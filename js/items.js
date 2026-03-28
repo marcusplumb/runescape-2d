@@ -128,10 +128,144 @@ export const ITEMS = {
       ctx.fillStyle = '#a07820';
       ctx.fillRect(x + s * 0.15, y + s * 0.35, s * 0.7, s * 0.18);
       ctx.fillStyle = '#6d5210';
-      // Rings
       ctx.beginPath();
       ctx.arc(x + s * 0.85, y + s * 0.64, s * 0.07, 0, Math.PI * 2);
       ctx.fill();
+    },
+  },
+
+  OAK_LOGS: {
+    id: 'oak_logs',
+    name: 'Oak Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#5e3d10';
+      ctx.fillRect(x + s * 0.08, y + s * 0.53, s * 0.84, s * 0.20);
+      ctx.fillStyle = '#7a5020';
+      ctx.fillRect(x + s * 0.12, y + s * 0.32, s * 0.76, s * 0.20);
+      ctx.fillStyle = '#3a2008';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.88, y + s * 0.63, s * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+      // Knot
+      ctx.fillStyle = '#2e1808';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.35, y + s * 0.42, s * 0.05, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  },
+
+  WILLOW_LOGS: {
+    id: 'willow_logs',
+    name: 'Willow Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#8a7a50';
+      ctx.fillRect(x + s * 0.08, y + s * 0.55, s * 0.84, s * 0.18);
+      ctx.fillStyle = '#a09068';
+      ctx.fillRect(x + s * 0.12, y + s * 0.36, s * 0.76, s * 0.18);
+      // Pale greenish grain streak
+      ctx.fillStyle = '#8a9870';
+      ctx.fillRect(x + s * 0.3, y + s * 0.38, s * 0.2, s * 0.14);
+      ctx.fillStyle = '#70604a';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.88, y + s * 0.64, s * 0.07, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  },
+
+  MAPLE_LOGS: {
+    id: 'maple_logs',
+    name: 'Maple Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#8b4a14';
+      ctx.fillRect(x + s * 0.08, y + s * 0.54, s * 0.84, s * 0.20);
+      ctx.fillStyle = '#a85e20';
+      ctx.fillRect(x + s * 0.12, y + s * 0.34, s * 0.76, s * 0.20);
+      // Orange-red heartwood
+      ctx.fillStyle = '#c4602a';
+      ctx.fillRect(x + s * 0.25, y + s * 0.36, s * 0.35, s * 0.16);
+      ctx.fillStyle = '#7a3a10';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.88, y + s * 0.64, s * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  },
+
+  YEW_LOGS: {
+    id: 'yew_logs',
+    name: 'Yew Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#3a2810';
+      ctx.fillRect(x + s * 0.06, y + s * 0.53, s * 0.88, s * 0.22);
+      ctx.fillStyle = '#4e3818';
+      ctx.fillRect(x + s * 0.10, y + s * 0.33, s * 0.80, s * 0.20);
+      // Dark reddish grain
+      ctx.fillStyle = '#5e2010';
+      ctx.fillRect(x + s * 0.2, y + s * 0.35, s * 0.15, s * 0.16);
+      ctx.fillRect(x + s * 0.5, y + s * 0.55, s * 0.12, s * 0.18);
+      ctx.fillStyle = '#281808';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.90, y + s * 0.64, s * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  },
+
+  MAGIC_LOGS: {
+    id: 'magic_logs',
+    name: 'Magic Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      // Glow aura
+      ctx.fillStyle = 'rgba(80,60,200,0.18)';
+      ctx.fillRect(x + s * 0.02, y + s * 0.28, s * 0.96, s * 0.50);
+      ctx.fillStyle = '#1e1850';
+      ctx.fillRect(x + s * 0.08, y + s * 0.54, s * 0.84, s * 0.20);
+      ctx.fillStyle = '#2e28a0';
+      ctx.fillRect(x + s * 0.12, y + s * 0.34, s * 0.76, s * 0.20);
+      // Glowing veins
+      ctx.fillStyle = '#6858e8';
+      ctx.fillRect(x + s * 0.2, y + s * 0.36, s * 0.5, s * 0.04);
+      ctx.fillRect(x + s * 0.25, y + s * 0.56, s * 0.4, s * 0.04);
+      // Sparkles
+      ctx.fillStyle = '#c0b0ff';
+      ctx.fillRect(x + s * 0.3, y + s * 0.35, s * 0.04, s * 0.04);
+      ctx.fillRect(x + s * 0.6, y + s * 0.55, s * 0.04, s * 0.04);
+      ctx.fillRect(x + s * 0.45, y + s * 0.45, s * 0.03, s * 0.03);
+      ctx.fillStyle = '#8070d0';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.88, y + s * 0.64, s * 0.08, 0, Math.PI * 2);
+      ctx.fill();
+    },
+  },
+
+  ELDER_LOGS: {
+    id: 'elder_logs',
+    name: 'Elder Logs',
+    stackable: true,
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#a0a898';
+      ctx.fillRect(x + s * 0.06, y + s * 0.52, s * 0.88, s * 0.24);
+      ctx.fillStyle = '#c8d0c0';
+      ctx.fillRect(x + s * 0.10, y + s * 0.32, s * 0.80, s * 0.22);
+      // Gold grain
+      ctx.fillStyle = '#d4b820';
+      ctx.fillRect(x + s * 0.22, y + s * 0.34, s * 0.4, s * 0.04);
+      ctx.fillRect(x + s * 0.18, y + s * 0.54, s * 0.3, s * 0.04);
+      // Bright highlight
+      ctx.fillStyle = '#e8f0e0';
+      ctx.fillRect(x + s * 0.12, y + s * 0.33, s * 0.6, s * 0.06);
+      ctx.fillStyle = '#8090a0';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.90, y + s * 0.64, s * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#c0a010';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x + s * 0.90, y + s * 0.64, s * 0.09, 0, Math.PI * 2);
+      ctx.stroke();
     },
   },
 

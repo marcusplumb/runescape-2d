@@ -3,6 +3,7 @@ import {
   INV_COLS, INV_ROWS, INV_CELL, INV_PAD,
   SKILL_NAMES, SKILL_COLORS,
 } from './constants.js';
+import { ITEMS } from './items.js';
 import { getBiome, BIOMES } from './biomes.js';
 import {
   SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
@@ -51,6 +52,9 @@ export class Renderer {
 
     // Animated time for tile effects
     this.time = 0;
+
+    // Item sprite lookup for skill-unlock popup icons
+    this._itemById = new Map(Object.values(ITEMS).map(item => [item.id, item]));
   }
 
   clear() {
@@ -86,17 +90,10 @@ export class Renderer {
     }
 
     // Raw visible range from camera position, then capped to 70×70
-    let startCol = Math.floor(camX / TILE_SIZE);
-    let startRow = Math.floor(camY / TILE_SIZE);
-    let endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
-    let endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
-    const MAX_HALF = 35; // 70×70 max view
-    const midCol = (startCol + endCol) >> 1;
-    const midRow = (startRow + endRow) >> 1;
-    startCol = Math.max(startCol, midCol - MAX_HALF);
-    startRow = Math.max(startRow, midRow - MAX_HALF);
-    endCol   = Math.min(endCol,   midCol + MAX_HALF);
-    endRow   = Math.min(endRow,   midRow + MAX_HALF);
+    let startCol = Math.floor(camX / TILE_SIZE) - 2;
+    let startRow = Math.floor(camY / TILE_SIZE) - 2;
+    let endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 5;
+    let endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 5;
 
     const cxMin = startCol / CHUNK_TILES | 0;
     const cyMin = startRow / CHUNK_TILES | 0;
@@ -1545,41 +1542,109 @@ export class Renderer {
      seed    = { s1:(c*7+r*13)%17, s2:(c*11+r*7)%19,
                  s3:(c*13+r*11)%23, s4:(c*17+r*5)%29 }
      ═══════════════════════════════════════════════════════ */
-  drawTreeSprite(ctx, px, py, seed, biome) {
+  drawTreeSprite(ctx, px, py, seed, tileType, biome) {
     const { s1, s2, s3, s4 } = seed;
-    const key = `${biome}_${s1}_${s2}_${s3}_${s4}`;
+    const key = `${tileType}_${biome}_${s1}_${s2}_${s3}_${s4}`;
 
     if (!this._treeCache.has(key)) {
-      // Canvas large enough for any tree variant: 12px side padding, 26px top, 6px bottom
-      const PAD_X = 12, PAD_Y = 26, PAD_B = 6;
-      const W = TILE_SIZE + PAD_X * 2;      // 56 px wide
-      const H = TILE_SIZE + PAD_Y + PAD_B;  // 64 px tall
+      // Extra padding for large trees (yew/elder/magic need more room)
+      const PAD_X = 14, PAD_Y = 30, PAD_B = 6;
+      const W = TILE_SIZE + PAD_X * 2;
+      const H = TILE_SIZE + PAD_Y + PAD_B;
       const oc   = new OffscreenCanvas(W, H);
       const octx = oc.getContext('2d');
-      // Draw as if tile origin is at (PAD_X, PAD_Y) in the offscreen canvas
-      switch (biome) {
-        case BIOMES.TUNDRA:   this._drawPineTree(octx, PAD_X, PAD_Y, seed);  break;
-        case BIOMES.SWAMP:    this._drawSwampTree(octx, PAD_X, PAD_Y, seed); break;
-        case BIOMES.VOLCANIC:
-        case BIOMES.DANGER:   this._drawDeadTree(octx, PAD_X, PAD_Y, seed);  break;
-        default:              this._drawLeafyTree(octx, PAD_X, PAD_Y, seed); break;
+      // Rare tree types take priority; TILES.TREE falls back to biome
+      switch (tileType) {
+        case TILES.OAK_TREE:    this._drawOakTree(octx, PAD_X, PAD_Y, seed);    break;
+        case TILES.WILLOW_TREE: this._drawWillowTree(octx, PAD_X, PAD_Y, seed); break;
+        case TILES.MAPLE_TREE:  this._drawMapleTree(octx, PAD_X, PAD_Y, seed);  break;
+        case TILES.YEW_TREE:    this._drawYewTree(octx, PAD_X, PAD_Y, seed);    break;
+        case TILES.MAGIC_TREE:  this._drawMagicTree(octx, PAD_X, PAD_Y, seed);  break;
+        case TILES.ELDER_TREE:  this._drawElderTree(octx, PAD_X, PAD_Y, seed);  break;
+        default: // TILES.TREE — biome determines appearance
+          switch (biome) {
+            case BIOMES.TUNDRA:   this._drawPineTree(octx, PAD_X, PAD_Y, seed);  break;
+            case BIOMES.SWAMP:    this._drawSwampTree(octx, PAD_X, PAD_Y, seed); break;
+            case BIOMES.VOLCANIC:
+            case BIOMES.DANGER:   this._drawDeadTree(octx, PAD_X, PAD_Y, seed);  break;
+            default:              this._drawLeafyTree(octx, PAD_X, PAD_Y, seed); break;
+          }
       }
-      // LRU eviction: drop oldest entry rather than nuking the whole cache
       if (this._treeCache.size >= 2048) {
         this._treeCache.delete(this._treeCache.keys().next().value);
       }
       this._treeCache.set(key, { oc, PAD_X, PAD_Y });
     }
 
-    // Re-insert on hit so recently-used entries survive LRU eviction
     const entry = this._treeCache.get(key);
     this._treeCache.delete(key);
     this._treeCache.set(key, entry);
     ctx.drawImage(entry.oc, px - entry.PAD_X, py - entry.PAD_Y);
   }
 
-  /** Default broad-leaf tree (plains / forest / desert edge) */
-  _drawLeafyTree(ctx, px, py, { s1, s2, s3, s4 }) {
+  /** Oak — darker, richer greens */
+  _drawOakTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#061a04', bulk:'#0e3208', mid:'#184a0e', hi:'#286018', top:'#387828' },
+      { shadow:'#08200a', bulk:'#10380e', mid:'#1c5214', hi:'#2c6e20', top:'#3e882e' },
+      { shadow:'#042004', bulk:'#0c340a', mid:'#164c10', hi:'#24641c', top:'#347c28' },
+      { shadow:'#061c06', bulk:'#103008', mid:'#1a480e', hi:'#285e1a', top:'#387426' },
+    ]);
+  }
+
+  /** Willow — blue-green teal tones */
+  _drawWillowTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#041e1a', bulk:'#0c3830', mid:'#165048', hi:'#226a60', top:'#308478' },
+      { shadow:'#061e18', bulk:'#0e3c30', mid:'#185448', hi:'#266e60', top:'#348876' },
+      { shadow:'#041c18', bulk:'#0a3428', mid:'#144c3c', hi:'#206452', top:'#2e7e68' },
+      { shadow:'#062018', bulk:'#103830', mid:'#1a5244', hi:'#286c5c', top:'#368670' },
+    ]);
+  }
+
+  /** Maple — warm autumn oranges, reds, and golds */
+  _drawMapleTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#2a0c02', bulk:'#5a1e06', mid:'#8c340a', hi:'#b84e10', top:'#d86818' },
+      { shadow:'#1e1002', bulk:'#483006', mid:'#785010', hi:'#a87020', top:'#c88c28' },
+      { shadow:'#240c04', bulk:'#4e1e08', mid:'#7a340e', hi:'#a84e14', top:'#cc681c' },
+      { shadow:'#1a1402', bulk:'#3e3006', mid:'#66500c', hi:'#8e7018', top:'#b09020' },
+    ]);
+  }
+
+  /** Yew — very dark, near-black ancient greens */
+  _drawYewTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#020802', bulk:'#061406', mid:'#0c200c', hi:'#142e14', top:'#1e3e1e' },
+      { shadow:'#020a02', bulk:'#081608', mid:'#0e2410', hi:'#163214', top:'#204220' },
+      { shadow:'#030804', bulk:'#071206', mid:'#0d1e0c', hi:'#152c12', top:'#1f3c1c' },
+      { shadow:'#020902', bulk:'#061808', mid:'#0c260e', hi:'#163414', top:'#20461e' },
+    ]);
+  }
+
+  /** Magic — blue-purple violet tones */
+  _drawMagicTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#0c0428', bulk:'#200a5c', mid:'#381494', hi:'#5030b8', top:'#7050d0' },
+      { shadow:'#0a0630', bulk:'#1c1060', mid:'#32209a', hi:'#4c38bc', top:'#6c58d4' },
+      { shadow:'#0e0224', bulk:'#240856', mid:'#3c1490', hi:'#5828b0', top:'#7848cc' },
+      { shadow:'#080428', bulk:'#180c5a', mid:'#2c1892', hi:'#4430b4', top:'#6452cc' },
+    ]);
+  }
+
+  /** Elder — pale silver-white tones */
+  _drawElderTree(ctx, px, py, seed) {
+    this._drawLeafyTree(ctx, px, py, seed, [
+      { shadow:'#2a3028', bulk:'#485448', mid:'#6a786a', hi:'#909e90', top:'#b8c8b4' },
+      { shadow:'#2c3230', bulk:'#4a5650', mid:'#6c7c74', hi:'#92a49a', top:'#bacac0' },
+      { shadow:'#283028', bulk:'#465048', mid:'#687068', hi:'#8e9a8e', top:'#b6c4b2' },
+      { shadow:'#2e3430', bulk:'#4c5850', mid:'#6e7e76', hi:'#94a89c', top:'#bccec4' },
+    ]);
+  }
+
+  /** Default broad-leaf tree (plains / forest / desert edge).
+   *  Pass a custom `palettes` array to reuse this drawing for other tree types. */
+  _drawLeafyTree(ctx, px, py, { s1, s2, s3, s4 }, palettes) {
     // Per-tree variation parameters
     const lean     = (s2 % 5) - 2;          // -2..+2 px horizontal lean
     const bigness  = (s3 % 5);              // 0..4 px extra radius on main lobes
@@ -1587,7 +1652,7 @@ export class Renderer {
     const tint     = s4 % 4;               // selects color palette variant
 
     // Four green palette variants (dark → mid → highlight → bright)
-    const palettes = [
+    if (!palettes) palettes = [
       { shadow:'#0a2e04', bulk:'#185210', mid:'#267016', hi:'#3a9428', top:'#52b438' },
       { shadow:'#0c3408', bulk:'#1e5c12', mid:'#2e7c1c', hi:'#44a030', top:'#5cc040' },
       { shadow:'#083008', bulk:'#164e10', mid:'#226818', hi:'#36902a', top:'#4aaa38' },
@@ -2079,6 +2144,207 @@ export class Renderer {
       ctx.textAlign = 'center';
       ctx.fillText(`${xp} XP`, px + panelW / 2, ry + 29);
     }
+  }
+
+  drawSkillInfoPopup(skillId, skills, SKILL_UNLOCKS, scrollY = 0) {
+    const ctx     = this.ctx;
+    const W       = this.canvas.width;
+    const H       = this.canvas.height;
+    const color   = SKILL_COLORS[skillId];
+    const name    = SKILL_NAMES[skillId];
+    const level   = skills.getLevel(skillId);
+    const xp      = skills.xp[skillId];
+    const toNext  = skills.xpToNext(skillId);
+    const prog    = skills.progressToNext(skillId);
+    // Sort unlocks lowest → highest level
+    const unlocks = [...(SKILL_UNLOCKS[skillId] || [])].sort((a, b) => a.level - b.level);
+
+    // ── Layout ───────────────────────────────────────────
+    const PAD     = 16;
+    const hasSub  = unlocks.some(u => u.sub);
+    const ROW_H   = hasSub ? 62 : 48;
+    const ICON_S  = 32;
+    const BADGE_W = 36;
+    const HDR_H   = 92;
+    const FOOT_H  = 26;
+    const SCROLL_W = 8;
+    const PW      = Math.min(480, W - 32);
+    const PH      = Math.min(H - 48, HDR_H + unlocks.length * ROW_H + FOOT_H);
+    const px      = Math.round((W - PW) / 2);
+    const py      = Math.round((H - PH) / 2);
+    const contentH = PH - HDR_H - FOOT_H;           // visible scroll viewport height
+    const totalH   = unlocks.length * ROW_H;         // total scrollable height
+    const maxScroll = Math.max(0, totalH - contentH);
+    const scroll    = Math.max(0, Math.min(scrollY, maxScroll));
+
+    // ── Dim backdrop ─────────────────────────────────────
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    // ── Panel background ─────────────────────────────────
+    ctx.fillStyle = '#100c06';
+    this._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.stroke();
+    ctx.strokeStyle = '#2a1a08';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, px + 3, py + 3, PW - 6, PH - 6, 6);
+    ctx.stroke();
+
+    // ── Header ───────────────────────────────────────────
+    const HICON = 42;
+    this._drawSkillIcon(ctx, skillId, px + PAD, py + PAD, HICON);
+
+    ctx.fillStyle = color;
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(name, px + PAD + HICON + 12, py + PAD + 16);
+
+    ctx.fillStyle = '#f0e8d0';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText(`Level ${level} / 99`, px + PAD + HICON + 12, py + PAD + 34);
+
+    ctx.fillStyle = '#8a7050';
+    ctx.font = '11px monospace';
+    const xpText = level >= 99
+      ? `${xp.toLocaleString()} XP total`
+      : `${xp.toLocaleString()} XP  (${toNext.toLocaleString()} to next)`;
+    ctx.fillText(xpText, px + PAD + HICON + 12, py + PAD + 52);
+
+    const barX = px + PAD + HICON + 12;
+    const barY = py + PAD + 58;
+    const barW = PW - PAD * 2 - HICON - 12;
+    ctx.fillStyle = '#1e1408';
+    this._roundRect(ctx, barX, barY, barW, 8, 3);
+    ctx.fill();
+    if (prog > 0) {
+      ctx.fillStyle = color;
+      this._roundRect(ctx, barX, barY, Math.max(4, barW * prog), 8, 3);
+      ctx.fill();
+    }
+
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.3;
+    ctx.fillRect(px + PAD, py + HDR_H - 6, PW - PAD * 2, 1);
+    ctx.globalAlpha = 1;
+
+    // ── Scrollable content area ───────────────────────────
+    const clipX = px + 4;
+    const clipY = py + HDR_H;
+    const clipW = PW - 8;
+    const clipH = contentH;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(clipX, clipY, clipW, clipH);
+    ctx.clip();
+
+    const rowW = PW - PAD * 2 - (maxScroll > 0 ? SCROLL_W + 4 : 0);
+
+    for (let i = 0; i < unlocks.length; i++) {
+      const { level: reqLvl, text, sub, icon } = unlocks[i];
+      const unlocked = level >= reqLvl;
+      const rx = px + PAD;
+      const ry = clipY + i * ROW_H - scroll;
+
+      // Skip rows entirely outside the clip zone
+      if (ry + ROW_H < clipY || ry > clipY + clipH) continue;
+
+      // Row background
+      ctx.fillStyle = unlocked ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.2)';
+      this._roundRect(ctx, rx, ry + 2, rowW, ROW_H - 4, 4);
+      ctx.fill();
+      if (unlocked) {
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = 0.18;
+        ctx.lineWidth = 1;
+        this._roundRect(ctx, rx, ry + 2, rowW, ROW_H - 4, 4);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // Icon
+      const iconX = rx + 6;
+      const iconY = ry + (ROW_H - ICON_S) / 2;
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.fillRect(iconX, iconY, ICON_S, ICON_S);
+      ctx.globalAlpha = unlocked ? 1 : 0.3;
+      if (icon && this._itemById.has(icon)) {
+        this._itemById.get(icon).draw(ctx, iconX + 1, iconY + 1, ICON_S - 2);
+      } else {
+        this._drawSkillIcon(ctx, skillId, iconX + 1, iconY + 1, ICON_S - 2);
+      }
+      ctx.globalAlpha = 1;
+
+      // Level badge
+      const badgeX = iconX + ICON_S + 6;
+      const badgeMid = ry + ROW_H / 2;
+      ctx.fillStyle = unlocked ? color : '#241a0a';
+      this._roundRect(ctx, badgeX, badgeMid - 11, BADGE_W, 22, 3);
+      ctx.fill();
+      ctx.fillStyle = unlocked ? '#0c0804' : '#5a4020';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${reqLvl}`, badgeX + BADGE_W / 2, badgeMid + 4);
+
+      // Unlock text (main line + optional sub line)
+      const textX = badgeX + BADGE_W + 8;
+      const maxTW  = rowW - ICON_S - BADGE_W - 32;
+      ctx.textAlign = 'left';
+      const textY = sub ? ry + ROW_H / 2 - 4 : badgeMid + 4;
+      ctx.fillStyle = unlocked ? '#e8dfc0' : '#4a3820';
+      ctx.font = `${unlocked ? 'bold ' : ''}12px monospace`;
+      let label = text;
+      while (ctx.measureText(label).width > maxTW && label.length > 1) label = label.slice(0, -1);
+      if (label !== text) label = label.slice(0, -2) + '…';
+      ctx.fillText(label, textX, textY);
+
+      if (sub) {
+        ctx.font = '10px monospace';
+        ctx.fillStyle = unlocked ? color : '#3a2c14';
+        ctx.globalAlpha = unlocked ? 0.85 : 1;
+        let subLabel = sub;
+        while (ctx.measureText(subLabel).width > maxTW && subLabel.length > 1) subLabel = subLabel.slice(0, -1);
+        if (subLabel !== sub) subLabel = subLabel.slice(0, -2) + '…';
+        ctx.fillText(subLabel, textX, textY + 15);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    ctx.restore();
+
+    // ── Scrollbar ─────────────────────────────────────────
+    if (maxScroll > 0) {
+      const sbX    = px + PW - PAD / 2 - SCROLL_W;
+      const sbTopY = clipY + 2;
+      const sbH    = clipH - 4;
+      // Track
+      ctx.fillStyle = '#1a1208';
+      this._roundRect(ctx, sbX, sbTopY, SCROLL_W, sbH, 4);
+      ctx.fill();
+      // Thumb
+      const thumbH  = Math.max(20, (contentH / totalH) * sbH);
+      const thumbY  = sbTopY + (scroll / maxScroll) * (sbH - thumbH);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.6;
+      this._roundRect(ctx, sbX, thumbY, SCROLL_W, thumbH, 4);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+
+    // ── Footer ────────────────────────────────────────────
+    ctx.fillStyle = '#2a1e0a';
+    ctx.fillRect(px + 4, py + PH - FOOT_H, PW - 8, 1);
+    ctx.fillStyle = '#3a2c14';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(
+      maxScroll > 0 ? 'Scroll to see more  •  Esc or click skill to close' : 'Esc or click skill to close',
+      px + PW / 2, py + PH - 8
+    );
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -3941,6 +4207,20 @@ export class Renderer {
 
   /** Pixel-art skill icons — drawn at (x,y) into a (size×size) box */
   _drawSkillIcon(ctx, skillIndex, x, y, size) {
+    // Cache each (skillIndex, size) pair in an OffscreenCanvas so the 5-8
+    // fillStyle/fillRect calls only run once per unique (skill, size) combo.
+    if (!this._skillIconCache) this._skillIconCache = new Map();
+    const cacheKey = skillIndex * 10000 + size;
+    let cached = this._skillIconCache.get(cacheKey);
+    if (!cached) {
+      cached = new OffscreenCanvas(size, size);
+      this._renderSkillIconInto(cached.getContext('2d'), skillIndex, 0, 0, size);
+      this._skillIconCache.set(cacheKey, cached);
+    }
+    ctx.drawImage(cached, x, y);
+  }
+
+  _renderSkillIconInto(ctx, skillIndex, x, y, size) {
     const s = size / 32;
     const p = (px, py, pw, ph, color) => {
       ctx.fillStyle = color;
@@ -4021,34 +4301,28 @@ export class Renderer {
         p( 4,  4,  4,  4, '#777');    // left point
         p(18,  6,  6,  2, '#777');    // right point
         break;
-      case 10: // Forgery — anvil + flame
-        // Anvil body
-        p( 6, 18, 20,  5, '#555');   // top face
-        p( 8, 16, 16,  3, '#686868'); // raised top
-        p(10, 22, 12,  5, '#383838'); // waist
-        p( 5, 26, 22,  4, '#444');   // base
-        p( 3, 19,  5,  3, '#484848'); // horn
-        p( 6, 18, 20,  2, 'rgba(255,255,255,0.14)'); // highlight
-        // Flame (bottom-left)
-        p( 4, 20,  4,  6, '#ff6600'); // outer flame
-        p( 5, 18,  3,  4, '#ff9900'); // mid flame
-        p( 6, 17,  2,  3, '#ffdd00'); // tip
-        break;
-
       case 9: // Architect — hammer + blueprint
-        // Blueprint (paper)
         p( 6, 14, 14, 14, '#2471A3'); // blue paper
         p( 6, 14, 14,  2, '#1A5276'); // top edge
         p( 8, 18,  4,  2, '#5DADE2'); // line 1 left
         p( 8, 22,  4,  2, '#5DADE2'); // line 2 left
         p(13, 18,  5,  2, '#5DADE2'); // line 1 right
         p(13, 22,  5,  2, '#5DADE2'); // line 2 right
-        // Hammer handle
-        p(18,  8,  4, 18, '#8B5E3C');
-        // Hammer head
-        p(14,  4, 12,  8, '#9B9B9B');
+        p(18,  8,  4, 18, '#8B5E3C'); // hammer handle
+        p(14,  4, 12,  8, '#9B9B9B'); // hammer head
         p(14,  4,  4,  4, '#777');    // left face
         p(22,  4,  4,  4, '#777');    // right face
+        break;
+      case 10: // Forgery — anvil + flame
+        p( 6, 18, 20,  5, '#555');   // top face
+        p( 8, 16, 16,  3, '#686868'); // raised top
+        p(10, 22, 12,  5, '#383838'); // waist
+        p( 5, 26, 22,  4, '#444');   // base
+        p( 3, 19,  5,  3, '#484848'); // horn
+        p( 6, 18, 20,  2, 'rgba(255,255,255,0.14)'); // highlight
+        p( 4, 20,  4,  6, '#ff6600'); // outer flame
+        p( 5, 18,  3,  4, '#ff9900'); // mid flame
+        p( 6, 17,  2,  3, '#ffdd00'); // tip
         break;
     }
   }

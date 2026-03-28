@@ -72,6 +72,13 @@ export const TILES = {
   ROCK_TUNGSTEN:  44,
   ROCK_OBSIDIAN:  45,
   ROCK_MOONSTONE: 46,
+  // Rare tree varieties (level-gated woodcutting)
+  OAK_TREE:    47,
+  WILLOW_TREE: 48,
+  MAPLE_TREE:  49,
+  YEW_TREE:    50,
+  MAGIC_TREE:  51,
+  ELDER_TREE:  52,
 };
 
 // Which tiles block movement
@@ -105,6 +112,19 @@ export const SOLID_TILES = new Set([
   TILES.ROCK_TUNGSTEN,
   TILES.ROCK_OBSIDIAN,
   TILES.ROCK_MOONSTONE,
+  // Rare trees
+  TILES.OAK_TREE,
+  TILES.WILLOW_TREE,
+  TILES.MAPLE_TREE,
+  TILES.YEW_TREE,
+  TILES.MAGIC_TREE,
+  TILES.ELDER_TREE,
+]);
+
+/** All tile IDs that are choppable trees (used for depth-sort and action detection). */
+export const TREE_TILES = new Set([
+  TILES.TREE, TILES.OAK_TREE, TILES.WILLOW_TREE,
+  TILES.MAPLE_TREE, TILES.YEW_TREE, TILES.MAGIC_TREE, TILES.ELDER_TREE,
 ]);
 
 // ── Tile colours ─────────────────────────────────────────
@@ -156,6 +176,13 @@ export const TILE_COLORS = {
   [TILES.ROCK_TUNGSTEN]:  '#4a4a5a',
   [TILES.ROCK_OBSIDIAN]:  '#2a1a2a',
   [TILES.ROCK_MOONSTONE]: '#3a3a5a',
+  // Rare trees (ground color beneath — sprite drawn in entity layer)
+  [TILES.OAK_TREE]:    '#3d7a34',
+  [TILES.WILLOW_TREE]: '#3a7050',
+  [TILES.MAPLE_TREE]:  '#4a7030',
+  [TILES.YEW_TREE]:    '#1e3a18',
+  [TILES.MAGIC_TREE]:  '#1a1640',
+  [TILES.ELDER_TREE]:  '#4a5a40',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -202,6 +229,157 @@ export const SKILL_IDS = {
   FORGERY:     10,
 };
 export const SKILL_NAMES  = ['Woodcutting', 'Firemaking', 'Fishing', 'Cooking', 'Attack', 'Strength', 'Defence', 'Hitpoints', 'Mining', 'Architect', 'Forgery'];
+
+// ── Skill unlock tables ───────────────────────────────────
+// Indexed by SKILL_IDS. Each entry: { level, text, icon? }
+// icon: item id string → draw that item sprite; null → draw the skill icon
+export const SKILL_UNLOCKS = [
+  // 0 — Woodcutting
+  [
+    { level:  1, text: 'Chop Trees → Logs (25 XP)',                       icon: 'axe' },
+    { level: 10, text: 'Iron Axe — 20% faster chops',                     icon: 'iron_axe' },
+    { level: 15, text: 'Oak Trees → Oak Logs (38 XP)',                    icon: 'oak_logs' },
+    { level: 20, text: 'Steel Axe — 40% faster chops',                    icon: 'steel_axe' },
+    { level: 30, text: 'Willow Trees → Willow Logs (68 XP)',              icon: 'willow_logs' },
+    { level: 40, text: 'Experienced logger — +1 max log per tree',        icon: 'logs' },
+    { level: 45, text: 'Maple Trees → Maple Logs (100 XP)',               icon: 'maple_logs' },
+    { level: 60, text: 'Yew Trees → Yew Logs (175 XP)',                   icon: 'yew_logs' },
+    { level: 75, text: 'Magic Trees → Magic Logs (250 XP)',               icon: 'magic_logs' },
+    { level: 90, text: 'Elder Trees → Elder Logs (400 XP)',               icon: 'elder_logs' },
+    { level: 99, text: 'Master Woodcutter — fastest possible speed',       icon: null },
+  ],
+  // 1 — Firemaking
+  [
+    { level:  1, text: 'Logs — 40 XP  •  60s fire',          sub: 'Lets you cook raw fish nearby',            icon: 'logs' },
+    { level: 15, text: 'Oak Logs — 60 XP  •  120s fire',     sub: 'Nearby perk: cook 2× faster',             icon: 'oak_logs' },
+    { level: 30, text: 'Willow Logs — 90 XP  •  200s fire',  sub: 'Nearby perk: fish 40% faster',            icon: 'willow_logs' },
+    { level: 45, text: 'Maple Logs — 135 XP  •  360s fire',  sub: 'Nearby perk: food never burns',           icon: 'maple_logs' },
+    { level: 60, text: 'Yew Logs — 200 XP  •  480s fire',    sub: 'Nearby perk: 15% less damage taken',      icon: 'yew_logs' },
+    { level: 75, text: 'Magic Logs — 303 XP  •  600s fire',  sub: 'Nearby perk: +1 HP every 8 seconds',      icon: 'magic_logs' },
+    { level: 90, text: 'Elder Logs — 404 XP  •  900s fire',  sub: 'Nearby perk: +10% XP from all skills',    icon: 'elder_logs' },
+    { level: 99, text: 'Master Firestarter',                  sub: 'Fires light instantly',                   icon: null },
+  ],
+  // 2 — Fishing
+  [
+    { level:  1, text: 'Shrimp (Common) — any Fishing Spot, 10 XP',      icon: 'raw_shrimp' },
+    { level:  5, text: 'Sardine (Common) — Fishing & Salmon Spots',       icon: 'raw_sardine' },
+    { level: 10, text: 'Herring (Common) — Fishing & Salmon Spots',       icon: 'raw_herring' },
+    { level: 20, text: 'Trout (Uncommon) — Fishing & Salmon Spots',       icon: 'raw_trout' },
+    { level: 30, text: 'Salmon (Uncommon) — Salmon Spots only',           icon: 'raw_salmon' },
+    { level: 40, text: 'Tuna (Rare) — Lobster Spots only',                icon: 'raw_tuna' },
+    { level: 50, text: 'Lobster (Rare) — Lobster Spots only',             icon: 'raw_lobster' },
+    { level: 60, text: 'Swordfish (Very Rare) — Lobster Spots only',      icon: 'raw_swordfish' },
+    { level: 76, text: 'Shark (Legendary) — Lobster Spots only',          icon: 'raw_shark' },
+    { level: 99, text: 'Master Fisher — fastest catch speed',             icon: null },
+  ],
+  // 3 — Cooking
+  [
+    { level:  1, text: 'Cook any raw fish on a Campfire',                 icon: 'cooked_shrimp' },
+    { level:  5, text: 'Shark: reaches minimum burn chance (5%)',         icon: 'cooked_shark' },
+    { level:  8, text: 'Swordfish: reaches minimum burn chance',          icon: 'cooked_swordfish' },
+    { level: 13, text: 'Shrimp: reaches minimum burn chance',             icon: 'cooked_shrimp' },
+    { level: 15, text: 'Herring: reaches minimum burn chance',            icon: 'cooked_herring' },
+    { level: 17, text: 'Sardine: reaches minimum burn chance',            icon: 'cooked_sardine' },
+    { level: 18, text: 'Trout: reaches minimum burn chance',              icon: 'cooked_trout' },
+    { level: 20, text: 'Salmon: reaches minimum burn chance',             icon: 'cooked_salmon' },
+    { level: 23, text: 'Lobster: reaches minimum burn chance',            icon: 'cooked_lobster' },
+    { level: 50, text: 'Seasoned chef — overall burn rate reduced',       icon: null },
+    { level: 99, text: 'Master Chef — 5% burn floor on all dishes',       icon: null },
+  ],
+  // 4 — Attack
+  [
+    { level:  1, text: 'Bronze Sword (accuracy 5, power 4)',              icon: 'bronze_sword' },
+    { level: 10, text: 'Iron Sword (accuracy 12, power 10)',              icon: 'iron_sword' },
+    { level: 20, text: 'Steel Sword (accuracy 22, power 20)',             icon: 'steel_sword' },
+    { level: 30, text: 'Shadow Treads boots (+accuracy, +speed)',         icon: null },
+    { level: 35, text: 'Mithril Sword (accuracy 36, power 32)',           icon: 'mithril_sword' },
+    { level: 35, text: 'Shadow Tunic chestplate (+crit)',                 icon: null },
+    { level: 40, text: 'Venom Blade (accuracy 50, 10% crit)',             icon: null },
+    { level: 45, text: 'Shadow Dagger (accuracy 60, 20% crit, fast)',     icon: null },
+    { level: 50, text: 'Tungsten Blade (accuracy 52, power 48)',          icon: 'tungsten_blade' },
+    { level: 55, text: 'Obsidian Cleaver (power 75, 8% crit)',            icon: 'obsidian_cleaver' },
+    { level: 70, text: 'Moonstone Staff (accuracy 80, power 50)',         icon: 'moonstone_staff' },
+    { level: 99, text: 'Max Attack — unmatched hit accuracy',             icon: null },
+  ],
+  // 5 — Strength
+  [
+    { level:  1, text: 'Unarmed attacks deal minimal damage',             icon: null },
+    { level: 40, text: "Berserker Mask (+power, +crit bonus)",            icon: null },
+    { level: 40, text: "Berserker's Wraps gloves (+power, +crit)",        icon: null },
+    { level: 45, text: 'Venom Blade (Strength secondary req.)',           icon: null },
+    { level: 50, text: "Berserker's Axe (power 85, 14% crit)",           icon: null },
+    { level: 99, text: 'Max Strength — maximum damage output',            icon: null },
+  ],
+  // 6 — Defence
+  [
+    { level:  1, text: 'Leather Cap, Body, Legs, Gloves, Boots',          icon: null },
+    { level:  1, text: 'Bronze Plate, Helm, Gauntlets, Boots, Legs',      icon: 'bronze_plate' },
+    { level: 10, text: 'Iron Plate, Helm, Gauntlets, Boots, Legs',        icon: 'iron_plate' },
+    { level: 20, text: 'Steel Plate, Helm, Gauntlets, Boots, Legs',       icon: 'steel_plate' },
+    { level: 35, text: 'Mithril Plate, Helm, Legs (armour 50/26/32)',     icon: 'mithril_plate' },
+    { level: 50, text: 'Tungsten Plate & Helm (armour 80 & 40)',          icon: 'tungsten_plate' },
+    { level: 99, text: 'Max Defence — highest damage reduction',           icon: null },
+  ],
+  // 7 — Hitpoints
+  [
+    { level:  1, text: 'Base HP = 10; XP gained passively from combat',  icon: null },
+    { level: 10, text: 'Veteran fighter — increased combat survivability', icon: null },
+    { level: 30, text: 'Hardened warrior — noticeable HP pool growth',   icon: null },
+    { level: 50, text: 'Battle-scarred — significantly more HP',          icon: null },
+    { level: 70, text: 'Iron constitution — rarely falls in one fight',   icon: null },
+    { level: 99, text: 'Max Hitpoints — near-unkillable HP pool',         icon: null },
+  ],
+  // 8 — Mining
+  [
+    { level:  1, text: 'Copper Ore (17 XP)',                              icon: 'ore_copper' },
+    { level:  1, text: 'Tin Ore (14 XP)',                                 icon: 'ore_tin' },
+    { level: 10, text: 'Iron Pickaxe — mines faster (Forgery 10)',        icon: 'iron_pickaxe' },
+    { level: 15, text: 'Iron Ore (35 XP)',                                icon: 'ore_iron' },
+    { level: 20, text: 'Silver Ore (45 XP)',                              icon: 'ore_silver' },
+    { level: 20, text: 'Steel Pickaxe — mines faster (Forgery 20)',       icon: 'steel_pickaxe' },
+    { level: 30, text: 'Coal (50 XP)',                                    icon: 'ore_coal' },
+    { level: 40, text: 'Gold Ore (65 XP)',                                icon: 'ore_gold' },
+    { level: 45, text: 'Tungsten Ore (needs Steel Pickaxe, 90 XP)',       icon: 'ore_tungsten' },
+    { level: 50, text: 'Tungsten Pickaxe (craft at Forgery 50)',          icon: 'tungsten_pickaxe' },
+    { level: 55, text: 'Mithril Ore (80 XP)',                             icon: 'ore_mithril' },
+    { level: 70, text: 'Obsidian Ore (needs Tungsten Pickaxe, 110 XP)',   icon: 'ore_obsidian' },
+    { level: 85, text: 'Moonstone (needs Tungsten Pickaxe, 150 XP)',      icon: 'ore_moonstone' },
+    { level: 99, text: 'Master Miner — fastest ore extraction',           icon: null },
+  ],
+  // 9 — Architect
+  [
+    { level:  1, text: 'Place furniture in your Player House',            icon: null },
+    { level:  1, text: 'Chair, Rug, Table, Chest, Bookshelf, Plant',     icon: null },
+    { level: 10, text: 'Unlock additional furniture designs',             icon: null },
+    { level: 25, text: 'Expanded house layout options',                   icon: null },
+    { level: 50, text: 'Master Builder — premium furniture sets',         icon: null },
+    { level: 99, text: 'Grand Architect — full house customisation',      icon: null },
+  ],
+  // 10 — Forgery
+  [
+    { level:  1, text: 'Smelt Bronze Bar (Copper + Tin, 25 XP)',          icon: 'bar_bronze' },
+    { level:  1, text: 'Smith Bronze Sword, Legs, Gauntlets, Boots',      icon: 'bronze_sword' },
+    { level:  3, text: 'Smith Bronze Helm',                               icon: 'bronze_helm' },
+    { level:  5, text: 'Smith Bronze Plate',                              icon: 'bronze_plate' },
+    { level: 10, text: 'Smelt Iron Bar (40 XP)',                          icon: 'bar_iron' },
+    { level: 10, text: 'Smith Iron Sword, Axe, Pickaxe, Gauntlets…',     icon: 'iron_sword' },
+    { level: 12, text: 'Smith Iron Helm',                                 icon: 'iron_helm' },
+    { level: 14, text: 'Smith Iron Plate',                                icon: 'iron_plate' },
+    { level: 20, text: 'Smelt Steel Bar (55 XP)',                         icon: 'bar_steel' },
+    { level: 20, text: 'Smith Steel Sword, Axe, Pickaxe, Gauntlets…',    icon: 'steel_sword' },
+    { level: 22, text: 'Smith Steel Helm',                                icon: 'steel_helm' },
+    { level: 24, text: 'Smith Steel Plate',                               icon: 'steel_plate' },
+    { level: 25, text: 'Smelt Silver Bar (50 XP)',                        icon: 'bar_silver' },
+    { level: 30, text: 'Smelt Gold Bar (65 XP)',                          icon: 'bar_gold' },
+    { level: 40, text: 'Smelt Mithril Bar; Smith Mithril Sword & Armour', icon: 'bar_mithril' },
+    { level: 50, text: 'Smelt Tungsten Bar; Smith Tungsten Blade & Pick', icon: 'bar_tungsten' },
+    { level: 52, text: 'Smith Tungsten Helm',                             icon: 'tungsten_helm' },
+    { level: 54, text: 'Smith Tungsten Plate',                            icon: 'tungsten_plate' },
+    { level: 65, text: 'Smelt Obsidian Ingot; Smith Obsidian Cleaver',    icon: 'bar_obsidian' },
+    { level: 80, text: 'Smelt Moonstone Ingot; Smith Moonstone Staff',    icon: 'bar_moonstone' },
+    { level: 99, text: 'Grand Forgemaster — all recipes available',       icon: null },
+  ],
+];
 export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392b', '#8e44ad', '#2980b9', '#ec407a', '#95a5a6', '#d4a017', '#b7410e'];
 
 // XP table — Runescape-inspired curve
@@ -229,6 +407,12 @@ export const ACTION_TIMES = {
 // ── XP rewards ───────────────────────────────────────────
 export const XP_REWARDS = {
   CHOP:          25,
+  CHOP_OAK:      38,
+  CHOP_WILLOW:   68,
+  CHOP_MAPLE:    100,
+  CHOP_YEW:      175,
+  CHOP_MAGIC:    250,
+  CHOP_ELDER:    400,
   FISH:          30,
   COOK:          40,
   LIGHT:         20,

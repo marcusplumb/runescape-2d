@@ -29,8 +29,8 @@ import { STRUCTURE_NODES } from './structures.js';
 import { ARMOR_OPTIONS, EQUIPMENT_SLOTS, SLOT_LABELS } from './equipment.js';
 import { getBiome } from './biomes.js';
 import {
-  TILE_SIZE, PLAYER_SPEED, TILES,
-  INV_COLS, INV_ROWS, INV_CELL, INV_PAD, SKILL_IDS,
+  TILE_SIZE, PLAYER_SPEED, TILES, TREE_TILES,
+  INV_COLS, INV_ROWS, INV_CELL, INV_PAD, SKILL_IDS, SKILL_NAMES, SKILL_UNLOCKS,
 } from './constants.js';
 
 // Duration to cross one tile — remote players interpolate at the same speed as local
@@ -48,6 +48,12 @@ import {
 
 const TILE_TOOLTIPS = {
   [TILES.TREE]:              'Tree — click to chop (need Axe)',
+  [TILES.OAK_TREE]:          'Oak Tree — click to chop (level 15)',
+  [TILES.WILLOW_TREE]:       'Willow Tree — click to chop (level 30)',
+  [TILES.MAPLE_TREE]:        'Maple Tree — click to chop (level 45)',
+  [TILES.YEW_TREE]:          'Yew Tree — click to chop (level 60)',
+  [TILES.MAGIC_TREE]:        'Magic Tree — click to chop (level 75)',
+  [TILES.ELDER_TREE]:        'Elder Tree — click to chop (level 90)',
   [TILES.FISH_SPOT]:         'Fishing spot — click to fish (need Rod)',
   [TILES.FISH_SPOT_SALMON]:  'Salmon spot — click to fish (need Rod)',
   [TILES.FISH_SPOT_LOBSTER]: 'Lobster spot — click to fish (need Rod)',
@@ -109,8 +115,9 @@ export class Game {
     this.actions.fishingRecords = this.fishingRecords;
     this.combat          = new Combat(
       this.player, this.mobManager, this.inventory,
-      this.skills, this.notifications
+      this.skills, this.notifications, this.actions
     );
+    this._hpRegenTimer = 0; // seconds since last magic-fire HP regen tick
     this.pendingInteract = null; // { type, col, row, worldX?, worldY? }
     this.clickDest       = null; // { col, row } — shown as click marker, null for WASD
 
@@ -193,7 +200,9 @@ export class Game {
     this.forgeOpen     = false;  // smelting panel (Furnace)
     this.smithOpen     = false;  // smithing panel (Anvil)
     this.smithTab      = 'weapons'; // 'weapons' | 'tools' | 'armor'
-    this.playerViewOpen = false; // character stat popup (from Worn tab)
+    this.playerViewOpen  = false; // character stat popup (from Worn tab)
+    this.skillInfoSkill  = null;  // index of skill whose info popup is open, or null
+    this.skillInfoScroll = 0;     // scroll offset in pixels for skill info popup
     this.smeltingAction = null;  // { recipe, progress, duration } — animated smelting
     this.showAdminTp   = false;
     this.adminEquipOpen  = false;
@@ -266,6 +275,13 @@ export class Game {
     this.frameCount = 0;
 
     window.addEventListener('resize', () => this.resizeCanvas());
+
+    window.addEventListener('wheel', (e) => {
+      if (this.skillInfoSkill !== null) {
+        e.preventDefault();
+        this.skillInfoScroll = Math.max(0, this.skillInfoScroll + e.deltaY);
+      }
+    }, { passive: false });
 
     this.notifications.add('Welcome! You have an Axe, Pickaxe, Tinderbox, Fishing Rod, and 25g.', '#f1c40f');
     this.notifications.add('Explore biomes: Forest, Tundra, Swamp, Desert, Volcanic & Danger Zone!', '#aaa');
@@ -368,6 +384,9 @@ export class Game {
       } else if (this.placingFurniture) {
         this.placingFurniture = null;
         this.notifications.add('Placement cancelled.', '#aaa');
+      } else if (this.skillInfoSkill !== null) {
+        this.skillInfoSkill  = null;
+        this.skillInfoScroll = 0;
       } else if (this.playerViewOpen) {
         this.playerViewOpen = false;
       } else if (this.forgeOpen) {
@@ -672,7 +691,7 @@ export class Game {
               this.player.dir = fdr > 0 ? DIR.DOWN : DIR.UP;
             }
             const t = this.activeMap.getTile(pi.col, pi.row);
-            if (t === TILES.TREE)
+            if (TREE_TILES.has(t))
               this.player.currentAction = 'chop';
             else if (t === TILES.FISH_SPOT || t === TILES.FISH_SPOT_SALMON || t === TILES.FISH_SPOT_LOBSTER)
               this.player.currentAction = 'fish';
@@ -708,6 +727,18 @@ export class Game {
     // Update systems
     this.actions.update(dt);
     this.combat.update(dt);
+
+    // Magic fire HP regen — 1 HP every 8 seconds when near a magic log fire
+    this._hpRegenTimer += dt;
+    if (this._hpRegenTimer >= 8) {
+      this._hpRegenTimer = 0;
+      const pCol = Math.floor(this.player.cx / TILE_SIZE);
+      const pRow = Math.floor(this.player.cy / TILE_SIZE);
+      if (this.actions.getFirePerks(pCol, pRow).has('HP_REGEN') && this.player.hp < this.player.maxHp) {
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 1);
+        this.notifications.add('The magic fire restores your health. (+1 HP)', '#2ecc71');
+      }
+    }
     for (const s of this.remoteHitSplats) s.timer += dt;
     this.remoteHitSplats = this.remoteHitSplats.filter(s => s.timer < s.maxTimer);
     if (this._chatCooldown > 0) this._chatCooldown -= dt;
@@ -814,32 +845,55 @@ export class Game {
         const sr = Math.max(0, Math.floor(camY / TILE_SIZE) - 1);
         const ec = sc + Math.ceil(this.canvas.width  / TILE_SIZE) + 3;
         const er = sr + Math.ceil(this.canvas.height / TILE_SIZE) + 3;
-        const treeSortables = [];
+        // Reuse pool of tree-sortable objects to avoid per-frame GC pressure.
+        // Each object doubles as the seed (has s1-s4) so no extra seed allocation.
+        if (!this._treeSortablesBuf) {
+          this._treeSortablesBuf = [];
+          this._treeSortablePool = [];
+          const _game = this;
+          this._treeDraw = function(ctx) {
+            _game.renderer.drawTreeSprite(ctx, this.tpx, this.tpy, this, this.tileType, this.biome);
+          };
+        }
+        const treeSortables = this._treeSortablesBuf;
+        treeSortables.length = 0;
+        let _poolIdx = 0;
         for (let tr = sr; tr <= er; tr++) {
           for (let tc = sc; tc <= ec; tc++) {
-            if (this.activeMap.getTile(tc, tr) === TILES.TREE) {
-              const tpx = tc * TILE_SIZE, tpy = tr * TILE_SIZE;
-              const seed = {
-                s1: (tc * 7  + tr * 13) % 17,
-                s2: (tc * 11 + tr * 7)  % 19,
-                s3: (tc * 13 + tr * 11) % 23,
-                s4: (tc * 17 + tr * 5)  % 29,
-              };
-              const biome = getBiome(tc, tr);
-              treeSortables.push({
-                y: tpy - TREE_OVERHANG,
-                h: TILE_SIZE + TREE_OVERHANG,
-                draw: (ctx) => this.renderer.drawTreeSprite(ctx, tpx, tpy, seed, biome),
-              });
+            const tileType = this.activeMap.getTile(tc, tr);
+            if (!TREE_TILES.has(tileType)) continue;
+            let ts = this._treeSortablePool[_poolIdx];
+            if (!ts) {
+              ts = { y:0, h:0, tpx:0, tpy:0, tileType:0, biome:'', s1:0, s2:0, s3:0, s4:0, draw: this._treeDraw };
+              this._treeSortablePool[_poolIdx] = ts;
             }
+            const tpx = tc * TILE_SIZE, tpy = tr * TILE_SIZE;
+            ts.y        = tpy - TREE_OVERHANG;
+            ts.h        = TILE_SIZE + TREE_OVERHANG;
+            ts.tpx      = tpx;
+            ts.tpy      = tpy;
+            ts.tileType = tileType;
+            ts.biome    = getBiome(tc, tr);
+            ts.s1       = (tc * 7  + tr * 13) % 17;
+            ts.s2       = (tc * 11 + tr * 7)  % 19;
+            ts.s3       = (tc * 13 + tr * 11) % 23;
+            ts.s4       = (tc * 17 + tr * 5)  % 29;
+            treeSortables.push(ts);
+            _poolIdx++;
           }
         }
 
-        // Draw entities sorted by Y (painter's algorithm)
-        const remoteViews = [...this.remotePlayers.values()];
-        const entities = [this.player, ...remoteViews, ...this.mobManager.mobs, this.shopKeeper, this.makoverNpc, this.fishermanNpc, ...treeSortables];
-        entities.sort((a, b) => (a.y + a.h) - (b.y + b.h));
-        for (const e of entities) e.draw(ctx);
+        // Draw entities sorted by Y (painter's algorithm) — reuse array to avoid per-frame GC
+        if (!this._entityBuf) this._entityBuf = [];
+        const eb = this._entityBuf;
+        eb.length = 0;
+        eb.push(this.player);
+        for (const rv of this.remotePlayers.values()) eb.push(rv);
+        for (const m of this.mobManager.mobs) eb.push(m);
+        eb.push(this.shopKeeper, this.makoverNpc, this.fishermanNpc);
+        for (const t of treeSortables) eb.push(t);
+        eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
+        for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
 
         // Combat target highlight
         if (this.combat.targetMob && !this.combat.targetMob.dead) {
@@ -967,6 +1021,11 @@ export class Game {
 
     this.renderer.drawTileTooltip(tooltip, this.mouseScreen.x, this.mouseScreen.y);
 
+    // Skill info popup
+    if (this.skillInfoSkill !== null) {
+      this.renderer.drawSkillInfoPopup(this.skillInfoSkill, this.skills, SKILL_UNLOCKS, this.skillInfoScroll);
+    }
+
     // Logout button (bottom-right, only when logged in)
     if (this._saveToken) this._drawLogoutButton(ctx);
 
@@ -1054,6 +1113,29 @@ export class Game {
         this.sidePanelTab = tabs[tabIdx];
       }
       return true;
+    }
+
+    // Skills tab: click a cell to open skill info popup
+    if (this.sidePanelTab === 'skills') {
+      const contentY = py + TAB_H + 2;
+      const COLS = 4, ROWS = 5, HEADER_H = 20;
+      const cellW = Math.floor(PW / COLS);
+      const cellH = Math.floor((CONTENT_H - HEADER_H) / ROWS);
+      const relX = sx - px, relY = sy - (contentY + HEADER_H);
+      if (relX >= 0 && relY >= 0) {
+        const col = Math.floor(relX / cellW);
+        const row = Math.floor(relY / cellH);
+        const idx = row * COLS + col;
+        if (col < COLS && row < ROWS && idx < SKILL_NAMES.length) {
+          if (this.skillInfoSkill === idx) {
+            this.skillInfoSkill = null;
+          } else {
+            this.skillInfoSkill  = idx;
+            this.skillInfoScroll = 0;
+          }
+          return true;
+        }
+      }
     }
 
     // Inventory tab: left-click food to eat

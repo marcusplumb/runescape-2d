@@ -1,22 +1,89 @@
 import {
   TILE_SIZE, TILES, SOLID_TILES,
-  SKILL_IDS, ACTION_TIMES, XP_REWARDS, FIRE_LIFETIME, ROCK_RESPAWN_TIME,
+  SKILL_IDS, ACTION_TIMES, XP_REWARDS, ROCK_RESPAWN_TIME,
 } from './constants.js';
 import { ITEMS, COOK_RECIPES } from './items.js';
 import { FISH_SPECIES, makeFishItem } from './fishing.js';
 
+// Which tree tile maps to which log item, XP, level requirement, and timing
+const TREE_MAP = {
+  [TILES.TREE]: {
+    item: ITEMS.LOGS,        xp: XP_REWARDS.CHOP,        levelReq: 1,
+    chopBase: ACTION_TIMES.CHOP, logsMin: 1, logsMax: 4,
+    respawnMin: 15,  respawnMax: 25,  name: 'tree',
+  },
+  [TILES.OAK_TREE]: {
+    item: ITEMS.OAK_LOGS,    xp: XP_REWARDS.CHOP_OAK,    levelReq: 15,
+    chopBase: 3.5, logsMin: 1, logsMax: 5,
+    respawnMin: 25,  respawnMax: 35,  name: 'oak',
+  },
+  [TILES.WILLOW_TREE]: {
+    item: ITEMS.WILLOW_LOGS, xp: XP_REWARDS.CHOP_WILLOW, levelReq: 30,
+    chopBase: 5.0, logsMin: 1, logsMax: 6,
+    respawnMin: 35,  respawnMax: 50,  name: 'willow',
+  },
+  [TILES.MAPLE_TREE]: {
+    item: ITEMS.MAPLE_LOGS,  xp: XP_REWARDS.CHOP_MAPLE,  levelReq: 45,
+    chopBase: 7.0, logsMin: 1, logsMax: 5,
+    respawnMin: 60,  respawnMax: 90,  name: 'maple',
+  },
+  [TILES.YEW_TREE]: {
+    item: ITEMS.YEW_LOGS,    xp: XP_REWARDS.CHOP_YEW,    levelReq: 60,
+    chopBase: 10.0, logsMin: 1, logsMax: 5,
+    respawnMin: 120, respawnMax: 180, name: 'yew',
+  },
+  [TILES.MAGIC_TREE]: {
+    item: ITEMS.MAGIC_LOGS,  xp: XP_REWARDS.CHOP_MAGIC,  levelReq: 75,
+    chopBase: 12.0, logsMin: 1, logsMax: 4,
+    respawnMin: 200, respawnMax: 300, name: 'magic',
+  },
+  [TILES.ELDER_TREE]: {
+    item: ITEMS.ELDER_LOGS,  xp: XP_REWARDS.CHOP_ELDER,  levelReq: 90,
+    chopBase: 16.0, logsMin: 1, logsMax: 3,
+    respawnMin: 500, respawnMax: 700, name: 'elder',
+  },
+};
+
+// Returns 0=bronze, 1=iron, 2=steel. -1 if no axe.
+function getAxeTier(inventory) {
+  if (inventory.has('steel_axe')) return 2;
+  if (inventory.has('iron_axe'))  return 1;
+  if (inventory.has('axe'))       return 0;
+  return -1;
+}
+
 // Which ore tile maps to which ore item + XP reward + required tool tier
 const ORE_MAP = {
-  [TILES.ROCK_COPPER]:   { item: ITEMS.ORE_COPPER,   xp: XP_REWARDS.MINE_COPPER,    toolTier: 0 },
-  [TILES.ROCK_TIN]:      { item: ITEMS.ORE_TIN,      xp: XP_REWARDS.MINE_TIN,       toolTier: 0 },
-  [TILES.ROCK_IRON]:     { item: ITEMS.ORE_IRON,     xp: XP_REWARDS.MINE_IRON,      toolTier: 0 },
-  [TILES.ROCK_COAL]:     { item: ITEMS.ORE_COAL,     xp: XP_REWARDS.MINE_COAL,      toolTier: 0 },
-  [TILES.ROCK_SILVER]:   { item: ITEMS.ORE_SILVER,   xp: XP_REWARDS.MINE_SILVER,    toolTier: 0 },
-  [TILES.ROCK_GOLD]:     { item: ITEMS.ORE_GOLD,     xp: XP_REWARDS.MINE_GOLD,      toolTier: 0 },
-  [TILES.ROCK_MITHRIL]:  { item: ITEMS.ORE_MITHRIL,  xp: XP_REWARDS.MINE_MITHRIL,   toolTier: 0 },
-  [TILES.ROCK_TUNGSTEN]: { item: ITEMS.ORE_TUNGSTEN, xp: XP_REWARDS.MINE_TUNGSTEN,  toolTier: 1 },
-  [TILES.ROCK_OBSIDIAN]: { item: ITEMS.ORE_OBSIDIAN, xp: XP_REWARDS.MINE_OBSIDIAN,  toolTier: 2 },
-  [TILES.ROCK_MOONSTONE]:{ item: ITEMS.ORE_MOONSTONE,xp: XP_REWARDS.MINE_MOONSTONE, toolTier: 2 },
+  [TILES.ROCK_COPPER]:   { item: ITEMS.ORE_COPPER,   xp: XP_REWARDS.MINE_COPPER,    toolTier: 0, levelReq:  1 },
+  [TILES.ROCK_TIN]:      { item: ITEMS.ORE_TIN,      xp: XP_REWARDS.MINE_TIN,       toolTier: 0, levelReq:  1 },
+  [TILES.ROCK_IRON]:     { item: ITEMS.ORE_IRON,     xp: XP_REWARDS.MINE_IRON,      toolTier: 0, levelReq: 15 },
+  [TILES.ROCK_COAL]:     { item: ITEMS.ORE_COAL,     xp: XP_REWARDS.MINE_COAL,      toolTier: 0, levelReq: 30 },
+  [TILES.ROCK_SILVER]:   { item: ITEMS.ORE_SILVER,   xp: XP_REWARDS.MINE_SILVER,    toolTier: 0, levelReq: 20 },
+  [TILES.ROCK_GOLD]:     { item: ITEMS.ORE_GOLD,     xp: XP_REWARDS.MINE_GOLD,      toolTier: 0, levelReq: 40 },
+  [TILES.ROCK_MITHRIL]:  { item: ITEMS.ORE_MITHRIL,  xp: XP_REWARDS.MINE_MITHRIL,   toolTier: 0, levelReq: 55 },
+  [TILES.ROCK_TUNGSTEN]: { item: ITEMS.ORE_TUNGSTEN, xp: XP_REWARDS.MINE_TUNGSTEN,  toolTier: 1, levelReq: 45 },
+  [TILES.ROCK_OBSIDIAN]: { item: ITEMS.ORE_OBSIDIAN, xp: XP_REWARDS.MINE_OBSIDIAN,  toolTier: 2, levelReq: 70 },
+  [TILES.ROCK_MOONSTONE]:{ item: ITEMS.ORE_MOONSTONE,xp: XP_REWARDS.MINE_MOONSTONE, toolTier: 2, levelReq: 85 },
+};
+
+// Which log type maps to fire XP, lifetime, Firemaking level requirement, and proximity perk
+const LOG_MAP = {
+  logs:        { xp:  40, fireLifetime:  60, levelReq:  1, perk: null,         name: 'logs' },
+  oak_logs:    { xp:  60, fireLifetime: 120, levelReq: 15, perk: 'COOK_SPEED', name: 'oak logs' },
+  willow_logs: { xp:  90, fireLifetime: 200, levelReq: 30, perk: 'FISH_SPEED', name: 'willow logs' },
+  maple_logs:  { xp: 135, fireLifetime: 360, levelReq: 45, perk: 'NO_BURN',    name: 'maple logs' },
+  yew_logs:    { xp: 200, fireLifetime: 480, levelReq: 60, perk: 'DMG_REDUCE', name: 'yew logs' },
+  magic_logs:  { xp: 303, fireLifetime: 600, levelReq: 75, perk: 'HP_REGEN',   name: 'magic logs' },
+  elder_logs:  { xp: 404, fireLifetime: 900, levelReq: 90, perk: 'XP_BOOST',   name: 'elder logs' },
+};
+const LOG_PRIORITY = ['elder_logs', 'magic_logs', 'yew_logs', 'maple_logs', 'willow_logs', 'oak_logs', 'logs'];
+const _PERK_DESC = {
+  COOK_SPEED:  'oak perk: cook 2x faster',
+  FISH_SPEED:  'willow perk: fish 40% faster',
+  NO_BURN:     'maple perk: food never burns',
+  DMG_REDUCE:  'yew perk: 15% less damage taken',
+  HP_REGEN:    'magic perk: HP regenerates',
+  XP_BOOST:    'elder perk: +10% skill XP',
 };
 
 // Returns the best pickaxe tier in inventory: 2=tungsten, 1=steel, 0=any basic
@@ -27,9 +94,6 @@ function getPickaxeTier(inventory) {
   return -1;
 }
 
-function hasAnyAxe(inventory) {
-  return inventory.has('axe') || inventory.has('iron_axe') || inventory.has('steel_axe');
-}
 
 
 /**
@@ -46,7 +110,7 @@ export class Actions {
     // Current action state
     this.active = null;  // { type, col, row, timer, duration, label }
 
-    // Fire tracking: { "col,row": remainingSeconds }
+    // Fire tracking: { "col,row": { remaining: seconds, logType: string } }
     this.fires = {};
 
     // Depleted ore tracking: { "col,row": remainingSeconds }
@@ -71,22 +135,35 @@ export class Actions {
     this.active = null;
 
     // ── Chop tree ────────────────────────────────────
-    if (tile === TILES.TREE) {
-      if (!hasAnyAxe(this.inventory)) {
+    if (TREE_MAP[tile]) {
+      const treeInfo = TREE_MAP[tile];
+      const axeTier  = getAxeTier(this.inventory);
+      if (axeTier === -1) {
         this.notif.add('You need an axe to chop trees.', '#e74c3c');
+        return true;
+      }
+      const wcLevel = this.skills.getLevel(SKILL_IDS.WOODCUTTING);
+      if (wcLevel < treeInfo.levelReq) {
+        this.notif.add(`You need Woodcutting level ${treeInfo.levelReq} to chop ${treeInfo.name} trees.`, '#e74c3c');
         return true;
       }
       if (this.inventory.isFull()) {
         this.notif.add('Your inventory is full.', '#e74c3c');
         return true;
       }
+      // Better axes chop faster: iron=20% faster, steel=40% faster
+      const speedMult = [1.0, 0.80, 0.60][axeTier];
+      // Level 40 bonus: +1 max log per tree
+      const bonusLog = wcLevel >= 40 ? 1 : 0;
+      const logsLeft = treeInfo.logsMin + Math.floor(Math.random() * (treeInfo.logsMax - treeInfo.logsMin + 1 + bonusLog));
       this.active = {
         type: 'chop', col, row,
-        timer: 0, duration: ACTION_TIMES.CHOP + Math.random() * 2,
-        logsLeft: 1 + Math.floor(Math.random() * 4), // 1–4 logs before tree falls
-        label: 'Chopping...',
+        timer: 0, duration: (treeInfo.chopBase + Math.random() * 2) * speedMult,
+        logsLeft,
+        originalTile: tile,
+        label: `Chopping ${treeInfo.name}...`,
       };
-      this.notif.add('You swing your axe at the tree.', '#aaa');
+      this.notif.add(`You swing your axe at the ${treeInfo.name} tree.`, '#aaa');
       return true;
     }
 
@@ -96,6 +173,11 @@ export class Actions {
       const pickTier  = getPickaxeTier(this.inventory);
       if (pickTier === -1) {
         this.notif.add('You need a pickaxe to mine rocks.', '#e74c3c');
+        return true;
+      }
+      const miningLevel = this.skills.getLevel(SKILL_IDS.MINING);
+      if (miningLevel < oreInfo.levelReq) {
+        this.notif.add(`You need Mining level ${oreInfo.levelReq} to mine ${oreInfo.item.name}.`, '#e74c3c');
         return true;
       }
       if (pickTier < oreInfo.toolTier) {
@@ -129,10 +211,14 @@ export class Actions {
         this.notif.add('Your inventory is full.', '#e74c3c');
         return true;
       }
+      const pCol = Math.floor(this.player.cx / TILE_SIZE);
+      const pRow = Math.floor(this.player.cy / TILE_SIZE);
+      const fishPerks = this.getFirePerks(pCol, pRow);
+      const fishMult = fishPerks.has('FISH_SPEED') ? 0.60 : 1.0;
       this.active = {
         type: 'fish', col, row,
-        timer: 0, duration: Math.random() * 30,
-        label: 'Fishing...',
+        timer: 0, duration: Math.random() * 30 * fishMult,
+        label: fishPerks.has('FISH_SPEED') ? 'Fishing... (willow perk)' : 'Fishing...',
       };
       this.notif.add('You cast your line into the water.', '#aaa');
       return true;
@@ -142,13 +228,21 @@ export class Actions {
     const lightable = [TILES.STUMP, TILES.GRASS, TILES.DARK_GRASS, TILES.DIRT,
                        TILES.SNOW, TILES.DEAD_GRASS, TILES.SAND];
     if (lightable.includes(tile) && tile !== TILES.FIRE) {
-      if (this.inventory.has('logs') && this.inventory.has('tinderbox')) {
+      const logType = LOG_PRIORITY.find(id => this.inventory.has(id));
+      if (logType && this.inventory.has('tinderbox')) {
+        const logInfo = LOG_MAP[logType];
+        const fmLevel = this.skills.getLevel(SKILL_IDS.FIREMAKING);
+        if (fmLevel < logInfo.levelReq) {
+          this.notif.add(`You need Firemaking level ${logInfo.levelReq} to burn ${logInfo.name}.`, '#e74c3c');
+          return true;
+        }
         this.active = {
           type: 'light', col, row,
           timer: 0, duration: ACTION_TIMES.LIGHT,
-          label: 'Lighting fire...',
+          logType,
+          label: `Lighting ${logInfo.name}...`,
         };
-        this.notif.add('You attempt to light a fire.', '#aaa');
+        this.notif.add(`You attempt to light a fire with ${logInfo.name}.`, '#aaa');
         return true;
       }
     }
@@ -161,11 +255,16 @@ export class Actions {
         return true;
       }
       const rawItem = this.inventory.slots[cookIdx].item;
+      const cpCol = Math.floor(this.player.cx / TILE_SIZE);
+      const cpRow = Math.floor(this.player.cy / TILE_SIZE);
+      const cookPerks = this.getFirePerks(cpCol, cpRow);
+      const cookMult = cookPerks.has('COOK_SPEED') ? 0.5 : 1.0;
       this.active = {
         type: 'cook', col, row,
-        timer: 0, duration: ACTION_TIMES.COOK,
-        label: `Cooking ${rawItem.name}...`,
+        timer: 0, duration: ACTION_TIMES.COOK * cookMult,
+        label: cookPerks.has('COOK_SPEED') ? `Cooking ${rawItem.name}... (oak perk)` : `Cooking ${rawItem.name}...`,
         rawItemId: rawItem.id,
+        noBurn: cookPerks.has('NO_BURN'),
       };
       this.notif.add(`You begin cooking ${rawItem.name}.`, '#aaa');
       return true;
@@ -178,8 +277,8 @@ export class Actions {
   update(dt) {
     // Update fires
     for (const key of Object.keys(this.fires)) {
-      this.fires[key] -= dt;
-      if (this.fires[key] <= 0) {
+      this.fires[key].remaining -= dt;
+      if (this.fires[key].remaining <= 0) {
         const [c, r] = key.split(',').map(Number);
         this.world.setTile(c, r, TILES.DIRT);
         delete this.fires[key];
@@ -222,30 +321,32 @@ export class Actions {
 
     switch (a.type) {
       case 'chop': {
-        this.inventory.add(ITEMS.LOGS);
-        const res = this.skills.addXp(SKILL_IDS.WOODCUTTING, XP_REWARDS.CHOP);
-        this.notif.add(`You get some logs. (+${XP_REWARDS.CHOP} WC XP)`, '#27ae60');
-        if (res.leveled) this.notif.add(`🎉 Woodcutting level ${res.newLevel}!`, '#f1c40f');
+        const treeInfo = TREE_MAP[a.originalTile ?? TILES.TREE] ?? TREE_MAP[TILES.TREE];
+        this.inventory.add(treeInfo.item);
+        const res = this._awardXp(SKILL_IDS.WOODCUTTING, treeInfo.xp);
+        this.notif.add(`You get some ${treeInfo.item.name.toLowerCase()}. (+${res.awarded} WC XP)`, '#27ae60');
+        if (res.result.leveled) this.notif.add(`🎉 Woodcutting level ${res.result.newLevel}!`, '#f1c40f');
         const logsLeft = (a.logsLeft ?? 1) - 1;
         if (logsLeft > 0 && !this.inventory.isFull()) {
-          // Tree still has logs — keep chopping
+          const axeTier   = getAxeTier(this.inventory);
+          const speedMult = [1.0, 0.80, 0.60][axeTier] ?? 1.0;
           this.active = {
             type: 'chop', col: a.col, row: a.row,
-            timer: 0, duration: ACTION_TIMES.CHOP + Math.random() * 2,
-            logsLeft,
-            label: 'Chopping...',
+            timer: 0, duration: (treeInfo.chopBase + Math.random() * 2) * speedMult,
+            logsLeft, originalTile: a.originalTile,
+            label: `Chopping ${treeInfo.name}...`,
           };
         } else {
-          // Tree exhausted — turn to stump and respawn later
           this.world.setTile(a.col, a.row, TILES.STUMP);
           this.world.dirty = true;
           this.notif.add('The tree falls!', '#27ae60');
+          const respawnMs = (treeInfo.respawnMin + Math.random() * (treeInfo.respawnMax - treeInfo.respawnMin)) * 1000;
           setTimeout(() => {
             if (this.world.getTile(a.col, a.row) === TILES.STUMP) {
-              this.world.setTile(a.col, a.row, TILES.TREE);
+              this.world.setTile(a.col, a.row, a.originalTile ?? TILES.TREE);
               this.world.dirty = true;
             }
-          }, (15 + Math.random() * 10) * 1000);
+          }, respawnMs);
         }
         break;
       }
@@ -254,9 +355,9 @@ export class Actions {
         const oreInfo = ORE_MAP[this.world.getTile(a.col, a.row)];
         if (!oreInfo) break;
         this.inventory.add(oreInfo.item);
-        const res = this.skills.addXp(SKILL_IDS.MINING, oreInfo.xp);
-        this.notif.add(`You mine some ${oreInfo.item.name}. (+${oreInfo.xp} Mining XP)`, '#95a5a6');
-        if (res.leveled) this.notif.add(`🎉 Mining level ${res.newLevel}!`, '#f1c40f');
+        const res = this._awardXp(SKILL_IDS.MINING, oreInfo.xp);
+        this.notif.add(`You mine some ${oreInfo.item.name}. (+${res.awarded} Mining XP)`, '#95a5a6');
+        if (res.result.leveled) this.notif.add(`🎉 Mining level ${res.result.newLevel}!`, '#f1c40f');
         const oresLeft = (a.oresLeft ?? 1) - 1;
         if (oresLeft > 0 && !this.inventory.isFull()) {
           // Rock still has ore — keep mining
@@ -307,12 +408,12 @@ export class Actions {
         const weight = parseFloat((chosen.wMin + t * (chosen.wMax - chosen.wMin)).toFixed(2));
 
         this.inventory.add(makeFishItem(chosen, weight));
-        const res = this.skills.addXp(SKILL_IDS.FISHING, chosen.xp);
+        const res = this._awardXp(SKILL_IDS.FISHING, chosen.xp);
         this.notif.add(
-          `You catch a ${chosen.name}! (${weight}kg, +${chosen.xp} Fish XP)`,
+          `You catch a ${chosen.name}! (${weight}kg, +${res.awarded} Fish XP)`,
           '#3498db'
         );
-        if (res.leveled) this.notif.add(`🎉 Fishing level ${res.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.add(`🎉 Fishing level ${res.result.newLevel}!`, '#f1c40f');
 
         // Update fishing records
         if (this.fishingRecords) {
@@ -358,13 +459,17 @@ export class Actions {
       }
 
       case 'light': {
-        this.inventory.remove('logs', 1);
+        const logType = a.logType || 'logs';
+        const logInfo = LOG_MAP[logType] || LOG_MAP.logs;
+        this.inventory.remove(logType, 1);
         this.world.setTile(a.col, a.row, TILES.FIRE);
         this.world.dirty = true;
-        this.fires[`${a.col},${a.row}`] = FIRE_LIFETIME;
-        const res = this.skills.addXp(SKILL_IDS.FIREMAKING, XP_REWARDS.LIGHT);
-        this.notif.add(`The fire catches! (+${XP_REWARDS.LIGHT} FM XP)`, '#e67e22');
-        if (res.leveled) this.notif.add(`🎉 Firemaking level ${res.newLevel}!`, '#f1c40f');
+        this.fires[`${a.col},${a.row}`] = { remaining: logInfo.fireLifetime, logType };
+        const xpAmt = logInfo.xp;
+        const res = this._awardXp(SKILL_IDS.FIREMAKING, xpAmt);
+        const perkNote = logInfo.perk ? ` — ${_PERK_DESC[logInfo.perk]}` : '';
+        this.notif.add(`The ${logInfo.name} fire catches! (+${res.awarded} FM XP)${perkNote}`, '#e67e22');
+        if (res.result.leveled) this.notif.add(`🎉 Firemaking level ${res.result.newLevel}!`, '#f1c40f');
         break;
       }
 
@@ -374,15 +479,15 @@ export class Actions {
         this.inventory.remove(a.rawItemId, 1);
         const cookLvl = this.skills.getLevel(SKILL_IDS.COOKING);
         const burnReduction = cookLvl * 0.02;
-        const burnt = Math.random() < Math.max(0.05, recipe.burnChance - burnReduction);
+        const burnt = a.noBurn ? false : Math.random() < Math.max(0.05, recipe.burnChance - burnReduction);
         if (burnt) {
           this.inventory.add(recipe.burnt);
           this.notif.add('You accidentally burn the fish.', '#e74c3c');
         } else {
           this.inventory.add(recipe.cooked);
-          const res = this.skills.addXp(SKILL_IDS.COOKING, XP_REWARDS.COOK);
-          this.notif.add(`You cook the fish perfectly! (+${XP_REWARDS.COOK} Cook XP)`, '#e74c3c');
-          if (res.leveled) this.notif.add(`🎉 Cooking level ${res.newLevel}!`, '#f1c40f');
+          const res = this._awardXp(SKILL_IDS.COOKING, XP_REWARDS.COOK);
+          this.notif.add(`You cook the fish perfectly! (+${res.awarded} Cook XP)`, '#e74c3c');
+          if (res.result.leveled) this.notif.add(`🎉 Cooking level ${res.result.newLevel}!`, '#f1c40f');
         }
         break;
       }
@@ -401,6 +506,36 @@ export class Actions {
 
   get isActive() {
     return this.active !== null;
+  }
+
+  /**
+   * Returns a Set of active perk strings from fires within 5 tiles of playerCol/Row.
+   * Perk names: COOK_SPEED, FISH_SPEED, NO_BURN, DMG_REDUCE, HP_REGEN, XP_BOOST
+   */
+  getFirePerks(playerCol, playerRow) {
+    const perks = new Set();
+    for (const [key, fire] of Object.entries(this.fires)) {
+      const logInfo = LOG_MAP[fire.logType];
+      if (!logInfo || !logInfo.perk) continue;
+      const [fc, fr] = key.split(',').map(Number);
+      if (Math.abs(fc - playerCol) + Math.abs(fr - playerRow) <= 5) {
+        perks.add(logInfo.perk);
+      }
+    }
+    return perks;
+  }
+
+  /**
+   * Awards XP, applying the XP_BOOST elder fire perk (+10%) if the player is near one.
+   * Returns { result, awarded } where result is the skills.addXp return value.
+   */
+  _awardXp(skillId, baseXp) {
+    const pCol = Math.floor(this.player.cx / TILE_SIZE);
+    const pRow = Math.floor(this.player.cy / TILE_SIZE);
+    const perks = this.getFirePerks(pCol, pRow);
+    const awarded = perks.has('XP_BOOST') ? Math.ceil(baseXp * 1.10) : baseXp;
+    const result = this.skills.addXp(skillId, awarded);
+    return { result, awarded };
   }
 
   cancel() {

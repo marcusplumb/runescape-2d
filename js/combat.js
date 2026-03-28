@@ -8,19 +8,20 @@
  * XP is awarded in Attack, Strength, Defence (for the player), and
  * Hitpoints (both sides).
  */
-import { SKILL_IDS, COMBAT_TICK } from './constants.js';
+import { SKILL_IDS, COMBAT_TICK, TILE_SIZE } from './constants.js';
 import { getTotalStats } from './gear.js';
 
 const COMBAT_SIDE_GAP = 6;       // pixels between player and mob
 const COMBAT_SLOT_EPSILON = 10;  // how close mob must get to its slot before fighting
 
 export class Combat {
-  constructor(player, mobManager, inventory, skills, notifications) {
+  constructor(player, mobManager, inventory, skills, notifications, actions) {
     this.player       = player;
     this.mobManager   = mobManager;
     this.inventory    = inventory;
     this.skills       = skills;
     this.notif        = notifications;
+    this.actions      = actions || null;
 
     // The mob the player is currently attacking (or null)
     this.targetMob    = null;
@@ -190,7 +191,14 @@ export class Combat {
       );
 
       if (mobHit) {
-        const mobDmg = _rollDamage(this.targetMob.strengthLevel);
+        let mobDmg = _rollDamage(this.targetMob.strengthLevel);
+        if (mobDmg > 0 && this.actions) {
+          const pCol = Math.floor(this.player.cx / TILE_SIZE);
+          const pRow = Math.floor(this.player.cy / TILE_SIZE);
+          if (this.actions.getFirePerks(pCol, pRow).has('DMG_REDUCE')) {
+            mobDmg = Math.max(1, Math.ceil(mobDmg * 0.85));
+          }
+        }
         if (mobDmg > 0) {
           this.player.hp = Math.max(0, this.player.hp - mobDmg);
           this.hitSplats.push({

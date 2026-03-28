@@ -1,6 +1,6 @@
 import {
   WORLD_COLS, WORLD_ROWS, TILE_SIZE,
-  TILES, SOLID_TILES
+  TILES, SOLID_TILES, TREE_TILES,
 } from './constants.js';
 import { buildBiomeMap, getBiome, BIOMES } from './biomes.js';
 import { placeAllStructures } from './structures.js';
@@ -174,6 +174,55 @@ export class World {
           if (t === TILES.GRASS && cn < 0.35 && rng() < 0.12) {
             map[r][c] = TILES.FLOWERS;
           }
+        }
+      }
+    }
+
+    // ── Phase 2b: Upgrade common trees to rarer varieties ─
+    // Higher cluster density → rarer tree type. Rarer trees are also slower
+    // to respawn so they stay scarce during play.
+    for (let r = 0; r < this.rows; r++) {
+      for (let c = 0; c < this.cols; c++) {
+        const t     = map[r][c];
+        const cn    = clusterNoise[r][c];
+        const biome = getBiome(c, r);
+        if (!TREE_TILES.has(t)) continue; // only upgrade existing trees
+
+        // Oak — Forest and Plains, moderate cluster threshold
+        if (t === TILES.TREE &&
+            (biome === BIOMES.FOREST || biome === BIOMES.PLAINS) &&
+            cn > 0.72 && rng() < 0.30) {
+          map[r][c] = TILES.OAK_TREE;
+          continue;
+        }
+        // Willow — placed near the lower end of tree-cluster density (openings near water)
+        if ((t === TILES.TREE || t === TILES.OAK_TREE) &&
+            (biome === BIOMES.FOREST || biome === BIOMES.PLAINS) &&
+            cn > 0.60 && cn < 0.72 && rng() < 0.06) {
+          map[r][c] = TILES.WILLOW_TREE;
+          continue;
+        }
+        // Maple — Forest only, high cluster
+        if ((t === TILES.TREE || t === TILES.OAK_TREE) &&
+            biome === BIOMES.FOREST && cn > 0.82 && rng() < 0.18) {
+          map[r][c] = TILES.MAPLE_TREE;
+          continue;
+        }
+        // Yew — Forest only, very high cluster
+        if (TREE_TILES.has(t) && biome === BIOMES.FOREST && cn > 0.90 && rng() < 0.12) {
+          map[r][c] = TILES.YEW_TREE;
+          continue;
+        }
+        // Magic — any non-desert/volcanic biome, very rare
+        if (biome !== BIOMES.DESERT && biome !== BIOMES.VOLCANIC &&
+            cn > 0.93 && rng() < 0.025) {
+          map[r][c] = TILES.MAGIC_TREE;
+          continue;
+        }
+        // Elder — Forest/Plains only, extremely rare
+        if ((biome === BIOMES.FOREST || biome === BIOMES.PLAINS) &&
+            cn > 0.96 && rng() < 0.015) {
+          map[r][c] = TILES.ELDER_TREE;
         }
       }
     }

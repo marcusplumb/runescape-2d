@@ -51,12 +51,8 @@ export class Notifications {
       ctx.fillStyle = `rgba(0,0,0,${0.5 * alpha})`;
       ctx.fillRect(8, y - 12, ctx.measureText(msg.text).width + 12, 16);
 
-      ctx.fillStyle = msg.color.replace(')', `,${alpha})`).replace('rgb', 'rgba');
-      // Handle hex colors
-      if (msg.color.startsWith('#')) {
-        ctx.globalAlpha = alpha;
-        ctx.fillStyle = msg.color;
-      }
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = msg.color;
       ctx.fillText(msg.text, 14, y);
       ctx.globalAlpha = 1;
     }
