@@ -14,7 +14,7 @@ const { attachRooms } = require('./server/rooms');
 // ── Setup ──────────────────────────────────────────────
 if (!process.env.JWT_SECRET) {
   // Dev fallback — warn so it's obvious in production
-  process.env.JWT_SECRET = 'runeworld_dev_secret_change_me';
+  process.env.JWT_SECRET = 'e23f17744982f7ea87b7b91150aa74cc';
   if (process.env.NODE_ENV === 'production') {
     console.error('⚠️  JWT_SECRET env var is not set! Set it before deploying.');
     process.exit(1);
