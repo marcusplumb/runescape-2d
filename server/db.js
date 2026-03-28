@@ -40,10 +40,10 @@ function loadSave(username) {
 }
 
 function writeSave(username, saveData) {
-  const file = _file(username);
-  const record = findPlayer(username) || { username: username.toLowerCase(), password_hash: '', save: null };
+  const record = findPlayer(username);
+  if (!record) return; // player file missing — never overwrite with blank password_hash
   record.save = saveData;
-  fs.writeFileSync(file, JSON.stringify(record), 'utf8');
+  fs.writeFileSync(_file(username), JSON.stringify(record), 'utf8');
 }
 
 module.exports = { findPlayer, createPlayer, loadSave, writeSave };
