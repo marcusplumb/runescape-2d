@@ -31,8 +31,13 @@ export class Network {
   }
 
   /** Emit equipment + style after the player equips or visits the makeover mage. */
-  sendEquip(equipment, style, name) {
-    this.socket.emit('equip', { equipment, style, name });
+  sendEquip(equipment, style, name, combatLevel) {
+    this.socket.emit('equip', { equipment, style, name, combatLevel });
+  }
+
+  /** Emit a tile change caused by this player (chop, mine, fire, etc.). */
+  sendTileChange(col, row, tile) {
+    this.socket.emit('tile_change', { col, row, tile });
   }
 
   on(event, cb) { this.socket.on(event, cb); }

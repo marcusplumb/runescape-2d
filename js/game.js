@@ -29,9 +29,12 @@ import { STRUCTURE_NODES } from './structures.js';
 import { ARMOR_OPTIONS, EQUIPMENT_SLOTS, SLOT_LABELS } from './equipment.js';
 import { getBiome } from './biomes.js';
 import {
-  TILE_SIZE, TILES,
+  TILE_SIZE, PLAYER_SPEED, TILES,
   INV_COLS, INV_ROWS, INV_CELL, INV_PAD, SKILL_IDS,
 } from './constants.js';
+
+// Duration to cross one tile — remote players interpolate at the same speed as local
+const REMOTE_MOVE_TIME = TILE_SIZE / PLAYER_SPEED;
 import {
   FishermanNPC, FISH_SPECIES, FISH_SHOP_STOCK, FISH_SELL_PRICES,
   FISH_PW, FISH_PH, FISH_HEADER_H, FISH_TAB_H, FISH_ROW_H,
@@ -76,6 +79,15 @@ export class Game {
     // Core systems
     this.world        = new World();
     this.player       = new Player(this.world);
+    this._applyingRemoteTile = false; // prevents echo-back when applying others' tile changes
+    // Intercept setTile so every world mutation is broadcast to other players
+    const _origSetTile = this.world.setTile.bind(this.world);
+    this.world.setTile = (col, row, tile) => {
+      _origSetTile(col, row, tile);
+      if (this.network && !this._applyingRemoteTile) {
+        this.network.sendTileChange(col, row, tile);
+      }
+    };
     this.camera       = new Camera(canvas);
     this.input        = new Input(canvas);
     this.renderer     = new Renderer(canvas);
@@ -122,6 +134,8 @@ export class Game {
       this.inventory.add(ITEMS.PICKAXE);
       this.inventory.add(ITEMS.GOLD_COIN, 25);
     }
+    // Always use the authenticated username — overrides any stale save value
+    if (username) this.player.name = username;
 
     // Multiplayer network connection
     this.network       = token ? new Network(token) : null;
@@ -509,6 +523,36 @@ export class Game {
       this.actions.cancel();
       this.pendingInteract = null;
       this.notifications.add('Action cancelled.', '#aaa');
+    }
+
+    // Keep local player's combat level up to date (cheap: 4 array lookups)
+    this.player.combatLevel = Math.max(1, Math.floor(
+      (this.skills.getLevel(SKILL_IDS.ATTACK)    + this.skills.getLevel(SKILL_IDS.STRENGTH) +
+       this.skills.getLevel(SKILL_IDS.DEFENCE)   + this.skills.getLevel(SKILL_IDS.HITPOINTS)) / 4
+    ));
+
+    // Interpolate and animate remote players
+    for (const view of this.remotePlayers.values()) {
+      if (view.moveT < REMOTE_MOVE_TIME) {
+        view.moveT += dt;
+        const p = Math.min(view.moveT / REMOTE_MOVE_TIME, 1);
+        view.x = view._fromX + (view._toX - view._fromX) * p;
+        view.y = view._fromY + (view._toY - view._fromY) * p;
+        view.moving = view.moveT < REMOTE_MOVE_TIME;
+      } else {
+        view.moving = false;
+      }
+
+      if (view.moving) {
+        view.animTimer += dt;
+        if (view.animTimer > 0.15) {
+          view.animTimer = 0;
+          view.animFrame = (view.animFrame + 1) % 4;
+        }
+      } else {
+        view.animFrame = 0;
+        view.animTimer = 0;
+      }
     }
 
     // Interior transition triggers
@@ -1152,6 +1196,8 @@ export class Game {
     const doneBtnY = py + MO_PH - MO_PAD_BOT + 11;
     if (sx >= doneBtnX && sx <= doneBtnX + doneBtnW && sy >= doneBtnY && sy <= doneBtnY + 30) {
       this.makoverOpen = false;
+      if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
+      this._saveToServer();
       return;
     }
     const contentY = py + MO_HEADER_H + MO_PREVIEW_H;
@@ -1782,7 +1828,7 @@ export class Game {
     this.contextMenu = null;
     this.notifications.add(`Equipped ${slot.item.name}.`, '#aaa');
     this._saveToServer();
-    if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name);
+    if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
   }
 
   _unequipSlot(slot) {
@@ -1799,7 +1845,7 @@ export class Game {
     this.player.equipment[slot] = 'none';
     if (item) this.notifications.add(`Unequipped ${item.name}.`, '#aaa');
     this._saveToServer();
-    if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name);
+    if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
   }
 
   _handleContextMenuClick(sx, sy) {
@@ -2069,19 +2115,24 @@ export class Game {
     net.on('player_moved', ({ id, col, row, dir }) => {
       const view = this.remotePlayers.get(id);
       if (!view) return;
-      view.col = col;
-      view.row = row;
-      view.x   = col * TILE_SIZE + 4;
-      view.y   = row * TILE_SIZE;
-      view.dir = dir ?? view.dir;
+      // Set up smooth interpolation from current pixel pos to the new tile
+      view._fromX = view.x;
+      view._fromY = view.y;
+      view._toX   = col * TILE_SIZE + 4;
+      view._toY   = row * TILE_SIZE;
+      view.moveT  = 0;
+      view.col    = col;
+      view.row    = row;
+      view.dir    = dir ?? view.dir;
     });
 
-    net.on('player_updated', ({ id, equipment, style, name }) => {
+    net.on('player_updated', ({ id, equipment, style, name, combatLevel }) => {
       const view = this.remotePlayers.get(id);
       if (!view) return;
-      if (equipment) view.equipment = equipment;
-      if (style)     view.style     = style;
-      if (name)      view.name      = name;
+      if (equipment)              view.equipment    = equipment;
+      if (style)                  view.style        = style;
+      if (name)                   view.name         = name;
+      if (combatLevel != null)    view.combatLevel  = combatLevel;
     });
 
     net.on('player_left', ({ id }) => {
@@ -2091,15 +2142,35 @@ export class Game {
         this.remotePlayers.delete(id);
       }
     });
+
+    // Shared world state: tile changes from other players
+    net.on('world_overrides', (overrides) => {
+      this._applyingRemoteTile = true;
+      for (const { col, row, tile } of overrides) {
+        this.world.setTile(col, row, tile);
+      }
+      this._applyingRemoteTile = false;
+    });
+
+    net.on('tile_change', ({ col, row, tile }) => {
+      this._applyingRemoteTile = true;
+      this.world.setTile(col, row, tile);
+      this._applyingRemoteTile = false;
+    });
   }
 
   _upsertRemotePlayer(snap) {
+    const sx = snap.col * TILE_SIZE + 4;
+    const sy = snap.row * TILE_SIZE;
     if (this.remotePlayers.has(snap.id)) {
+      // Snap to the reported position (world_state / player_joined — not a movement event)
       const view = this.remotePlayers.get(snap.id);
-      view.col = snap.col;  view.row = snap.row;
-      view.x   = snap.col * TILE_SIZE + 4;
-      view.y   = snap.row * TILE_SIZE;
-      view.dir = snap.dir ?? view.dir;
+      view.col    = snap.col;  view.row    = snap.row;
+      view.x      = sx;        view.y      = sy;
+      view._fromX = sx;        view._fromY = sy;
+      view._toX   = sx;        view._toY   = sy;
+      view.moveT  = REMOTE_MOVE_TIME; // mark as "arrived"
+      view.dir    = snap.dir ?? view.dir;
       if (snap.equipment) view.equipment = snap.equipment;
       if (snap.style)     view.style     = snap.style;
       if (snap.name)      view.name      = snap.name;
@@ -2111,8 +2182,13 @@ export class Game {
       name:          snap.name || snap.username,
       col:           snap.col,
       row:           snap.row,
-      x:             snap.col * TILE_SIZE + 4,
-      y:             snap.row * TILE_SIZE,
+      x:             sx,
+      y:             sy,
+      _fromX:        sx,
+      _fromY:        sy,
+      _toX:          sx,
+      _toY:          sy,
+      moveT:         REMOTE_MOVE_TIME, // start as "arrived" — no initial lerp
       w:             24,
       h:             32,
       dir:           snap.dir ?? 0,
@@ -2126,6 +2202,7 @@ export class Game {
       maxHp:         10,
       style:         { ...{ hair:'#4a3520',skin:'#deb887',shirt:'#b04040',pants:'#3d3424',hairStyle:'short',shirtStyle:'tunic' }, ...(snap.style || {}) },
       equipment:     { helmet:'none',chestplate:'none',leggings:'none',gloves:'none',boots:'none',cape:'none',weapon:'none', ...(snap.equipment || {}) },
+      combatLevel:   snap.combatLevel || 1,
       draw(ctx) { Player.prototype.draw.call(this, ctx); },
     };
     this.remotePlayers.set(snap.id, view);

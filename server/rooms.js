@@ -23,8 +23,9 @@ function attachRooms(io) {
     }
   });
 
-  const online       = new Map(); // socketId  → snapshot
-  const onlineByUser = new Map(); // username  → socketId
+  const online         = new Map(); // socketId  → snapshot
+  const onlineByUser   = new Map(); // username  → socketId
+  const worldOverrides = new Map(); // "col,row" → tile — shared world state for late joiners
 
   io.on('connection', (socket) => {
     const username = socket.username;
@@ -43,14 +44,15 @@ function attachRooms(io) {
     // Build initial snapshot from saved data (style/equipment preserved from save)
     const save = db.loadSave(username) || {};
     const snapshot = {
-      id:        socket.id,
+      id:          socket.id,
       username,
-      name:      save.name      || username,
-      col:       save.col       ?? 512,
-      row:       save.row       ?? 389,
-      dir:       0,
-      style:     save.style     || {},
-      equipment: save.equipment || {},
+      name:        username,
+      col:         save.col       ?? 512,
+      row:         save.row       ?? 389,
+      dir:         0,
+      style:       save.style     || {},
+      equipment:   save.equipment || {},
+      combatLevel: 1,
     };
     online.set(socket.id, snapshot);
     onlineByUser.set(username, socket.id);
@@ -58,6 +60,16 @@ function attachRooms(io) {
     // Send this player the current world state (everyone else online)
     const others = [...online.values()].filter(p => p.id !== socket.id);
     socket.emit('world_state', others);
+
+    // Send accumulated tile changes so the new player sees the shared world
+    if (worldOverrides.size > 0) {
+      const overrides = [];
+      for (const [key, tile] of worldOverrides) {
+        const comma = key.indexOf(',');
+        overrides.push({ col: +key.slice(0, comma), row: +key.slice(comma + 1), tile });
+      }
+      socket.emit('world_overrides', overrides);
+    }
 
     // Tell everyone else this player joined
     socket.broadcast.emit('player_joined', snapshot);
@@ -85,6 +97,13 @@ function attachRooms(io) {
         style:     p.style,
         name:      p.name,
       });
+    });
+
+    socket.on('tile_change', ({ col, row, tile }) => {
+      if (typeof col !== 'number' || typeof row !== 'number' || typeof tile !== 'number') return;
+      if (col < 0 || col > 4096 || row < 0 || row > 4096) return;
+      worldOverrides.set(`${col},${row}`, tile);
+      socket.broadcast.emit('tile_change', { col, row, tile });
     });
 
     socket.on('disconnect', () => {

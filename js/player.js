@@ -191,6 +191,7 @@ export class Player {
     this.skillAnim     = 0;
     this.currentAction = 'idle'; // 'idle' | 'chop' | 'mine' | 'fish' | 'cook' | 'fight'
     this.actionTarget  = null;   // { col, row } tile the current action is targeting
+    this.combatLevel   = 1;      // updated each frame by Game from Skills
   }
 
   /** Replace the queued path. The player finishes the current tile, then follows. */
@@ -478,15 +479,16 @@ export class Player {
       ctx.fillRect(barX, barY, Math.round(barW * frac), barH);
     }
 
-    // Name tag
+    // Name tag — "Name (Lvl. X)"
+    const label = `${this.name} (Lvl. ${this.combatLevel || 1})`;
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'center';
     const nameY = cy - 6 - bob;
-    ctx.strokeText(this.name, cx + this.w / 2, nameY);
-    ctx.fillText(this.name, cx + this.w / 2, nameY);
+    ctx.strokeText(label, cx + this.w / 2, nameY);
+    ctx.fillText(label, cx + this.w / 2, nameY);
   }
 
   _drawActionTool(ctx, cx, cy, bob, armSwing) {

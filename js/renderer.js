@@ -85,10 +85,18 @@ export class Renderer {
       this.minimapDirty = true;
     }
 
-    const startCol = Math.floor(camX / TILE_SIZE);
-    const startRow = Math.floor(camY / TILE_SIZE);
-    const endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
-    const endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
+    // Raw visible range from camera position, then capped to 70×70
+    let startCol = Math.floor(camX / TILE_SIZE);
+    let startRow = Math.floor(camY / TILE_SIZE);
+    let endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
+    let endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
+    const MAX_HALF = 35; // 70×70 max view
+    const midCol = (startCol + endCol) >> 1;
+    const midRow = (startRow + endRow) >> 1;
+    startCol = Math.max(startCol, midCol - MAX_HALF);
+    startRow = Math.max(startRow, midRow - MAX_HALF);
+    endCol   = Math.min(endCol,   midCol + MAX_HALF);
+    endRow   = Math.min(endRow,   midRow + MAX_HALF);
 
     const cxMin = startCol / CHUNK_TILES | 0;
     const cyMin = startRow / CHUNK_TILES | 0;
