@@ -1976,36 +1976,54 @@ export class Renderer {
     const cx = this.canvas.width - RADIUS - 14;
     const cy = RADIUS + 14;
 
-    // Clip to circle
+    const pcol = Math.floor(player.cx / TILE_SIZE);
+    const prow = Math.floor(player.cy / TILE_SIZE);
+    const span = Math.ceil(RADIUS / TILE_PX) + 1;
+    const SIZE  = (span * 2 + 1) * TILE_PX;
+
+    // Rebuild the offscreen tile cache only when the player crosses a tile boundary
+    if (this.minimapDirty || !this.minimapCanvas ||
+        this._mmPcol !== pcol || this._mmProw !== prow) {
+      this.minimapDirty = false;
+      this._mmPcol = pcol;
+      this._mmProw = prow;
+
+      if (!this.minimapCanvas) {
+        this.minimapCanvas = document.createElement('canvas');
+      }
+      if (this.minimapCanvas.width !== SIZE) {
+        this.minimapCanvas.width  = SIZE;
+        this.minimapCanvas.height = SIZE;
+      }
+      const mc = this.minimapCanvas.getContext('2d');
+      const origin = span * TILE_PX; // pixel centre of the offscreen canvas
+
+      mc.fillStyle = '#0c0c0c';
+      mc.fillRect(0, 0, SIZE, SIZE);
+
+      for (let dr = -span; dr <= span; dr++) {
+        for (let dc = -span; dc <= span; dc++) {
+          const tile = world.getTile(pcol + dc, prow + dr);
+          mc.fillStyle = TILE_COLORS[tile] || '#000';
+          mc.fillRect(
+            origin + dc * TILE_PX - Math.floor(TILE_PX / 2),
+            origin + dr * TILE_PX - Math.floor(TILE_PX / 2),
+            TILE_PX, TILE_PX
+          );
+        }
+      }
+
+      // Player dot at centre
+      mc.fillStyle = '#ffffff';
+      mc.fillRect(origin - 2, origin - 2, 4, 4);
+    }
+
+    // Blit cached canvas clipped to circle
     ctx.save();
     ctx.beginPath();
     ctx.arc(cx, cy, RADIUS, 0, Math.PI * 2);
     ctx.clip();
-
-    // Background
-    ctx.fillStyle = '#0c0c0c';
-    ctx.fillRect(cx - RADIUS, cy - RADIUS, RADIUS * 2, RADIUS * 2);
-
-    // Render tiles around player
-    const pcol = Math.floor(player.cx / TILE_SIZE);
-    const prow = Math.floor(player.cy / TILE_SIZE);
-    const span = Math.ceil(RADIUS / TILE_PX) + 1;
-    for (let dr = -span; dr <= span; dr++) {
-      for (let dc = -span; dc <= span; dc++) {
-        const tile = world.getTile(pcol + dc, prow + dr);
-        ctx.fillStyle = TILE_COLORS[tile] || '#000';
-        ctx.fillRect(
-          cx + dc * TILE_PX - Math.floor(TILE_PX / 2),
-          cy + dr * TILE_PX - Math.floor(TILE_PX / 2),
-          TILE_PX, TILE_PX
-        );
-      }
-    }
-
-    // Player dot
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(cx - 2, cy - 2, 4, 4);
-
+    ctx.drawImage(this.minimapCanvas, cx - span * TILE_PX, cy - span * TILE_PX);
     ctx.restore();
 
     // Gold border ring

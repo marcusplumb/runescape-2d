@@ -38,5 +38,8 @@ export class Network {
   on(event, cb) { this.socket.on(event, cb); }
   off(event, cb) { this.socket.off(event, cb); }
 
+  /** Register a callback that fires when the server kicks this session. */
+  onForceLogout(cb) { this.socket.on('force_logout', cb); }
+
   disconnect() { this.socket.disconnect(); }
 }

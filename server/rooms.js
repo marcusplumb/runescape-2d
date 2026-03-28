@@ -23,10 +23,22 @@ function attachRooms(io) {
     }
   });
 
-  const online = new Map(); // socketId → snapshot
+  const online       = new Map(); // socketId  → snapshot
+  const onlineByUser = new Map(); // username  → socketId
 
   io.on('connection', (socket) => {
     const username = socket.username;
+
+    // Kick any existing session for this username
+    const existingId = onlineByUser.get(username);
+    if (existingId) {
+      const existingSocket = io.sockets.sockets.get(existingId);
+      if (existingSocket) {
+        existingSocket.emit('force_logout', { reason: 'Logged in from another location.' });
+        existingSocket.disconnect(true);
+      }
+      online.delete(existingId);
+    }
 
     // Build initial snapshot from saved data (style/equipment preserved from save)
     const save = db.loadSave(username) || {};
@@ -41,6 +53,7 @@ function attachRooms(io) {
       equipment: save.equipment || {},
     };
     online.set(socket.id, snapshot);
+    onlineByUser.set(username, socket.id);
 
     // Send this player the current world state (everyone else online)
     const others = [...online.values()].filter(p => p.id !== socket.id);
@@ -76,6 +89,10 @@ function attachRooms(io) {
 
     socket.on('disconnect', () => {
       online.delete(socket.id);
+      // Only remove from onlineByUser if this socket is still the current session
+      if (onlineByUser.get(username) === socket.id) {
+        onlineByUser.delete(username);
+      }
       io.emit('player_left', { id: socket.id });
     });
   });

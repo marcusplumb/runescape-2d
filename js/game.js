@@ -126,7 +126,13 @@ export class Game {
     // Multiplayer network connection
     this.network       = token ? new Network(token) : null;
     this.remotePlayers = new Map(); // socketId → remote player view
-    if (this.network) this._setupNetworkHandlers();
+    if (this.network) {
+      this._setupNetworkHandlers();
+      this.network.onForceLogout(({ reason }) => {
+        this.notifications.add(`Logged out: ${reason}`, '#e74c3c');
+        setTimeout(() => this._logout(), 1500);
+      });
+    }
 
     // Auto-save every 30 s + on page unload
     if (token) {
@@ -135,6 +141,19 @@ export class Game {
       setInterval(() => this._saveToServer(), 30_000);
       window.addEventListener('beforeunload', () => this._saveToServer());
     }
+
+    // Idle auto-logout: 3 min idle → logout; warn at 2m30s
+    this._idleTimeout  = 3 * 60;  // seconds
+    this._idleWarnAt   = 30;       // warn when this many seconds remain
+    this._idleTimer    = this._idleTimeout;
+    this._idleWarned   = false;
+    const resetIdle = () => {
+      this._idleTimer  = this._idleTimeout;
+      this._idleWarned = false;
+    };
+    ['mousemove', 'mousedown', 'keydown', 'touchstart'].forEach(evt =>
+      window.addEventListener(evt, resetIdle, { passive: true })
+    );
 
     // Panel visibility
     this.showInventory = false;
@@ -338,6 +357,15 @@ export class Game {
     }
 
     if (click) {
+      // Logout button (always checked first)
+      if (this._saveToken) {
+        const lb = this._logoutButtonRect();
+        if (click.screenX >= lb.x && click.screenX <= lb.x + lb.w &&
+            click.screenY >= lb.y && click.screenY <= lb.y + lb.h) {
+          this._logout();
+          return;
+        }
+      }
       if (this.contextMenu) {
         this._handleContextMenuClick(click.screenX, click.screenY);
       } else if (this.adminEquipOpen) {
@@ -463,6 +491,18 @@ export class Game {
     // Broadcast position to other players (Network class throttles duplicate emissions)
     if (this.network && !this.inInterior) {
       this.network.sendMove(this.player.col, this.player.row, this.player.dir);
+    }
+
+    // Idle auto-logout timer (only when logged in)
+    if (this._saveToken) {
+      this._idleTimer -= dt;
+      if (!this._idleWarned && this._idleTimer <= this._idleWarnAt) {
+        this._idleWarned = true;
+        this.notifications.add('You will be logged out in 30 seconds due to inactivity.', '#e67e22');
+      }
+      if (this._idleTimer <= 0) {
+        this._logout();
+      }
     }
 
     if (result === 'cancel_action') {
@@ -817,6 +857,9 @@ export class Game {
 
     this.renderer.drawTileTooltip(tooltip, this.mouseScreen.x, this.mouseScreen.y);
 
+    // Logout button (bottom-right, only when logged in)
+    if (this._saveToken) this._drawLogoutButton(ctx);
+
     // Notifications
     this.notifications.drawMessages(ctx, this.canvas.height);
     this.notifications.drawXpDrops(ctx);
@@ -875,6 +918,11 @@ export class Game {
     const PW = 232, PH = 28 + 378 + 4;
     const px = W - PW - 4, py = H - PH - 4;
     if (sx >= px && sx <= px + PW && sy >= py && sy <= py + PH) return true;
+    // Logout button
+    if (this._saveToken) {
+      const lb = this._logoutButtonRect();
+      if (sx >= lb.x && sx <= lb.x + lb.w && sy >= lb.y && sy <= lb.y + lb.h) return true;
+    }
     return false;
   }
 
@@ -1946,6 +1994,42 @@ export class Game {
         house._rotations.set(rots.subarray(0, house._rotations.length));
       } catch { /* ignore corrupt data */ }
     }
+  }
+
+  _logoutButtonRect() {
+    const W = this.canvas.width, H = this.canvas.height;
+    const PW = 232, PH = 28 + 378 + 4;
+    const px = W - PW - 4;
+    // sit just below the side panel with a small gap
+    const by = H - PH - 4 - 26 - 4;
+    return { x: px, y: by, w: PW, h: 26 };
+  }
+
+  _drawLogoutButton(ctx) {
+    const r = this._logoutButtonRect();
+    const hover = this.mouseScreen.x >= r.x && this.mouseScreen.x <= r.x + r.w &&
+                  this.mouseScreen.y >= r.y && this.mouseScreen.y <= r.y + r.h;
+    ctx.fillStyle = hover ? '#4a1010' : '#2a0808';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    // bevel border
+    ctx.strokeStyle = hover ? '#c05050' : '#7a2020';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+    ctx.fillStyle = '#e07070';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Log Out', r.x + r.w / 2, r.y + r.h / 2);
+    ctx.textAlign = 'left';
+  }
+
+  _logout() {
+    this._saveToServer();
+    if (this.network) this.network.disconnect();
+    localStorage.removeItem('rw_token');
+    localStorage.removeItem('rw_username');
+    // Small delay so the save beacon can fire before reload
+    setTimeout(() => location.reload(), 300);
   }
 
   _saveToServer() {
