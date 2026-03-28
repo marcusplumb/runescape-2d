@@ -27,8 +27,9 @@ export class InteriorMap {
     this.rows       = rows;
     this._tiles     = tiles;
     this._rotations = new Uint8Array(cols * rows); // 0-3, furniture rotation
-    this.entryCol   = entryCol;
-    this.entryRow   = entryRow;
+    this.entryCol    = entryCol;
+    this.entryRow    = entryRow;
+    this.changedTiles = [];
   }
 
   getTile(c, r) {
@@ -45,6 +46,7 @@ export class InteriorMap {
     const idx = r * this.cols + c;
     this._tiles[idx]     = tile;
     this._rotations[idx] = rotation & 3;
+    this.changedTiles.push(c | (r << 16));
   }
 
   getRotation(c, r) {

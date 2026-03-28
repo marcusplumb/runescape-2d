@@ -34,6 +34,7 @@ export class World {
     this.cols = WORLD_COLS;
     this.rows = WORLD_ROWS;
     this.dirty = true;
+    this.changedTiles = []; // packed (col | row<<16) entries, drained by renderer
     this.tiles = this.generate();
   }
 
@@ -513,6 +514,7 @@ export class World {
     if (col < 0 || col >= this.cols || row < 0 || row >= this.rows) return;
     this.tiles[row][col] = tile;
     this.dirty = true;
+    this.changedTiles.push(col | (row << 16));
   }
 
   isSolid(col, row) {

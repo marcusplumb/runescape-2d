@@ -24,6 +24,15 @@ import {
 import { EQUIP_ID_TO_ITEM } from './items.js';
 import { GEAR_BY_ID } from './gear.js';
 
+// Tiles that animate each frame (use this.time) — excluded from the chunk cache
+const ANIMATED_TILES = new Set([
+  TILES.WATER, TILES.SWAMP_WATER, TILES.LAVA,
+  TILES.FISH_SPOT, TILES.FISH_SPOT_SALMON, TILES.FISH_SPOT_LOBSTER,
+  TILES.FIRE, TILES.PORTAL,
+]);
+const CHUNK_TILES = 16;                        // tiles per chunk side
+const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -32,6 +41,13 @@ export class Renderer {
 
     this.minimapCanvas = null;
     this.minimapDirty = true;
+
+    // Tile chunk cache — per world-object so world and interiors stay separate
+    this._chunkCaches = new WeakMap(); // world → Map<"cx,cy", OffscreenCanvas>
+    this._dirtyChunks = new WeakMap(); // world → Set<"cx,cy">
+
+    // Tree sprite cache — keyed by seed+biome, built once per unique tree variant
+    this._treeCache = new Map(); // key → OffscreenCanvas
 
     // Animated time for tile effects
     this.time = 0;
@@ -51,25 +67,93 @@ export class Renderer {
      ═══════════════════════════════════════════════════════ */
   drawWorld(world, camX, camY) {
     const ctx = this.ctx;
+
+    // Ensure per-world cache maps exist
+    if (!this._chunkCaches.has(world)) this._chunkCaches.set(world, new Map());
+    if (!this._dirtyChunks.has(world)) this._dirtyChunks.set(world, new Set());
+    const cache = this._chunkCaches.get(world);
+    const dirty = this._dirtyChunks.get(world);
+
+    // Drain tile-change notifications → mark the affected chunk dirty
+    if (world.changedTiles.length) {
+      for (const packed of world.changedTiles) {
+        const col = packed & 0xFFFF;
+        const row = packed >>> 16;
+        dirty.add(`${col / CHUNK_TILES | 0},${row / CHUNK_TILES | 0}`);
+      }
+      world.changedTiles.length = 0;
+      this.minimapDirty = true;
+    }
+
     const startCol = Math.floor(camX / TILE_SIZE);
     const startRow = Math.floor(camY / TILE_SIZE);
-    const endCol = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
-    const endRow = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
+    const endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
+    const endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
 
+    const cxMin = startCol / CHUNK_TILES | 0;
+    const cyMin = startRow / CHUNK_TILES | 0;
+    const cxMax = endCol   / CHUNK_TILES | 0;
+    const cyMax = endRow   / CHUNK_TILES | 0;
+
+    // Blit static chunks — build/rebuild only when missing or dirty
+    for (let cy = cyMin; cy <= cyMax; cy++) {
+      for (let cx = cxMin; cx <= cxMax; cx++) {
+        const key = `${cx},${cy}`;
+        if (!cache.has(key) || dirty.has(key)) {
+          cache.set(key, this._renderChunk(cx, cy, world));
+          dirty.delete(key);
+        }
+        ctx.drawImage(cache.get(key), cx * CHUNK_PX, cy * CHUNK_PX);
+      }
+    }
+
+    // Animated tiles drawn on top each frame (they use this.time)
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
         const tile = world.getTile(c, r);
-        const px = c * TILE_SIZE;
-        const py = r * TILE_SIZE;
-
-        ctx.fillStyle = TILE_COLORS[tile] || '#000';
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-
-        if (TILE_HAS_DETAIL.has(tile)) {
+        if (ANIMATED_TILES.has(tile)) {
+          const px = c * TILE_SIZE, py = r * TILE_SIZE;
+          ctx.fillStyle = TILE_COLORS[tile] || '#000';
+          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
           this._drawTileDetail(ctx, tile, px, py, c, r, world);
         }
       }
     }
+
+    // Evict chunks far from the viewport to bound memory (~90 chunks max kept)
+    const BORDER = 2;
+    for (const key of cache.keys()) {
+      const comma = key.indexOf(',');
+      const kcx = key.slice(0, comma) | 0;
+      const kcy = key.slice(comma + 1) | 0;
+      if (kcx < cxMin - BORDER || kcx > cxMax + BORDER ||
+          kcy < cyMin - BORDER || kcy > cyMax + BORDER) {
+        cache.delete(key);
+      }
+    }
+  }
+
+  /** Pre-render a 16×16-tile chunk to an OffscreenCanvas (static tiles only). */
+  _renderChunk(cx, cy, world) {
+    const oc  = new OffscreenCanvas(CHUNK_PX, CHUNK_PX);
+    const ctx = oc.getContext('2d');
+    const c0  = cx * CHUNK_TILES;
+    const r0  = cy * CHUNK_TILES;
+    for (let dr = 0; dr < CHUNK_TILES; dr++) {
+      for (let dc = 0; dc < CHUNK_TILES; dc++) {
+        const col  = c0 + dc;
+        const row  = r0 + dr;
+        const tile = world.getTile(col, row);
+        const px   = dc * TILE_SIZE;
+        const py   = dr * TILE_SIZE;
+        ctx.fillStyle = TILE_COLORS[tile] || '#000';
+        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        if (TILE_HAS_DETAIL.has(tile) && !ANIMATED_TILES.has(tile)) {
+          this._drawTileDetail(ctx, tile, px, py, col, row, world);
+        }
+      }
+    }
+    return oc;
   }
 
   // Shared ashlar-course painter used by both WALL render paths.
@@ -1454,13 +1538,31 @@ export class Renderer {
                  s3:(c*13+r*11)%23, s4:(c*17+r*5)%29 }
      ═══════════════════════════════════════════════════════ */
   drawTreeSprite(ctx, px, py, seed, biome) {
-    switch (biome) {
-      case BIOMES.TUNDRA:   this._drawPineTree(ctx, px, py, seed);  break;
-      case BIOMES.SWAMP:    this._drawSwampTree(ctx, px, py, seed); break;
-      case BIOMES.VOLCANIC:
-      case BIOMES.DANGER:   this._drawDeadTree(ctx, px, py, seed);  break;
-      default:              this._drawLeafyTree(ctx, px, py, seed); break;
+    const { s1, s2, s3, s4 } = seed;
+    const key = `${biome}_${s1}_${s2}_${s3}_${s4}`;
+
+    if (!this._treeCache.has(key)) {
+      // Canvas large enough for any tree variant: 12px side padding, 26px top, 6px bottom
+      const PAD_X = 12, PAD_Y = 26, PAD_B = 6;
+      const W = TILE_SIZE + PAD_X * 2;      // 56 px wide
+      const H = TILE_SIZE + PAD_Y + PAD_B;  // 64 px tall
+      const oc   = new OffscreenCanvas(W, H);
+      const octx = oc.getContext('2d');
+      // Draw as if tile origin is at (PAD_X, PAD_Y) in the offscreen canvas
+      switch (biome) {
+        case BIOMES.TUNDRA:   this._drawPineTree(octx, PAD_X, PAD_Y, seed);  break;
+        case BIOMES.SWAMP:    this._drawSwampTree(octx, PAD_X, PAD_Y, seed); break;
+        case BIOMES.VOLCANIC:
+        case BIOMES.DANGER:   this._drawDeadTree(octx, PAD_X, PAD_Y, seed);  break;
+        default:              this._drawLeafyTree(octx, PAD_X, PAD_Y, seed); break;
+      }
+      // Evict oldest entries if the cache grows too large
+      if (this._treeCache.size >= 512) this._treeCache.clear();
+      this._treeCache.set(key, { oc, PAD_X, PAD_Y });
     }
+
+    const { oc, PAD_X, PAD_Y } = this._treeCache.get(key);
+    ctx.drawImage(oc, px - PAD_X, py - PAD_Y);
   }
 
   /** Default broad-leaf tree (plains / forest / desert edge) */
