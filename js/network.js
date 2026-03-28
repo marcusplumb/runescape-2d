@@ -50,6 +50,11 @@ export class Network {
     this.socket.emit('mob_hit', { mobId, damage });
   }
 
+  /** Send a chat message to all players. */
+  sendChat(message) {
+    this.socket.emit('chat', { message });
+  }
+
   on(event, cb) { this.socket.on(event, cb); }
   off(event, cb) { this.socket.off(event, cb); }
 

@@ -1564,13 +1564,18 @@ export class Renderer {
         case BIOMES.DANGER:   this._drawDeadTree(octx, PAD_X, PAD_Y, seed);  break;
         default:              this._drawLeafyTree(octx, PAD_X, PAD_Y, seed); break;
       }
-      // Evict oldest entries if the cache grows too large
-      if (this._treeCache.size >= 512) this._treeCache.clear();
+      // LRU eviction: drop oldest entry rather than nuking the whole cache
+      if (this._treeCache.size >= 2048) {
+        this._treeCache.delete(this._treeCache.keys().next().value);
+      }
       this._treeCache.set(key, { oc, PAD_X, PAD_Y });
     }
 
-    const { oc, PAD_X, PAD_Y } = this._treeCache.get(key);
-    ctx.drawImage(oc, px - PAD_X, py - PAD_Y);
+    // Re-insert on hit so recently-used entries survive LRU eviction
+    const entry = this._treeCache.get(key);
+    this._treeCache.delete(key);
+    this._treeCache.set(key, entry);
+    ctx.drawImage(entry.oc, px - entry.PAD_X, py - entry.PAD_Y);
   }
 
   /** Default broad-leaf tree (plains / forest / desert edge) */

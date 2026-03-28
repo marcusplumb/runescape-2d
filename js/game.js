@@ -200,6 +200,12 @@ export class Game {
     this.equipPanelOpen  = false;   // worn-items panel
     this.contextMenu     = null;    // { x, y, invSlot, options:[{label,cb}] }
 
+    // Chat system
+    this.chatMessages    = [];       // { name, text, time } — most-recent last
+    this.chatInputActive = false;
+    this._chatInput      = null;     // DOM <input> element, created on first open
+    this._chatCooldown   = 0;        // seconds until next message allowed
+
     // Mouse screen pos for tooltip + drag
     this.mouseScreen = { x: 0, y: 0 };
     this.dragSlot    = -1;
@@ -311,6 +317,23 @@ export class Game {
       return; // freeze game during transition
     } else if (this.fadeAlpha > 0) {
       this.fadeAlpha = Math.max(0, this.fadeAlpha - dt * 3);
+    }
+
+    // Chat input open/close
+    if (this.input.wasJustPressed('Enter')) {
+      if (this.chatInputActive) {
+        this._submitChat();
+      } else {
+        this._openChat();
+      }
+    }
+    if (this.chatInputActive) {
+      // While chat is open: Esc cancels, movement and panel keys are blocked
+      if (this.input.wasJustPressed('Escape')) {
+        this._closeChat();
+      }
+      this.input.endFrame(); // consume all remaining keys
+      return;
     }
 
     // Panel toggles
@@ -571,6 +594,18 @@ export class Game {
       }
     }
 
+    // Interpolate networked mob positions (avoids 100ms snap jitter)
+    if (this.network) {
+      for (const mob of this.mobManager.mobs) {
+        if (mob._lerpT !== undefined && mob._lerpT < 0.15) {
+          mob._lerpT += dt;
+          const p = Math.min(mob._lerpT / 0.15, 1);
+          mob.x = mob._fromX + (mob._toX - mob._fromX) * p;
+          mob.y = mob._fromY + (mob._toY - mob._fromY) * p;
+        }
+      }
+    }
+
     // Interior transition triggers
     if (this.transitionCooldown <= 0) {
       const tile = this.activeMap.getTile(this.player.col, this.player.row);
@@ -675,6 +710,7 @@ export class Game {
     this.combat.update(dt);
     for (const s of this.remoteHitSplats) s.timer += dt;
     this.remoteHitSplats = this.remoteHitSplats.filter(s => s.timer < s.maxTimer);
+    if (this._chatCooldown > 0) this._chatCooldown -= dt;
 
     // Consume XP gain events from skills queue
     // Smelting action tick
@@ -838,7 +874,6 @@ export class Game {
       this.renderer.drawCircleMinimap(this.world, this.player);
     }
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
-    if (this.actions.active?.type !== 'fish') this.renderer.drawActionBar(this.actions);
     const hoverSlot = this.dragSlot !== -1
       ? this._getInventorySlotAt(this.mouseScreen.x, this.mouseScreen.y)
       : -1;
@@ -934,6 +969,9 @@ export class Game {
 
     // Logout button (bottom-right, only when logged in)
     if (this._saveToken) this._drawLogoutButton(ctx);
+
+    // Chat box (bottom-left)
+    this._drawChat(ctx);
 
     // Notifications
     this.notifications.drawMessages(ctx, this.canvas.height);
@@ -2154,6 +2192,131 @@ export class Game {
       .catch(err => console.error('[Save] network error:', err));
   }
 
+  // ── Chat ─────────────────────────────────────────────────────────────────
+
+  _openChat() {
+    if (!this.network) return; // chat only available in multiplayer
+    this.chatInputActive = true;
+    if (!this._chatInput) {
+      const input = document.createElement('input');
+      input.type        = 'text';
+      input.maxLength   = 120;
+      input.placeholder = 'Press Enter to send, Esc to cancel';
+      input.style.cssText = [
+        'position:fixed',
+        'bottom:82px',
+        'left:12px',
+        'width:320px',
+        'background:rgba(20,14,8,0.88)',
+        'color:#f0e8d0',
+        'border:1px solid #8b6914',
+        'border-radius:3px',
+        'padding:4px 8px',
+        'font:13px monospace',
+        'outline:none',
+        'z-index:9999',
+      ].join(';');
+      // Enter submits, Esc cancels (handled via DOM in case canvas doesn't have focus)
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')  { e.preventDefault(); this._submitChat(); }
+        if (e.key === 'Escape') { e.preventDefault(); this._closeChat(); }
+        e.stopPropagation(); // prevent game key handlers from firing
+      });
+      document.body.appendChild(input);
+      this._chatInput = input;
+    }
+    this._chatInput.style.display = 'block';
+    this._chatInput.value = '';
+    this._chatInput.focus();
+  }
+
+  _closeChat() {
+    this.chatInputActive = false;
+    if (this._chatInput) {
+      this._chatInput.style.display = 'none';
+      this._chatInput.blur();
+    }
+  }
+
+  _submitChat() {
+    if (!this._chatInput || !this.network) { this._closeChat(); return; }
+    const text = this._chatInput.value.trim();
+    if (text && this._chatCooldown <= 0) {
+      this.network.sendChat(text);
+      this._chatCooldown = 1.0; // 1-second client-side cooldown
+    }
+    this._closeChat();
+  }
+
+  _drawChat(ctx) {
+    const PAD    = 12;
+    const LINE_H = 18;
+    const MAX_VISIBLE = 8;
+    const BOX_W  = 320;
+    const now    = Date.now();
+    const FADE_START = 10_000; // messages start fading after 10 s
+    const FADE_END   = 15_000; // fully gone after 15 s
+
+    // Filter to messages visible (not yet faded out), most-recent last
+    const visible = this.chatMessages.filter(m => now - m.time < FADE_END);
+    const slice   = visible.slice(-MAX_VISIBLE);
+
+    if (slice.length === 0 && !this.chatInputActive) return;
+
+    const rows     = slice.length;
+    const BOX_H    = rows * LINE_H + (rows > 0 ? 8 : 0);
+    const bottomY  = this.canvas.height - (this.chatInputActive ? 96 : 72);
+    const topY     = bottomY - BOX_H;
+
+    // Background for message area
+    if (rows > 0) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(10,7,4,0.55)';
+      ctx.strokeStyle = 'rgba(139,105,20,0.4)';
+      ctx.lineWidth = 1;
+      const r = 3;
+      ctx.beginPath();
+      ctx.roundRect(PAD - 4, topY - 2, BOX_W + 8, BOX_H + 4, r);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.font = '13px monospace';
+    ctx.textBaseline = 'top';
+    for (let i = 0; i < slice.length; i++) {
+      const msg  = slice[i];
+      const age  = now - msg.time;
+      const fade = age < FADE_START ? 1 : 1 - (age - FADE_START) / (FADE_END - FADE_START);
+      const alpha = Math.max(0, Math.min(1, fade));
+      const y = topY + i * LINE_H + 4;
+      // Name
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#f1c40f';
+      ctx.fillText(msg.name + ': ', PAD, y);
+      const nameW = ctx.measureText(msg.name + ': ').width;
+      ctx.fillStyle = '#f0e8d0';
+      // Clip message text to box width
+      const maxTextW = BOX_W - nameW - 4;
+      let text = msg.text;
+      while (ctx.measureText(text).width > maxTextW && text.length > 1) text = text.slice(0, -1);
+      ctx.fillText(text, PAD + nameW, y);
+    }
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // "Press Enter to chat" hint when no input active and there's multiplayer
+    if (!this.chatInputActive && this.network) {
+      ctx.save();
+      ctx.font = '11px monospace';
+      ctx.fillStyle = 'rgba(200,180,120,0.5)';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('Press Enter to chat', PAD, this.canvas.height - 56);
+      ctx.restore();
+    }
+  }
+
   // ── Multiplayer ──────────────────────────────────────────────────────────
 
   _setupNetworkHandlers() {
@@ -2232,12 +2395,18 @@ export class Game {
         let mob = this._mobById.get(s.id);
         if (!mob) {
           mob = new Mob(s.type, s.x, s.y);
-          mob.id = s.id;
+          mob.id     = s.id;
+          mob._fromX = s.x;  mob._fromY = s.y;
+          mob._toX   = s.x;  mob._toY   = s.y;
+          mob._lerpT = 0.15; // start as arrived — no initial snap
           this._mobById.set(s.id, mob);
           this.mobManager.mobs.push(mob);
+        } else {
+          // Set up lerp from current visual position to new server position
+          mob._fromX = mob.x;  mob._fromY = mob.y;
+          mob._toX   = s.x;    mob._toY   = s.y;
+          mob._lerpT = 0;
         }
-        mob.x          = s.x;
-        mob.y          = s.y;
         mob.hp         = s.hp;
         mob.maxHp      = s.maxHp;
         mob.dead       = s.dead;
@@ -2265,6 +2434,11 @@ export class Game {
       const mob = this._mobById.get(id);
       if (!mob || mob.dead) return;
       this.remoteHitSplats.push({ wx, wy, value: damage, timer: 0, maxTimer: 1.5 });
+    });
+
+    net.on('chat_message', ({ name, message }) => {
+      this.chatMessages.push({ name, text: message, time: Date.now() });
+      if (this.chatMessages.length > 50) this.chatMessages.shift();
     });
   }
 

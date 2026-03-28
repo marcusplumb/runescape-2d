@@ -153,6 +153,20 @@ function attachRooms(io) {
       }
     });
 
+    // Chat rate-limit: 1 message per second
+    let lastChatTime = 0;
+    socket.on('chat', ({ message }) => {
+      if (typeof message !== 'string') return;
+      const text = message.trim().slice(0, 120);
+      if (!text) return;
+      const now = Date.now();
+      if (now - lastChatTime < 1000) return; // rate limit
+      lastChatTime = now;
+      const p = online.get(socket.id);
+      const name = p ? (p.name || username) : username;
+      io.emit('chat_message', { name, message: text });
+    });
+
     socket.on('disconnect', () => {
       online.delete(socket.id);
       // Only remove from onlineByUser if this socket is still the current session
