@@ -1,0 +1,18 @@
+{
+  "name": "runescape-2d",
+  "version": "1.0.0",
+  "description": "RuneWorld 2D — multiplayer browser RPG",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^9.0.2",
+    "socket.io": "^4.7.4"
+  }
+}

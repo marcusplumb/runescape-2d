@@ -1,0 +1,633 @@
+import { TILE_SIZE, WORLD_COLS, WORLD_ROWS, TILES, AGGRO_RANGE } from './constants.js';
+import { BIOMES, getBiome } from './biomes.js';
+import { ITEMS } from './items.js';
+
+export const MOB_DEFS = {
+  // ── Passive mobs (spawn in safe areas) ──────────────────
+  chicken: {
+    name: 'Chicken', hp: 3, speed: 52, w: 14, h: 16,
+    aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 1.5, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    biomes: [BIOMES.PLAINS, BIOMES.FOREST],
+  },
+  cow: {
+    name: 'Cow', hp: 10, speed: 34, w: 26, h: 22,
+    aggressive: false, attackLevel: 1, strengthLevel: 2, defenceLevel: 1,
+    xpHp: 2, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    biomes: [BIOMES.PLAINS],
+  },
+  sheep: {
+    name: 'Sheep', hp: 8, speed: 44, w: 20, h: 18,
+    aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 1.5, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    biomes: [BIOMES.PLAINS, BIOMES.TUNDRA],
+  },
+
+  // ── Danger zone mobs (aggressive, drop more) ────────────
+  goblin: {
+    name: 'Goblin', hp: 12, speed: 68, w: 16, h: 20,
+    aggressive: true, attackLevel: 8, strengthLevel: 6, defenceLevel: 4,
+    xpHp: 5, drops: [
+      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,  chance: 0.5, qty: 3 },
+    ],
+    biomes: [BIOMES.DANGER],
+  },
+  orc: {
+    name: 'Orc', hp: 30, speed: 55, w: 22, h: 28,
+    aggressive: true, attackLevel: 16, strengthLevel: 18, defenceLevel: 12,
+    xpHp: 10, drops: [
+      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,  chance: 0.7, qty: 8 },
+      { item: ITEMS.ORE_IRON,   chance: 0.3, qty: 1 },
+    ],
+    biomes: [BIOMES.DANGER],
+  },
+  troll: {
+    name: 'Troll', hp: 60, speed: 38, w: 28, h: 32,
+    aggressive: true, attackLevel: 24, strengthLevel: 28, defenceLevel: 20,
+    xpHp: 15, drops: [
+      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,  chance: 0.9, qty: 20 },
+      { item: ITEMS.ORE_COAL,   chance: 0.4, qty: 1 },
+    ],
+    biomes: [BIOMES.DANGER],
+  },
+  demon: {
+    name: 'Demon', hp: 120, speed: 62, w: 30, h: 34,
+    aggressive: true, attackLevel: 40, strengthLevel: 42, defenceLevel: 35,
+    xpHp: 25, drops: [
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,   chance: 1.0, qty: 50 },
+      { item: ITEMS.ORE_MITHRIL, chance: 0.3, qty: 1 },
+    ],
+    biomes: [BIOMES.DANGER, BIOMES.VOLCANIC],
+  },
+};
+
+export class Mob {
+  constructor(type, x, y) {
+    const def = MOB_DEFS[type];
+    this.type  = type;
+    this.name  = def.name;
+    this.x     = x;
+    this.y     = y;
+    this.w     = def.w;
+    this.h     = def.h;
+    this.hp    = def.hp;
+    this.maxHp = def.hp;
+    this.speed = def.speed;
+    this.aggressive = def.aggressive;
+    this.attackLevel  = def.attackLevel;
+    this.strengthLevel = def.strengthLevel;
+    this.defenceLevel  = def.defenceLevel;
+    this.xpHp  = def.xpHp;  // XP per HP of damage dealt
+    this.drops = def.drops;
+
+    // Spawn anchor — mob returns here when not chasing
+    this.spawnX = x;
+    this.spawnY = y;
+
+    this.targetX     = null;
+    this.targetY     = null;
+    this.wanderTimer = Math.random() * 4;
+    this.idleTime    = 1.5 + Math.random() * 2;
+
+    this.animTimer  = 0;
+    this.animFrame  = 0;
+    this.moving     = false;
+    this.facingLeft = false;
+
+    // Combat state
+    this.inCombat       = false;
+    this.combatTarget   = null;  // reference to player
+    this.attackCooldown = 0;     // seconds until next attack
+
+    // Death / respawn
+    this.dead         = false;
+    this.respawnTimer = 0;
+  }
+
+  update(dt, world, player) {
+    if (this.dead) {
+      this.respawnTimer -= dt;
+      return;
+    }
+
+    this.attackCooldown = Math.max(0, this.attackCooldown - dt);
+
+    // ── Aggro check ───────────────────────────────────────
+    if (this.aggressive && player) {
+      const pdx = player.cx - this.cx;
+      const pdy = player.cy - this.cy;
+      const tileDist = Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE;
+      if (tileDist <= AGGRO_RANGE) {
+        this.inCombat = true;
+        this.combatTarget = player;
+      } else if (tileDist > AGGRO_RANGE * 2) {
+        // Flee range — break off
+        this.inCombat = false;
+        this.combatTarget = null;
+      }
+    }
+
+    // ── Chase player if in combat ─────────────────────────
+    if (this.inCombat && this.combatTarget) {
+      if (typeof this.combatSlotX === 'number' && typeof this.combatSlotY === 'number') {
+        this.targetX = this.combatSlotX;
+        this.targetY = this.combatSlotY;
+      } else {
+        this.targetX = this.combatTarget.cx - this.w / 2;
+        this.targetY = this.combatTarget.cy - this.h / 2;
+      }
+    } else {
+      // ── Normal wander logic ───────────────────────────
+      this.wanderTimer -= dt;
+      if (this.wanderTimer <= 0) {
+        if (this.targetX === null) {
+          const spread = 5 * TILE_SIZE;
+          const tx = this.x + (Math.random() * 2 - 1) * spread;
+          const ty = this.y + (Math.random() * 2 - 1) * spread;
+          this.targetX = Math.max(0, Math.min(tx, WORLD_COLS * TILE_SIZE - this.w));
+          this.targetY = Math.max(0, Math.min(ty, WORLD_ROWS * TILE_SIZE - this.h));
+          this.wanderTimer = 5 + Math.random() * 3;
+        } else {
+          this.targetX = null;
+          this.targetY = null;
+          this.wanderTimer = this.idleTime + Math.random() * 2;
+        }
+      }
+    }
+
+    // ── Move toward target ────────────────────────────────
+    this.moving = false;
+    if (this.targetX !== null) {
+      const dx = this.targetX - this.x;
+      const dy = this.targetY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+
+      if (dist > 2) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        if (dx < 0) this.facingLeft = true;
+        else if (dx > 0) this.facingLeft = false;
+        this.moving = true;
+
+        const newX = this.x + nx * this.speed * dt;
+        if (!world.isBlocked(newX, this.y, this.w, this.h)) {
+          this.x = newX;
+        } else {
+          if (!this.inCombat) this.targetX = null;
+        }
+
+        const newY = this.y + ny * this.speed * dt;
+        if (!world.isBlocked(this.x, newY, this.w, this.h)) {
+          this.y = newY;
+        } else {
+          if (!this.inCombat) this.targetY = null;
+        }
+
+        this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
+        this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
+      } else {
+        if (!this.inCombat) {
+          this.targetX = null;
+          this.targetY = null;
+          this.wanderTimer = this.idleTime;
+        }
+      }
+    }
+
+    // ── Walk animation ────────────────────────────────────
+    if (this.moving) {
+      this.animTimer += dt;
+      if (this.animTimer > 0.18) {
+        this.animTimer = 0;
+        this.animFrame = (this.animFrame + 1) % 4;
+      }
+    } else {
+      this.animFrame = 0;
+      this.animTimer = 0;
+    }
+  }
+
+  takeDamage(amount) {
+    this.hp = Math.max(0, this.hp - amount);
+    return this.hp <= 0;
+  }
+
+  draw(ctx) {
+    if (this.dead) return;
+
+    const x = Math.round(this.x);
+    const y = Math.round(this.y);
+    const { w, h, moving, animFrame, facingLeft, name, hp, maxHp, type } = this;
+    const bob = moving ? Math.abs(Math.sin(animFrame * Math.PI / 2)) * 1 : 0;
+    const legBob = moving ? Math.abs(Math.sin(animFrame * Math.PI / 2)) * 2 : 0;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h, w / 2 - 1, 3, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (type === 'chicken') {
+      _drawChicken(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'cow') {
+      _drawCow(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'sheep') {
+      _drawSheep(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'goblin') {
+      _drawGoblin(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'orc') {
+      _drawOrc(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'troll') {
+      _drawTroll(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'demon') {
+      _drawDemon(ctx, x, y, w, h, bob, legBob, facingLeft);
+    }
+
+    // Name tag
+    const nameColor = this.aggressive ? '#e74c3c' : '#fff';
+    ctx.fillStyle = nameColor;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.font = 'bold 9px monospace';
+    ctx.textAlign = 'center';
+    ctx.strokeText(name, x + w / 2, y - 4);
+    ctx.fillText(name, x + w / 2, y - 4);
+
+    // HP bar — always visible for combat mobs, only when damaged for passive
+    if (hp < maxHp || this.inCombat) {
+      const ratio = hp / maxHp;
+      const bw = Math.max(w, 30), bh = 6;
+      const bx = x + (w - bw) / 2, by = y - 14;
+      // Background track
+      ctx.fillStyle = '#1a0000';
+      ctx.fillRect(bx, by, bw, bh);
+      // Fill colour matches player bar thresholds
+      ctx.fillStyle = ratio > 0.5 ? '#27ae60' : ratio > 0.25 ? '#f39c12' : '#c0392b';
+      ctx.fillRect(bx, by, bw * ratio, bh);
+      // Border
+      ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, by, bw, bh);
+      // HP text
+      ctx.fillStyle = '#fff';
+      ctx.font = '7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(`${hp}/${maxHp}`, bx + bw / 2, by - 1);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  get cx() { return this.x + this.w / 2; }
+  get cy() { return this.y + this.h / 2; }
+}
+
+/* ── Per-type draw helpers ──────────────────────────── */
+
+function _drawChicken(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  ctx.fillStyle = '#f39c12';
+  ctx.fillRect(x + 3 - legBob, y + h - 4, 2, 4);
+  ctx.fillRect(x + w - 5 + legBob, y + h - 4, 2, 4);
+  ctx.fillStyle = '#f0f0e8';
+  ctx.fillRect(x + 1, y + 5 - bob, w - 2, h - 9);
+  ctx.fillStyle = '#d8d8d0';
+  ctx.fillRect(x + 2, y + 7 - bob, w - 4, Math.floor((h - 11) / 2));
+  const tailX = facingLeft ? x + w - 4 : x;
+  ctx.fillStyle = '#e8e8e0';
+  ctx.fillRect(tailX, y + 6 - bob, 4, 5);
+  const headX = facingLeft ? x : x + w - 7;
+  ctx.fillStyle = '#f0f0e8';
+  ctx.fillRect(headX, y + 1 - bob, 7, 7);
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(headX + 1, y - 2 - bob, 4, 4);
+  ctx.fillStyle = '#e74c3c';
+  ctx.fillRect(headX + 2, y + 6 - bob, 2, 3);
+  ctx.fillStyle = '#e67e22';
+  const beakX = facingLeft ? headX - 2 : headX + 7;
+  ctx.fillRect(beakX, y + 3 - bob, 2, 2);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(headX + (facingLeft ? 4 : 1), y + 3 - bob, 2, 2);
+}
+
+function _drawCow(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  ctx.fillStyle = '#7b5430';
+  ctx.fillRect(x + w - 8 + legBob, y + h - 7, 4, 7);
+  ctx.fillStyle = '#a07848';
+  ctx.fillRect(x + 2, y + 7 - bob, w - 6, h - 12);
+  ctx.fillStyle = '#2c2c2c';
+  ctx.fillRect(x + 4, y + 9 - bob, 6, 4);
+  ctx.fillRect(x + w - 13, y + 13 - bob, 4, 3);
+  ctx.fillStyle = '#f0c0b0';
+  ctx.fillRect(x + Math.floor(w / 2) - 4, y + h - 9 - bob, 9, 5);
+  ctx.fillStyle = '#7b5430';
+  ctx.fillRect(x + 4 - legBob, y + h - 7, 4, 7);
+  const headX = facingLeft ? x - 2 : x + w - 11;
+  ctx.fillStyle = '#a07848';
+  ctx.fillRect(headX, y + 3 - bob, 11, 9);
+  ctx.fillStyle = '#c49a70';
+  const noseOffset = facingLeft ? 0 : 1;
+  ctx.fillRect(headX + noseOffset, y + 8 - bob, 9, 5);
+  ctx.fillStyle = '#7a4a30';
+  ctx.fillRect(headX + noseOffset + 1, y + 9 - bob, 2, 2);
+  ctx.fillRect(headX + noseOffset + 5, y + 9 - bob, 2, 2);
+  ctx.fillStyle = '#e0d060';
+  const hornX = facingLeft ? headX + 8 : headX + 1;
+  ctx.fillRect(hornX, y - bob, 3, 4);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(headX + (facingLeft ? 7 : 2), y + 4 - bob, 2, 2);
+}
+
+function _drawSheep(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  ctx.fillStyle = '#777';
+  ctx.fillRect(x + 3 - legBob, y + h - 5, 3, 5);
+  ctx.fillRect(x + w - 6 + legBob, y + h - 5, 3, 5);
+  ctx.fillStyle = '#e4e4d8';
+  ctx.fillRect(x + 2, y + 7 - bob, w - 4, h - 12);
+  ctx.fillStyle = '#f0f0e4';
+  ctx.beginPath();
+  ctx.arc(x + 4, y + 8 - bob, 5, Math.PI, 0);
+  ctx.arc(x + Math.floor(w / 2), y + 6 - bob, 5, Math.PI, 0);
+  ctx.arc(x + w - 4, y + 8 - bob, 5, Math.PI, 0);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(x + 1, y + 12 - bob, 3, Math.PI / 2, -Math.PI / 2);
+  ctx.arc(x + w - 1, y + 12 - bob, 3, -Math.PI / 2, Math.PI / 2);
+  ctx.fill();
+  const headX = facingLeft ? x - 1 : x + w - 9;
+  ctx.fillStyle = '#888';
+  ctx.fillRect(headX, y + 4 - bob, 9, 8);
+  ctx.fillStyle = '#aaa';
+  const earX = facingLeft ? headX + 8 : headX - 1;
+  ctx.fillRect(earX, y + 4 - bob, 2, 4);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(headX + (facingLeft ? 5 : 2), y + 6 - bob, 2, 2);
+  ctx.fillStyle = '#b07070';
+  ctx.fillRect(headX + (facingLeft ? 1 : 2), y + 9 - bob, 4, 2);
+}
+
+function _drawGoblin(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Legs
+  ctx.fillStyle = '#5a4020';
+  ctx.fillRect(x + 3 - legBob, y + h - 6, 4, 6);
+  ctx.fillRect(x + w - 7 + legBob, y + h - 6, 4, 6);
+  // Body
+  ctx.fillStyle = '#6a9a20';
+  ctx.fillRect(x + 2, y + h * 0.4 - bob, w - 4, h * 0.45);
+  // Chest rag
+  ctx.fillStyle = '#5a7a18';
+  ctx.fillRect(x + 4, y + h * 0.42 - bob, w - 8, h * 0.2);
+  // Arms
+  ctx.fillStyle = '#6a9a20';
+  ctx.fillRect(x - 1, y + h * 0.42 - bob, 4, h * 0.35);
+  ctx.fillRect(x + w - 3, y + h * 0.42 - bob, 4, h * 0.35);
+  // Head (large, goblin-style)
+  const headX = facingLeft ? x - 1 : x + 1;
+  ctx.fillStyle = '#6a9a20';
+  ctx.fillRect(headX, y + 2 - bob, w - 2, h * 0.38);
+  // Ears
+  ctx.fillStyle = '#5a8018';
+  ctx.fillRect(facingLeft ? headX - 3 : headX + w - 2, y + 4 - bob, 3, 5);
+  ctx.fillRect(facingLeft ? headX + w - 2 : headX - 3, y + 4 - bob, 3, 5);
+  // Eyes (mean)
+  ctx.fillStyle = '#ff4444';
+  ctx.fillRect(headX + 2, y + 5 - bob, 3, 2);
+  ctx.fillRect(headX + w - 7, y + 5 - bob, 3, 2);
+  // Nose
+  ctx.fillStyle = '#4a7010';
+  ctx.fillRect(headX + Math.floor(w / 2) - 1, y + 8 - bob, 2, 2);
+}
+
+function _drawOrc(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Legs
+  ctx.fillStyle = '#2a3a28';
+  ctx.fillRect(x + 3 - legBob, y + h - 8, 6, 8);
+  ctx.fillRect(x + w - 9 + legBob, y + h - 8, 6, 8);
+  // Armoured body
+  ctx.fillStyle = '#5a8050';
+  ctx.fillRect(x + 1, y + h * 0.35 - bob, w - 2, h * 0.5);
+  // Armour plate
+  ctx.fillStyle = '#7a9a70';
+  ctx.fillRect(x + 3, y + h * 0.37 - bob, w - 6, h * 0.25);
+  // Belt
+  ctx.fillStyle = '#2a2a2a';
+  ctx.fillRect(x + 1, y + h * 0.6 - bob, w - 2, 3);
+  // Arms
+  ctx.fillStyle = '#5a8050';
+  ctx.fillRect(x - 2, y + h * 0.37 - bob, 5, h * 0.4);
+  ctx.fillRect(x + w - 3, y + h * 0.37 - bob, 5, h * 0.4);
+  // Head
+  ctx.fillStyle = '#5a8050';
+  ctx.fillRect(x + 2, y + 1 - bob, w - 4, h * 0.38);
+  // Tusks
+  ctx.fillStyle = '#e8e0a0';
+  ctx.fillRect(x + 4, y + h * 0.3 - bob, 3, 5);
+  ctx.fillRect(x + w - 7, y + h * 0.3 - bob, 3, 5);
+  // Eyes
+  ctx.fillStyle = '#ff6600';
+  ctx.fillRect(x + 5, y + 6 - bob, 3, 3);
+  ctx.fillRect(x + w - 8, y + 6 - bob, 3, 3);
+}
+
+function _drawTroll(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Wide legs
+  ctx.fillStyle = '#5a4a38';
+  ctx.fillRect(x + 2 - legBob, y + h - 10, 8, 10);
+  ctx.fillRect(x + w - 10 + legBob, y + h - 10, 8, 10);
+  // Big rocky body
+  ctx.fillStyle = '#6a5a48';
+  ctx.fillRect(x, y + h * 0.3 - bob, w, h * 0.55);
+  // Rock texture patches
+  ctx.fillStyle = '#5a4a38';
+  ctx.fillRect(x + 3, y + h * 0.35 - bob, 6, 4);
+  ctx.fillRect(x + w - 11, y + h * 0.45 - bob, 7, 4);
+  // Arms (huge)
+  ctx.fillStyle = '#6a5a48';
+  ctx.fillRect(x - 4, y + h * 0.3 - bob, 6, h * 0.5);
+  ctx.fillRect(x + w - 2, y + h * 0.3 - bob, 6, h * 0.5);
+  // Big head
+  ctx.fillStyle = '#6a5a48';
+  ctx.fillRect(x + 1, y - bob, w - 2, h * 0.38);
+  // Nose (big)
+  ctx.fillStyle = '#5a4a38';
+  ctx.fillRect(x + Math.floor(w / 2) - 3, y + h * 0.18 - bob, 6, 5);
+  // Eyes (tiny, mean)
+  ctx.fillStyle = '#cc2200';
+  ctx.fillRect(x + 5, y + 6 - bob, 3, 3);
+  ctx.fillRect(x + w - 8, y + 6 - bob, 3, 3);
+}
+
+function _drawDemon(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Dark legs
+  ctx.fillStyle = '#2a0a0a';
+  ctx.fillRect(x + 2 - legBob, y + h - 9, 7, 9);
+  ctx.fillRect(x + w - 9 + legBob, y + h - 9, 7, 9);
+  // Dark body with fire glow
+  ctx.fillStyle = '#3a0a0a';
+  ctx.fillRect(x + 1, y + h * 0.3 - bob, w - 2, h * 0.55);
+  // Glowing chest rune
+  ctx.fillStyle = '#ff2200';
+  ctx.fillRect(x + Math.floor(w / 2) - 3, y + h * 0.38 - bob, 6, 8);
+  ctx.fillStyle = '#ff6600';
+  ctx.fillRect(x + Math.floor(w / 2) - 1, y + h * 0.4 - bob, 2, 4);
+  // Wings
+  ctx.fillStyle = '#1a0505';
+  ctx.fillRect(x - 6, y + h * 0.25 - bob, 7, h * 0.45);
+  ctx.fillRect(x + w - 1, y + h * 0.25 - bob, 7, h * 0.45);
+  // Arms
+  ctx.fillStyle = '#3a0a0a';
+  ctx.fillRect(x - 2, y + h * 0.32 - bob, 5, h * 0.4);
+  ctx.fillRect(x + w - 3, y + h * 0.32 - bob, 5, h * 0.4);
+  // Head
+  ctx.fillStyle = '#3a0a0a';
+  ctx.fillRect(x + 2, y + 1 - bob, w - 4, h * 0.33);
+  // Horns
+  ctx.fillStyle = '#660000';
+  ctx.fillRect(x + 4, y - 6 - bob, 3, 8);
+  ctx.fillRect(x + w - 7, y - 6 - bob, 3, 8);
+  // Glowing eyes
+  ctx.fillStyle = '#ff2200';
+  ctx.fillRect(x + 5, y + 5 - bob, 4, 4);
+  ctx.fillRect(x + w - 9, y + 5 - bob, 4, 4);
+  ctx.fillStyle = '#ffaa00';
+  ctx.fillRect(x + 6, y + 6 - bob, 2, 2);
+  ctx.fillRect(x + w - 8, y + 6 - bob, 2, 2);
+}
+
+/* ── MobManager ─────────────────────────────────────── */
+
+export class MobManager {
+  constructor(world) {
+    this.mobs = [];
+    this.spawnTopUpTimer = 0;
+    this.desiredCounts = this._buildDesiredCounts(world);
+    this._spawnMissing(world, Infinity); // initial fill
+  }
+
+  _buildDesiredCounts(world) {
+    const area = world.cols * world.rows;
+
+    const byArea = (tilesPerMob, min, max = Infinity) =>
+      Math.max(min, Math.min(max, Math.round(area / tilesPerMob)));
+
+    return {
+      // Passive mobs
+      chicken: byArea(18000, 12, 90),
+      cow:     byArea(30000,  6, 50),
+      sheep:   byArea(22000,  8, 70),
+
+      // Aggressive mobs
+      goblin:  byArea(26000,  8, 60),
+      orc:     byArea(50000,  5, 30),
+      troll:   byArea(90000,  3, 18),
+      demon:   byArea(140000, 2, 10),
+    };
+  }
+
+  _currentCounts() {
+    const counts = {};
+    for (const mob of this.mobs) {
+      counts[mob.type] = (counts[mob.type] || 0) + 1;
+    }
+    return counts;
+  }
+
+  _trySpawnOne(world, type) {
+    const def = MOB_DEFS[type];
+    const { w, h } = def;
+
+    let attempts = 0;
+    const maxAttempts = 3000;
+
+    while (attempts < maxAttempts) {
+      attempts++;
+
+      const col = 5 + Math.floor(Math.random() * (world.cols - 10));
+      const row = 5 + Math.floor(Math.random() * (world.rows - 10));
+      const tile = world.getTile(col, row);
+      const biome = getBiome(col, row);
+
+      if (!def.biomes.includes(biome)) continue;
+
+      const walkable = (
+        tile === TILES.GRASS ||
+        tile === TILES.DARK_GRASS ||
+        tile === TILES.DIRT ||
+        tile === TILES.SNOW ||
+        tile === TILES.DEAD_GRASS
+      );
+      if (!walkable) continue;
+
+      const x = col * TILE_SIZE;
+      const y = row * TILE_SIZE;
+
+      if (!world.isBlocked(x, y, w, h)) {
+        this.mobs.push(new Mob(type, x, y));
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  _spawnMissing(world, maxToSpawn = 8) {
+    const counts = this._currentCounts();
+    let spawned = 0;
+
+    for (const [type, desired] of Object.entries(this.desiredCounts)) {
+      let missing = desired - (counts[type] || 0);
+
+      while (missing > 0 && spawned < maxToSpawn) {
+        const ok = this._trySpawnOne(world, type);
+        if (!ok) break;
+
+        missing--;
+        spawned++;
+      }
+
+      if (spawned >= maxToSpawn) break;
+    }
+  }
+
+  update(dt, world, player) {
+    for (const mob of this.mobs) {
+      if (mob.dead) {
+        mob.respawnTimer -= dt;
+        if (mob.respawnTimer <= 0) {
+          mob.hp = mob.maxHp;
+          mob.dead = false;
+          mob.x = mob.spawnX;
+          mob.y = mob.spawnY;
+          mob.inCombat = false;
+          mob.combatTarget = null;
+        }
+      } else {
+        mob.update(dt, world, player);
+      }
+    }
+
+    // In case initial spawning couldn't hit desired population,
+    // keep trying to top up gently over time.
+    this.spawnTopUpTimer -= dt;
+    if (this.spawnTopUpTimer <= 0) {
+      this.spawnTopUpTimer = 3;
+      this._spawnMissing(world, 4);
+    }
+  }
+
+  /** Returns the mob under the given world coordinates, or null. */
+  getMobAt(worldX, worldY) {
+    for (const mob of this.mobs) {
+      if (mob.dead) continue;
+      if (
+        worldX >= mob.x && worldX <= mob.x + mob.w &&
+        worldY >= mob.y && worldY <= mob.y + mob.h
+      ) {
+        return mob;
+      }
+    }
+    return null;
+  }
+}
