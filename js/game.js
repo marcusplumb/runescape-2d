@@ -2137,8 +2137,19 @@ export class Game {
       keepalive: true,
     })
       .then(r => {
-        if (!r.ok) r.text().then(t => console.warn('[Save] server error:', r.status, t));
-        else console.log('[Save] saved successfully');
+        if (r.status === 401) {
+          // Token expired or secret changed — clear it and force re-login
+          console.warn('[Save] token rejected (401) — session expired');
+          localStorage.removeItem('rw_token');
+          localStorage.removeItem('rw_username');
+          this._saveToken = null;
+          this.notifications.add('Session expired — please log in again.', '#e74c3c');
+          setTimeout(() => location.reload(), 3000);
+        } else if (!r.ok) {
+          r.text().then(t => console.warn('[Save] server error:', r.status, t));
+        } else {
+          console.log('[Save] saved successfully');
+        }
       })
       .catch(err => console.error('[Save] network error:', err));
   }
