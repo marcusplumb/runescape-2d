@@ -40,6 +40,16 @@ export class Network {
     this.socket.emit('tile_change', { col, row, tile });
   }
 
+  /** Emit action state change (idle, chop, mine, fish, cook, fight). */
+  sendAction(currentAction, actionTarget) {
+    this.socket.emit('action', { currentAction, actionTarget: actionTarget || null });
+  }
+
+  /** Notify the server that this player hit a mob (server updates HP for all clients). */
+  sendMobHit(mobId, damage) {
+    this.socket.emit('mob_hit', { mobId, damage });
+  }
+
   on(event, cb) { this.socket.on(event, cb); }
   off(event, cb) { this.socket.off(event, cb); }
 

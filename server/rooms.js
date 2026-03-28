@@ -1,6 +1,7 @@
 'use strict';
-const jwt = require('jsonwebtoken');
-const db  = require('./db');
+const jwt    = require('jsonwebtoken');
+const db     = require('./db');
+const mobSim = require('./mobSim');
 
 /**
  * Manages the set of connected players and broadcasts real-time position/
@@ -27,6 +28,23 @@ function attachRooms(io) {
   const onlineByUser   = new Map(); // username  → socketId
   const worldOverrides = new Map(); // "col,row" → tile — shared world state for late joiners
 
+  // ── Start mob simulation (async; connections accepted immediately) ──
+  mobSim.init().then(() => {
+    // Tick mob AI + broadcast positions every 100 ms
+    setInterval(() => {
+      mobSim.update(0.1);
+      if (online.size > 0) {
+        io.emit('mob_state', mobSim.getSnapshot());
+      }
+    }, 100);
+
+    // Send current mob state to any players already connected during init
+    for (const [sid] of online) {
+      const sock = io.sockets.sockets.get(sid);
+      if (sock) sock.emit('mob_state', mobSim.getSnapshot());
+    }
+  });
+
   io.on('connection', (socket) => {
     const username = socket.username;
 
@@ -44,15 +62,17 @@ function attachRooms(io) {
     // Build initial snapshot from saved data (style/equipment preserved from save)
     const save = db.loadSave(username) || {};
     const snapshot = {
-      id:          socket.id,
+      id:            socket.id,
       username,
-      name:        username,
-      col:         save.col       ?? 512,
-      row:         save.row       ?? 389,
-      dir:         0,
-      style:       save.style     || {},
-      equipment:   save.equipment || {},
-      combatLevel: 1,
+      name:          username,
+      col:           save.col       ?? 512,
+      row:           save.row       ?? 389,
+      dir:           0,
+      style:         save.style     || {},
+      equipment:     save.equipment || {},
+      combatLevel:   1,
+      currentAction: 'idle',
+      actionTarget:  null,
     };
     online.set(socket.id, snapshot);
     onlineByUser.set(username, socket.id);
@@ -69,6 +89,11 @@ function attachRooms(io) {
         overrides.push({ col: +key.slice(0, comma), row: +key.slice(comma + 1), tile });
       }
       socket.emit('world_overrides', overrides);
+    }
+
+    // Send current mob state if simulation is already ready
+    if (mobSim.ready) {
+      socket.emit('mob_state', mobSim.getSnapshot());
     }
 
     // Tell everyone else this player joined
@@ -99,11 +124,33 @@ function attachRooms(io) {
       });
     });
 
+    socket.on('action', ({ currentAction, actionTarget }) => {
+      const p = online.get(socket.id);
+      if (!p) return;
+      const allowed = ['idle','chop','mine','fish','cook','fight'];
+      if (!allowed.includes(currentAction)) return;
+      p.currentAction = currentAction;
+      p.actionTarget  = actionTarget || null;
+      socket.broadcast.emit('player_action', { id: socket.id, currentAction, actionTarget: p.actionTarget });
+    });
+
     socket.on('tile_change', ({ col, row, tile }) => {
       if (typeof col !== 'number' || typeof row !== 'number' || typeof tile !== 'number') return;
       if (col < 0 || col > 4096 || row < 0 || row > 4096) return;
       worldOverrides.set(`${col},${row}`, tile);
+      mobSim.setTile(col, row, tile); // keep mob pathfinding world in sync
       socket.broadcast.emit('tile_change', { col, row, tile });
+    });
+
+    socket.on('mob_hit', ({ mobId, damage }) => {
+      if (typeof mobId !== 'number' || typeof damage !== 'number') return;
+      if (damage < 0 || damage > 500) return; // sanity cap
+      const result = mobSim.applyDamage(mobId, damage);
+      if (result) {
+        io.emit('mob_damage', { id: result.id, hp: result.hp, dead: result.dead });
+        // Send hit splat to all OTHER clients (sender already shows their own)
+        socket.broadcast.emit('mob_splat', { id: result.id, damage, wx: result.wx, wy: result.wy });
+      }
     });
 
     socket.on('disconnect', () => {

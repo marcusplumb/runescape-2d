@@ -10,7 +10,7 @@ import { Actions } from './actions.js';
 import { Notifications } from './notifications.js';
 import { ITEMS, EQUIP_ID_TO_ITEM } from './items.js';
 import { GEAR_BY_ID, meetsRequirements } from './gear.js';
-import { MobManager } from './mobs.js';
+import { MobManager, Mob } from './mobs.js';
 import { Combat } from './combat.js';
 import { ShopKeeper, SHOP_STOCK, SELL_PRICES, SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
   HouseShopKeeper, HOUSE_SHOP_STOCK, HOUSE_SHOP_PW, HOUSE_SHOP_PH, HOUSE_SHOP_HEADER_H, HOUSE_SHOP_ROW_H,
@@ -98,7 +98,8 @@ export class Game {
       this.world, this.player, this.inventory,
       this.skills, this.notifications
     );
-    this.mobManager   = new MobManager(this.world);
+    this.mobManager      = new MobManager(this.world);
+    this.remoteHitSplats = []; // hit splats from other players' combat
     this.shopKeeper      = new ShopKeeper();
     this.makoverNpc      = new MakoverNPC();
     this.fishermanNpc    = new FishermanNPC();
@@ -140,12 +141,19 @@ export class Game {
     // Multiplayer network connection
     this.network       = token ? new Network(token) : null;
     this.remotePlayers = new Map(); // socketId → remote player view
+    this._mobById      = new Map(); // mob id   → Mob object (server-synced)
+    this._lastSentAction       = 'idle';
+    this._lastSentActionLocked = false;
     if (this.network) {
       this._setupNetworkHandlers();
       this.network.onForceLogout(({ reason }) => {
         this.notifications.add(`Logged out: ${reason}`, '#e74c3c');
         setTimeout(() => this._logout(), 1500);
       });
+      // Relay mob hits to the server so all clients see the same HP
+      this.combat.onMobDamaged = (mob, damage) => {
+        if (mob.id !== undefined) this.network.sendMobHit(mob.id, damage);
+      };
     }
 
     // Auto-save every 30 s + on page unload
@@ -553,6 +561,13 @@ export class Game {
         view.animFrame = 0;
         view.animTimer = 0;
       }
+
+      // Tick skill animation for remote players doing actions
+      if (view.actionLocked || view.currentAction === 'fight') {
+        view.skillAnim += dt;
+      } else {
+        view.skillAnim = 0;
+      }
     }
 
     // Interior transition triggers
@@ -657,6 +672,8 @@ export class Game {
     // Update systems
     this.actions.update(dt);
     this.combat.update(dt);
+    for (const s of this.remoteHitSplats) s.timer += dt;
+    this.remoteHitSplats = this.remoteHitSplats.filter(s => s.timer < s.maxTimer);
 
     // Consume XP gain events from skills queue
     // Smelting action tick
@@ -713,9 +730,21 @@ export class Game {
       this.player.currentAction = 'idle';
     }
 
+    // Broadcast action state to other players when it changes
+    if (this.network) {
+      const ca = this.player.currentAction;
+      const al = this.player.actionLocked;
+      if (ca !== this._lastSentAction || al !== this._lastSentActionLocked) {
+        this._lastSentAction       = ca;
+        this._lastSentActionLocked = al;
+        this.network.sendAction(ca, al ? this.player.actionTarget : null);
+      }
+    }
+
     this.camera.follow(this.player.cx, this.player.cy, dt);
     this.notifications.update(dt);
-    this.mobManager.update(dt, this.world, this.player);
+    // When networked the server drives mob simulation; skip local update
+    if (!this.network) this.mobManager.update(dt, this.world, this.player);
   }
 
   draw() {
@@ -744,13 +773,27 @@ export class Game {
         // south of the tree draw over the trunk; entities north draw behind the canopy.
         const TREE_OVERHANG = 22; // canopy extends this many px above the tile top
         const camX = this.camera.x, camY = this.camera.y;
-        const sc = Math.max(0, Math.floor(camX / TILE_SIZE) - 1);
-        const sr = Math.max(0, Math.floor(camY / TILE_SIZE) - 1);
-        const ec = sc + Math.ceil(this.canvas.width  / TILE_SIZE) + 3;
-        const er = sr + Math.ceil(this.canvas.height / TILE_SIZE) + 3;
+
+        // Compute render bounds using the same 80×80 cap as the renderer
+        const RENDER_HALF = 40;
+        let rStartCol = Math.floor(camX / TILE_SIZE);
+        let rStartRow = Math.floor(camY / TILE_SIZE);
+        let rEndCol   = rStartCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
+        let rEndRow   = rStartRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
+        const rMidCol = (rStartCol + rEndCol) >> 1;
+        const rMidRow = (rStartRow + rEndRow) >> 1;
+        rStartCol = Math.max(0, rMidCol - RENDER_HALF);
+        rStartRow = Math.max(0, rMidRow - RENDER_HALF);
+        rEndCol   = rMidCol + RENDER_HALF;
+        rEndRow   = rMidRow + RENDER_HALF;
+        const renderPxMinX = rStartCol * TILE_SIZE;
+        const renderPxMinY = rStartRow * TILE_SIZE;
+        const renderPxMaxX = rEndCol   * TILE_SIZE;
+        const renderPxMaxY = rEndRow   * TILE_SIZE;
+
         const treeSortables = [];
-        for (let tr = sr; tr <= er; tr++) {
-          for (let tc = sc; tc <= ec; tc++) {
+        for (let tr = rStartRow; tr <= rEndRow; tr++) {
+          for (let tc = rStartCol; tc <= rEndCol; tc++) {
             if (this.activeMap.getTile(tc, tr) === TILES.TREE) {
               const tpx = tc * TILE_SIZE, tpy = tr * TILE_SIZE;
               const seed = {
@@ -769,9 +812,17 @@ export class Game {
           }
         }
 
+        // Cull mobs and NPCs outside the render box before sorting
+        const inView = e =>
+          e.x + e.w > renderPxMinX && e.x < renderPxMaxX &&
+          e.y + e.h > renderPxMinY && e.y < renderPxMaxY;
+
+        const remoteViews   = [...this.remotePlayers.values()].filter(inView);
+        const visibleMobs   = this.mobManager.mobs.filter(m => !m.dead && inView(m));
+        const visibleNPCs   = [this.shopKeeper, this.makoverNpc, this.fishermanNpc].filter(inView);
+
         // Draw entities sorted by Y (painter's algorithm)
-        const remoteViews = [...this.remotePlayers.values()];
-        const entities = [this.player, ...remoteViews, ...this.mobManager.mobs, this.shopKeeper, this.makoverNpc, this.fishermanNpc, ...treeSortables];
+        const entities = [this.player, ...remoteViews, ...visibleMobs, ...visibleNPCs, ...treeSortables];
         entities.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (const e of entities) e.draw(ctx);
 
@@ -782,6 +833,7 @@ export class Game {
 
         // Hit splats (world-space, drawn after all entities)
         this._drawHitSplats(ctx, this.combat.hitSplats);
+        this._drawHitSplats(ctx, this.remoteHitSplats);
       } else {
         // Interior: draw player + any interior-specific NPCs
         if (this.activeMap.id === 'player_house') {
@@ -2135,6 +2187,16 @@ export class Game {
       if (combatLevel != null)    view.combatLevel  = combatLevel;
     });
 
+    net.on('player_action', ({ id, currentAction, actionTarget }) => {
+      const view = this.remotePlayers.get(id);
+      if (!view) return;
+      view.currentAction = currentAction;
+      view.actionLocked  = currentAction !== 'idle' && currentAction !== 'fight';
+      view.actionTarget  = actionTarget || null;
+      if (currentAction === 'fight') view.skillAnim = 1.0;
+      else if (currentAction === 'idle') view.skillAnim = 0;
+    });
+
     net.on('player_left', ({ id }) => {
       const view = this.remotePlayers.get(id);
       if (view) {
@@ -2156,6 +2218,49 @@ export class Game {
       this._applyingRemoteTile = true;
       this.world.setTile(col, row, tile);
       this._applyingRemoteTile = false;
+    });
+
+    // ── Server-authoritative mob sync ─────────────────────
+    net.on('mob_state', (serverMobs) => {
+      const seen = new Set();
+      for (const s of serverMobs) {
+        seen.add(s.id);
+        let mob = this._mobById.get(s.id);
+        if (!mob) {
+          mob = new Mob(s.type, s.x, s.y);
+          mob.id = s.id;
+          this._mobById.set(s.id, mob);
+          this.mobManager.mobs.push(mob);
+        }
+        mob.x          = s.x;
+        mob.y          = s.y;
+        mob.hp         = s.hp;
+        mob.maxHp      = s.maxHp;
+        mob.dead       = s.dead;
+        mob.facingLeft = s.facingLeft;
+        mob.animFrame  = s.animFrame;
+        mob.moving     = s.moving;
+      }
+      // Remove any client-only mobs not in the server snapshot
+      this.mobManager.mobs = this.mobManager.mobs.filter(m => {
+        if (m.id === undefined || seen.has(m.id)) return true;
+        this._mobById.delete(m.id);
+        return false;
+      });
+    });
+
+    net.on('mob_damage', ({ id, hp, dead }) => {
+      const mob = this._mobById.get(id);
+      if (!mob) return;
+      mob.hp       = hp;
+      mob.dead     = dead;
+      mob.inCombat = !dead; // keep HP bar visible while mob is being fought
+    });
+
+    net.on('mob_splat', ({ id, damage, wx, wy }) => {
+      const mob = this._mobById.get(id);
+      if (!mob || mob.dead) return;
+      this.remoteHitSplats.push({ wx, wy, value: damage, timer: 0, maxTimer: 1.5 });
     });
   }
 
@@ -2197,7 +2302,8 @@ export class Game {
       animTimer:     0,
       skillAnim:     0,
       actionLocked:  false,
-      currentAction: 'idle',
+      currentAction: snap.currentAction || 'idle',
+      actionTarget:  snap.actionTarget  || null,
       hp:            10,
       maxHp:         10,
       style:         { ...{ hair:'#4a3520',skin:'#deb887',shirt:'#b04040',pants:'#3d3424',hairStyle:'short',shirtStyle:'tunic' }, ...(snap.style || {}) },

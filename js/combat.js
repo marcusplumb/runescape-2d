@@ -33,6 +33,9 @@ export class Combat {
 
     // Ground items: [{ item, qty, x, y, timer }]
     this.groundItems  = [];
+
+    // Optional callback(mob, damage) fired after each successful hit — used by Game to sync damage to server
+    this.onMobDamaged = null;
   }
 
   /* ── Public: player clicks a mob to initiate combat ──── */
@@ -133,6 +136,7 @@ export class Combat {
     if (hit) {
       const damage = _rollDamage(strLvl, gear.power, gear.critChance);
       const killed = this.targetMob.takeDamage(damage);
+      if (this.onMobDamaged && damage > 0) this.onMobDamaged(this.targetMob, damage);
 
       this.hitSplats.push({
         wx: this.targetMob.x + this.targetMob.w / 2,

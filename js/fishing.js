@@ -149,8 +149,8 @@ export class FishermanNPC {
   constructor() {
     this.w = 24;
     this.h = 32;
-    this.x = (Math.floor(WORLD_COLS / 2) + 11) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
-    this.y = (Math.floor(WORLD_ROWS / 2) + 13) * TILE_SIZE;
+    this.x = 525 * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = 394 * TILE_SIZE;
     this.name = 'Fisherman';
   }
 
