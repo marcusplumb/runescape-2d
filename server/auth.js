@@ -22,7 +22,10 @@ router.post('/register', async (req, res) => {
     return res.status(400).json({ error: 'Password must be at least 4 characters.' });
 
   try {
-    if (db.findPlayer(username))
+    const existing = db.findPlayer(username);
+    // Block re-registration only if the account has a valid password hash.
+    // An empty hash means the record was corrupted by an old bug — allow overwrite.
+    if (existing && existing.password_hash)
       return res.status(409).json({ error: 'Username already taken.' });
     const hash = await bcrypt.hash(password, SALT_ROUNDS);
     db.createPlayer(username, hash);
@@ -42,11 +45,19 @@ router.post('/login', async (req, res) => {
 
   try {
     const record = db.findPlayer(username);
-    if (!record)
+    if (!record) {
+      console.warn('[Login] no record found for:', username);
       return res.status(401).json({ error: 'Invalid username or password.' });
+    }
+    if (!record.password_hash) {
+      console.warn('[Login] corrupted account (empty hash) for:', username, '— re-register to fix');
+      return res.status(401).json({ error: 'Account corrupted — please register again with the same username.' });
+    }
     const match = await bcrypt.compare(password, record.password_hash);
-    if (!match)
+    if (!match) {
+      console.warn('[Login] wrong password for:', username);
       return res.status(401).json({ error: 'Invalid username or password.' });
+    }
     const token = makeToken(record.username);
     res.json({ token, username: record.username });
   } catch (e) {

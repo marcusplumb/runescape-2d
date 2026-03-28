@@ -29,8 +29,14 @@ function findPlayer(username) {
 
 function createPlayer(username, passwordHash) {
   const file = _file(username);
-  if (fs.existsSync(file)) throw new Error('Username already taken.');
-  const record = { username: username.toLowerCase(), password_hash: passwordHash, save: null };
+  // Preserve any existing save data when overwriting a corrupted record
+  const existing = findPlayer(username);
+  if (existing && existing.password_hash) throw new Error('Username already taken.');
+  const record = {
+    username:      username.toLowerCase(),
+    password_hash: passwordHash,
+    save:          existing ? existing.save : null,
+  };
   fs.writeFileSync(file, JSON.stringify(record), 'utf8');
   return record;
 }
