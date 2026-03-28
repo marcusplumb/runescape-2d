@@ -62,10 +62,15 @@ app.get('/save', requireAuth, (req, res) => {
 });
 
 app.post('/save', requireAuth, (req, res) => {
-  if (!req.body || typeof req.body !== 'object')
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body))
     return res.status(400).json({ error: 'Invalid save data.' });
-  db.writeSave(req.username, req.body);
-  res.json({ ok: true });
+  try {
+    db.writeSave(req.username, req.body);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Save route] write failed for', req.username, ':', e);
+    res.status(500).json({ error: 'Save failed.' });
+  }
 });
 
 // ── Real-time multiplayer ──────────────────────────────

@@ -12,6 +12,7 @@ const DATA_DIR = path.join(__dirname, '..', 'data', 'players');
 
 // Ensure storage directory exists
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+console.log('[DB] player data directory:', DATA_DIR);
 
 function _file(username) {
   // Sanitise to prevent path traversal
@@ -41,9 +42,13 @@ function loadSave(username) {
 
 function writeSave(username, saveData) {
   const record = findPlayer(username);
-  if (!record) return; // player file missing — never overwrite with blank password_hash
+  if (!record) {
+    console.warn('[DB] writeSave: no player file found for', username);
+    return;
+  }
   record.save = saveData;
   fs.writeFileSync(_file(username), JSON.stringify(record), 'utf8');
+  console.log('[DB] saved:', username);
 }
 
 module.exports = { findPlayer, createPlayer, loadSave, writeSave };

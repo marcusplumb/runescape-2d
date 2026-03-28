@@ -85,12 +85,12 @@ export class Renderer {
       this.minimapDirty = true;
     }
 
-    // Raw visible range from camera position, then capped to 80×80
+    // Raw visible range from camera position, then capped to 70×70
     let startCol = Math.floor(camX / TILE_SIZE);
     let startRow = Math.floor(camY / TILE_SIZE);
     let endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
     let endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
-    const MAX_HALF = 40; // 80×80 max view
+    const MAX_HALF = 35; // 70×70 max view
     const midCol = (startCol + endCol) >> 1;
     const midRow = (startRow + endRow) >> 1;
     startCol = Math.max(startCol, midCol - MAX_HALF);

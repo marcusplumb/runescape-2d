@@ -161,7 +161,8 @@ export class Game {
       this._saveToken    = token;
       this._saveUsername = username;
       setInterval(() => this._saveToServer(), 30_000);
-      window.addEventListener('beforeunload', () => this._saveToServer());
+      // keepalive fetch works during beforeunload; sendBeacon as fallback
+      window.addEventListener('beforeunload', () => this._saveToServer(true));
     }
 
     // Idle auto-logout: 3 min idle → logout; warn at 2m30s
@@ -773,27 +774,13 @@ export class Game {
         // south of the tree draw over the trunk; entities north draw behind the canopy.
         const TREE_OVERHANG = 22; // canopy extends this many px above the tile top
         const camX = this.camera.x, camY = this.camera.y;
-
-        // Compute render bounds using the same 80×80 cap as the renderer
-        const RENDER_HALF = 40;
-        let rStartCol = Math.floor(camX / TILE_SIZE);
-        let rStartRow = Math.floor(camY / TILE_SIZE);
-        let rEndCol   = rStartCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 1;
-        let rEndRow   = rStartRow + Math.ceil(this.canvas.height / TILE_SIZE) + 1;
-        const rMidCol = (rStartCol + rEndCol) >> 1;
-        const rMidRow = (rStartRow + rEndRow) >> 1;
-        rStartCol = Math.max(0, rMidCol - RENDER_HALF);
-        rStartRow = Math.max(0, rMidRow - RENDER_HALF);
-        rEndCol   = rMidCol + RENDER_HALF;
-        rEndRow   = rMidRow + RENDER_HALF;
-        const renderPxMinX = rStartCol * TILE_SIZE;
-        const renderPxMinY = rStartRow * TILE_SIZE;
-        const renderPxMaxX = rEndCol   * TILE_SIZE;
-        const renderPxMaxY = rEndRow   * TILE_SIZE;
-
+        const sc = Math.max(0, Math.floor(camX / TILE_SIZE) - 1);
+        const sr = Math.max(0, Math.floor(camY / TILE_SIZE) - 1);
+        const ec = sc + Math.ceil(this.canvas.width  / TILE_SIZE) + 3;
+        const er = sr + Math.ceil(this.canvas.height / TILE_SIZE) + 3;
         const treeSortables = [];
-        for (let tr = rStartRow; tr <= rEndRow; tr++) {
-          for (let tc = rStartCol; tc <= rEndCol; tc++) {
+        for (let tr = sr; tr <= er; tr++) {
+          for (let tc = sc; tc <= ec; tc++) {
             if (this.activeMap.getTile(tc, tr) === TILES.TREE) {
               const tpx = tc * TILE_SIZE, tpy = tr * TILE_SIZE;
               const seed = {
@@ -805,24 +792,16 @@ export class Game {
               const biome = getBiome(tc, tr);
               treeSortables.push({
                 y: tpy - TREE_OVERHANG,
-                h: TILE_SIZE + TREE_OVERHANG, // y+h = tpy + TILE_SIZE = tile bottom
+                h: TILE_SIZE + TREE_OVERHANG,
                 draw: (ctx) => this.renderer.drawTreeSprite(ctx, tpx, tpy, seed, biome),
               });
             }
           }
         }
 
-        // Cull mobs and NPCs outside the render box before sorting
-        const inView = e =>
-          e.x + e.w > renderPxMinX && e.x < renderPxMaxX &&
-          e.y + e.h > renderPxMinY && e.y < renderPxMaxY;
-
-        const remoteViews   = [...this.remotePlayers.values()].filter(inView);
-        const visibleMobs   = this.mobManager.mobs.filter(m => !m.dead && inView(m));
-        const visibleNPCs   = [this.shopKeeper, this.makoverNpc, this.fishermanNpc].filter(inView);
-
         // Draw entities sorted by Y (painter's algorithm)
-        const entities = [this.player, ...remoteViews, ...visibleMobs, ...visibleNPCs, ...treeSortables];
+        const remoteViews = [...this.remotePlayers.values()];
+        const entities = [this.player, ...remoteViews, ...this.mobManager.mobs, this.shopKeeper, this.makoverNpc, this.fishermanNpc, ...treeSortables];
         entities.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (const e of entities) e.draw(ctx);
 
@@ -2130,24 +2109,38 @@ export class Game {
     setTimeout(() => location.reload(), 300);
   }
 
-  _saveToServer() {
+  _saveToServer(isUnload = false) {
     if (!this._saveToken) return;
-    const body = JSON.stringify(this._serializeState());
-    // Use sendBeacon if available (works on page unload); fall back to fetch
-    if (navigator.sendBeacon) {
-      const blob = new Blob([body], { type: 'application/json' });
-      navigator.sendBeacon(`/save?token=${encodeURIComponent(this._saveToken)}`, blob);
-    } else {
-      fetch('/save', {
-        method:  'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${this._saveToken}`,
-        },
-        body,
-        keepalive: true,
-      }).catch(() => {});
+    let body;
+    try {
+      body = JSON.stringify(this._serializeState());
+    } catch (e) {
+      console.error('[Save] failed to serialize state:', e);
+      return;
     }
+
+    if (isUnload && navigator.sendBeacon) {
+      // sendBeacon is fire-and-forget but survives page close
+      const blob = new Blob([body], { type: 'application/json' });
+      const ok = navigator.sendBeacon(
+        `/save?token=${encodeURIComponent(this._saveToken)}`, blob
+      );
+      if (!ok) console.warn('[Save] sendBeacon rejected (payload too large?)');
+      return;
+    }
+
+    // Regular saves use fetch so failures are visible in the console
+    fetch('/save', {
+      method:    'POST',
+      headers:   { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this._saveToken}` },
+      body,
+      keepalive: true,
+    })
+      .then(r => {
+        if (!r.ok) r.text().then(t => console.warn('[Save] server error:', r.status, t));
+        else console.log('[Save] saved successfully');
+      })
+      .catch(err => console.error('[Save] network error:', err));
   }
 
   // ── Multiplayer ──────────────────────────────────────────────────────────
