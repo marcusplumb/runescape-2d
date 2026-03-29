@@ -811,8 +811,7 @@ export class Game {
 
     this.camera.follow(this.player.cx, this.player.cy, dt);
     this.notifications.update(dt);
-    // When networked the server drives mob simulation; skip local update
-    if (!this.network) this.mobManager.update(dt, this.world, this.player);
+    this.mobManager.update(dt, this.world, this.player);
   }
 
   draw() {

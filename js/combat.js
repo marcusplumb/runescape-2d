@@ -52,9 +52,7 @@ export class Combat {
     this.combatIdleTimer = 0;
 
     if (mob) {
-      mob.combatSide = this._pickCombatSide(mob);
       this._engageMob(mob);
-      this._updateMobCombatDestination(mob);
       this.notif.add(`Attacking ${mob.name}...`, '#e74c3c');
     }
   }
@@ -89,7 +87,6 @@ export class Combat {
     }
 
     this._engageMob(this.targetMob);
-    this._updateMobCombatDestination(this.targetMob);
 
     // Keep player facing the mob every frame (mob repositions to a side slot)
     const faceX = this.targetMob.cx - this.player.cx;
@@ -101,12 +98,11 @@ export class Combat {
     }
 
     // Combat idle timeout — disengage after 5 s outside active melee range
-    const mobAtSlot = this._isMobAtCombatSlot(this.targetMob);
     const pdx = this.player.cx - this.targetMob.cx;
     const pdy = this.player.cy - this.targetMob.cy;
-    const dist = Math.sqrt(pdx * pdx + pdy * pdy) / 32;
+    const dist = Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE;
 
-    if (mobAtSlot && dist <= 3) {
+    if (dist <= 1.5) {
       this.combatIdleTimer = 0;
     } else {
       this.combatIdleTimer += dt;
@@ -119,8 +115,7 @@ export class Combat {
       }
     }
 
-    if (!mobAtSlot) return;
-    if (dist > 3) return;
+    if (dist > 1.5) return;
 
     this.attackTimer -= dt;
     if (this.attackTimer > 0) return;
@@ -284,6 +279,7 @@ export class Combat {
     if (!mob) return;
     mob.inCombat = true;
     mob.combatTarget = this.player;
+    mob.isPlayerTarget = true;
 
     if (!mob.combatSide) {
       mob.combatSide = this._pickCombatSide(mob);
@@ -294,6 +290,7 @@ export class Combat {
     if (!mob) return;
     mob.inCombat = false;
     mob.combatTarget = null;
+    mob.isPlayerTarget = false;
     mob.combatSide = null;
     mob.combatSlotX = null;
     mob.combatSlotY = null;

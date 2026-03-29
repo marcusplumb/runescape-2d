@@ -55,9 +55,24 @@ export function drawHairStyle(ctx, x, y, s, style, bob = 0) {
   }
 }
 
-export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
+// Draws an arm rect. When angle≠0, pivots from the shoulder (top-centre) instead of translating.
+function drawArm(ctx, ax, ay, w, h, angle) {
+  if (angle) {
+    ctx.save();
+    ctx.translate(ax + w / 2, ay);
+    ctx.rotate(angle);
+    ctx.fillRect(-w / 2, 0, w, h);
+    ctx.restore();
+  } else {
+    ctx.fillRect(ax, ay, w, h);
+  }
+}
+
+export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0, punchAngle = 0, punchSide = 'right') {
   const shirt = style.shirt;
   const skin  = style.skin;
+  const la    = punchSide === 'left'  ? punchAngle : 0;  // angle for left arm
+  const ra    = punchSide === 'right' ? punchAngle : 0;  // angle for right arm
 
   switch (style.shirtStyle) {
     default:
@@ -67,8 +82,8 @@ export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
       ctx.fillStyle = '#5a3a1a';
       ctx.fillRect(x + 3*s, y +21*s - bob, 18*s,  3*s);
       ctx.fillStyle = skin;
-      ctx.fillRect(x,        y +12*s - bob - armSwing, 4*s, 10*s);
-      ctx.fillRect(x +20*s, y +12*s - bob + armSwing, 4*s, 10*s);
+      drawArm(ctx, x,        y +12*s - bob - armSwing, 4*s, 10*s, la);
+      drawArm(ctx, x +20*s,  y +12*s - bob + armSwing, 4*s, 10*s, ra);
       break;
 
     case 'armor':
@@ -86,8 +101,8 @@ export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
       ctx.fillRect(x + 3*s, y +21*s - bob, 18*s,  3*s);
       // Armoured arms
       ctx.fillStyle = shirt;
-      ctx.fillRect(x,        y +12*s - bob - armSwing, 4*s, 10*s);
-      ctx.fillRect(x +20*s, y +12*s - bob + armSwing, 4*s, 10*s);
+      drawArm(ctx, x,        y +12*s - bob - armSwing, 4*s, 10*s, la);
+      drawArm(ctx, x +20*s,  y +12*s - bob + armSwing, 4*s, 10*s, ra);
       break;
 
     case 'robe':
@@ -99,8 +114,8 @@ export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
       ctx.fillRect(x + 2*s, y +26*s - bob, 20*s,  4*s);
       // Long sleeves
       ctx.fillStyle = shirt;
-      ctx.fillRect(x - 1*s, y +12*s - bob - armSwing, 4*s, 12*s);
-      ctx.fillRect(x +21*s, y +12*s - bob + armSwing, 4*s, 12*s);
+      drawArm(ctx, x - 1*s,  y +12*s - bob - armSwing, 4*s, 12*s, la);
+      drawArm(ctx, x +21*s,  y +12*s - bob + armSwing, 4*s, 12*s, ra);
       break;
 
     case 'cape':
@@ -113,8 +128,8 @@ export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
       ctx.fillStyle = '#5a3a1a';
       ctx.fillRect(x + 3*s, y +21*s - bob, 18*s,  3*s);
       ctx.fillStyle = skin;
-      ctx.fillRect(x,        y +12*s - bob - armSwing, 4*s, 10*s);
-      ctx.fillRect(x +20*s, y +12*s - bob + armSwing, 4*s, 10*s);
+      drawArm(ctx, x,        y +12*s - bob - armSwing, 4*s, 10*s, la);
+      drawArm(ctx, x +20*s,  y +12*s - bob + armSwing, 4*s, 10*s, ra);
       break;
 
     case 'stripes':
@@ -129,8 +144,8 @@ export function drawBodyStyle(ctx, x, y, s, style, armSwing = 0, bob = 0) {
       ctx.fillStyle = '#5a3a1a';
       ctx.fillRect(x + 3*s, y +21*s - bob, 18*s,  3*s);
       ctx.fillStyle = skin;
-      ctx.fillRect(x,        y +12*s - bob - armSwing, 4*s, 10*s);
-      ctx.fillRect(x +20*s, y +12*s - bob + armSwing, 4*s, 10*s);
+      drawArm(ctx, x,        y +12*s - bob - armSwing, 4*s, 10*s, la);
+      drawArm(ctx, x +20*s,  y +12*s - bob + armSwing, 4*s, 10*s, ra);
       break;
   }
 }
@@ -358,6 +373,22 @@ export class Player {
     const armSwing  = this.moving ? Math.sin(animPhase) * 5 : skillBob;
     const eq = this.equipment;
 
+    // Bare-fist punch: half-sine over 0.6 s, then held at 0
+    const stab = (this.currentAction === 'fight' && this.skillAnim < 0.6)
+      ? Math.sin(this.skillAnim * (Math.PI / 0.6)) * 8
+      : 0;
+
+    // Rotate the punching arm in drawBodyStyle (no extra arm drawn on top)
+    let punchAngle = 0;
+    let punchSide  = 'right';
+    if (stab > 0 && (!eq.weapon || eq.weapon === 'none')) {
+      const swing = (stab / 8) * (Math.PI / 4); // 0 → 45°
+      if      (this.dir === DIR.RIGHT) { punchAngle = -swing;       punchSide = 'right'; }
+      else if (this.dir === DIR.LEFT)  { punchAngle =  swing;       punchSide = 'left';  }
+      else if (this.dir === DIR.DOWN)  { punchAngle = -swing * 0.5; punchSide = 'right'; }
+      else                             { punchAngle =  swing * 0.5; punchSide = 'right'; }
+    }
+
     // Tools drawn BEHIND the player when facing up (player faces away = tool is in front of them)
     if (this.actionLocked && this.dir === DIR.UP) {
       if (this.currentAction === 'fish') {
@@ -382,7 +413,7 @@ export class Player {
     drawBoots   (ctx, cx, cy, 1, eq.boots,    legSpread, bob);
 
     // Body + arms (style-dependent)
-    drawBodyStyle(ctx, cx, cy, 1, this.style, armSwing, bob);
+    drawBodyStyle(ctx, cx, cy, 1, this.style, armSwing, bob, punchAngle, punchSide);
 
     // Chestplate + gloves over body/arms
     drawChestplate(ctx, cx, cy, 1, eq.chestplate, armSwing, bob);
@@ -403,25 +434,8 @@ export class Player {
 
     // Weapon — hidden when another action tool is in hand (axe/rod replace the sword visually)
     if (this.currentAction === 'fight') {
-      // Smooth half-sine over 0.6 s; threshold prevents replay when no attack fires
-      const stab = this.skillAnim < 0.6
-        ? Math.sin(this.skillAnim * (Math.PI / 0.6)) * 8
-        : 0;
-
-      if (!eq.weapon || eq.weapon === 'none') {
-        // ── Bare-fist punch ───────────────────────────────
-        // Arm extends in the facing direction then retracts — no extra shapes needed.
-        ctx.fillStyle = this.style.skin;
-        if (this.dir === DIR.RIGHT) {
-          ctx.fillRect(cx + 20, cy + 12 - bob, 4 + stab, 10); // right arm swings right
-        } else if (this.dir === DIR.LEFT) {
-          ctx.fillRect(cx - stab, cy + 12 - bob, 4 + stab, 10); // left arm swings left
-        } else if (this.dir === DIR.DOWN) {
-          ctx.fillRect(cx + 20, cy + 12 - bob, 4, 10 + stab);   // right arm swings down
-        } else {
-          ctx.fillRect(cx + 20, cy + 12 - stab - bob, 4, 10 + stab); // right arm swings up
-        }
-      } else {
+      // stab is already computed above; bare-fist swing is handled by drawBodyStyle via punchAngle.
+      if (eq.weapon && eq.weapon !== 'none') {
         // ── Armed: angle forearm out + translate weapon for stab ──
         let dx = 0, dy = 0;
         if      (this.dir === DIR.RIGHT) dx = +stab;
