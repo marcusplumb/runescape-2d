@@ -221,7 +221,7 @@ export class Combat {
         }
       }
 
-      const defXp = Math.max(0, (mobMaxHit - mobDmg) * 2);
+      const defXp = Math.max(0, (mobMaxHit - mobDmg) * 4);
       if (defXp > 0) {
         const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
         if (defRes.leveled) {
