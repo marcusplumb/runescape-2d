@@ -185,15 +185,27 @@ export class Combat {
         0, gear.armour
       );
 
+      let mobDmg = 0;
+      let mobMaxHit = _getMaxHit(this.targetMob.strengthLevel);
+
+      const pCol = Math.floor(this.player.cx / TILE_SIZE);
+      const pRow = Math.floor(this.player.cy / TILE_SIZE);
+      const hasDmgReduce =
+        this.actions && this.actions.getFirePerks(pCol, pRow).has('DMG_REDUCE');
+
+      // Reduce the maximum possible incoming damage on the same basis
+      // as the real damage, so Defence XP reflects damage avoided.
+      if (hasDmgReduce) {
+        mobMaxHit = Math.max(1, Math.ceil(mobMaxHit * 0.85));
+      }
+
       if (mobHit) {
-        let mobDmg = _rollDamage(this.targetMob.strengthLevel);
-        if (mobDmg > 0 && this.actions) {
-          const pCol = Math.floor(this.player.cx / TILE_SIZE);
-          const pRow = Math.floor(this.player.cy / TILE_SIZE);
-          if (this.actions.getFirePerks(pCol, pRow).has('DMG_REDUCE')) {
-            mobDmg = Math.max(1, Math.ceil(mobDmg * 0.85));
-          }
+        mobDmg = _rollDamage(this.targetMob.strengthLevel);
+
+        if (hasDmgReduce && mobDmg > 0) {
+          mobDmg = Math.max(1, Math.ceil(mobDmg * 0.85));
         }
+
         if (mobDmg > 0) {
           this.player.hp = Math.max(0, this.player.hp - mobDmg);
           if (this.onPlayerDamaged) this.onPlayerDamaged(mobDmg);
@@ -206,12 +218,14 @@ export class Combat {
             maxTimer: 1.5,
           });
           this.notif.add(`${this.targetMob.name} hits you for ${mobDmg}!`, '#e74c3c');
+        }
+      }
 
-          const defXp = mobDmg * 4;
-          const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
-          if (defRes.leveled) {
-            this.notif.add(`🎉 Defence level ${defRes.newLevel}!`, '#f1c40f');
-          }
+      const defXp = Math.max(0, (mobMaxHit - mobDmg) * 2);
+      if (defXp > 0) {
+        const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
+        if (defRes.leveled) {
+          this.notif.add(`🎉 Defence level ${defRes.newLevel}!`, '#f1c40f');
         }
       }
     }
@@ -369,8 +383,12 @@ function _rollHit(attackLevel, defenceLevel, accuracy = 0, armour = 0) {
   return atkRoll >= defRoll;
 }
 
+function _getMaxHit(strengthLevel, power = 0) {
+  return Math.max(1, Math.floor(strengthLevel * 0.5 + power * 0.3 + 1));
+}
+
 function _rollDamage(strengthLevel, power = 0, critChance = 0) {
-  const maxHit = Math.max(1, Math.floor(strengthLevel * 0.5 + power * 0.3 + 1));
+  const maxHit = _getMaxHit(strengthLevel, power);
   let damage = Math.floor(Math.random() * (maxHit + 1));
   if (critChance > 0 && Math.random() < critChance) {
     damage = Math.max(1, Math.floor(damage * 1.5));
