@@ -45,6 +45,9 @@ import {
   FORGE_PW, FORGE_HEADER_H, FORGE_TAB_H, FORGE_ROW_H,
   SMELT_PH, SMITH_PH, SMELT_RECIPE_COUNT,
 } from './forge.js';
+import { DungeonMasterNPC } from './dungeonMaster.js';
+import { RaidInstance } from './raidInstance.js';
+import { RAID_DEFS, RAID_DIFFICULTIES } from './raids.js';
 
 const TILE_TOOLTIPS = {
   [TILES.TREE]:              'Tree — click to chop (need Axe)',
@@ -111,6 +114,7 @@ export class Game {
     this.fishermanNpc    = new FishermanNPC();
     this.fishermanOpen   = false;
     this.fishermanTab    = 'guide';
+    this.dungeonMaster   = new DungeonMasterNPC();
     this.fishingRecords  = makeFishingRecords();
     this.actions.fishingRecords = this.fishingRecords;
     this.combat          = new Combat(
@@ -159,7 +163,7 @@ export class Game {
       });
       // Relay mob hits to the server so all clients see the same HP
       this.combat.onMobDamaged = (mob, damage) => {
-        if (mob.id !== undefined) this.network.sendMobHit(mob.id, damage);
+        if (!this.inRaid && mob.id !== undefined) this.network.sendMobHit(mob.id, damage);
       };
     }
 
@@ -206,6 +210,13 @@ export class Game {
     this.smeltingAction = null;  // { recipe, progress, duration } — animated smelting
     this.showAdminTp   = false;
     this.adminEquipOpen  = false;
+
+    // ── Raid system state ──────────────────────────────────────────
+    this.raidMenuOpen      = false;
+    this.raidSelectedRaid  = 0;   // index into RAID_DEFS
+    this.raidSelectedDiff  = 0;   // index into RAID_DIFFICULTIES
+    this.activeRaid        = null; // RaidInstance | null
+    this.inRaid            = false;
     this.equipPanelOpen  = false;   // worn-items panel
     this.contextMenu     = null;    // { x, y, invSlot, options:[{label,cb}] }
 
@@ -282,6 +293,19 @@ export class Game {
         this.skillInfoScroll = Math.max(0, this.skillInfoScroll + e.deltaY);
       }
     }, { passive: false });
+
+    // Hook: fired by combat.js when player HP hits 0 (before respawn)
+    this.combat.onPlayerDeath = () => {
+      if (this.inRaid && this.activeRaid && !this.activeRaid.failed) {
+        this.activeRaid.onPlayerDeath();
+      }
+    };
+    // Hook: fired by combat.js each time the player takes damage
+    this.combat.onPlayerDamaged = (dmg) => {
+      if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
+        this.activeRaid.onPlayerDamaged(dmg);
+      }
+    };
 
     this.notifications.add('Welcome! You have an Axe, Pickaxe, Tinderbox, Fishing Rod, and 25g.', '#f1c40f');
     this.notifications.add('Explore biomes: Forest, Tundra, Swamp, Desert, Volcanic & Danger Zone!', '#aaa');
@@ -401,7 +425,15 @@ export class Game {
         this.makoverOpen = false;
       } else if (this.fishermanOpen) {
         this.fishermanOpen = false;
+      } else if (this.raidMenuOpen) {
+        this.raidMenuOpen = false;
+      } else if (this.inRaid && this.activeRaid && this.activeRaid.complete) {
+        this._exitRaid();
+      } else if (this.inRaid) {
+        this._exitRaid();
+        this.notifications.add('Raid abandoned.', '#e74c3c');
       } else if (this.combat.isInCombat) {
+        if (this.network) this.network.sendStopCombat(this.combat.targetMob.id);
         this.combat.clearTarget();
         this.notifications.add('You stop fighting.', '#aaa');
       } else if (this.actions.isActive) {
@@ -433,6 +465,12 @@ export class Game {
       }
       if (this.contextMenu) {
         this._handleContextMenuClick(click.screenX, click.screenY);
+      } else if (this.activeRaid && this.activeRaid.complete) {
+        this._handleRaidSummaryClick(click.screenX, click.screenY);
+        return;
+      } else if (this.raidMenuOpen) {
+        this._handleRaidMenuClick(click.screenX, click.screenY);
+        return;
       } else if (this.adminEquipOpen) {
         this._handleAdminEquipClick(click.screenX, click.screenY);
       } else if (this.showAdminTp) {
@@ -484,6 +522,15 @@ export class Game {
         // ── Check for ground item pickup first (world only) ─
         } else if (!this.inInterior && this.combat.tryPickup(worldPos.x, worldPos.y)) {
           // Picked up item — no movement needed
+        } else if (!this.inInterior && !this.inRaid && this.dungeonMaster.containsWorld(worldPos.x, worldPos.y)) {
+          const dmCol = Math.floor(this.dungeonMaster.cx / TILE_SIZE);
+          const dmRow = Math.floor(this.dungeonMaster.cy / TILE_SIZE);
+          const adj   = nearestWalkableAdjacent(this.world, dmCol, dmRow, this.player.col, this.player.row);
+          if (adj) {
+            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.pendingInteract = { type: 'dungeon_master', col: dmCol, row: dmRow };
+            this.clickDest = { col: dmCol, row: dmRow };
+          }
         } else if (!this.inInterior && this.shopKeeper.containsWorld(worldPos.x, worldPos.y)) {
           // Walk to shopkeeper then open shop
           const skCol = Math.floor((this.shopKeeper.x + this.shopKeeper.w / 2) / TILE_SIZE);
@@ -514,8 +561,9 @@ export class Game {
             this.clickDest = { col: fnCol, row: fnRow };
           }
         } else if (!this.inInterior) {
-          // ── World only: mob clicks & interactable tiles ──
-          const clickedMob = this.mobManager.getMobAt(worldPos.x, worldPos.y);
+          // ── World / raid: mob clicks & interactable tiles ──
+          const mobSource  = this.inRaid ? this.activeRaid : this.mobManager;
+          const clickedMob = mobSource.getMobAt(worldPos.x, worldPos.y);
           if (clickedMob) {
             const mobCol = Math.floor(clickedMob.cx / TILE_SIZE);
             const mobRow = Math.floor(clickedMob.cy / TILE_SIZE);
@@ -526,6 +574,7 @@ export class Game {
               this.clickDest = { col: mobCol, row: mobRow };
             } else {
               this.combat.setTarget(clickedMob);
+              if (this.network) this.network.sendStartCombat(clickedMob.id);
             }
           } else if (TILE_TOOLTIPS[this.world.getTile(clickCol, clickRow)] !== undefined
                      && this.world.getTile(clickCol, clickRow) !== TILES.ROCK_DEPLETED) {
@@ -628,9 +677,9 @@ export class Game {
     // Interior transition triggers
     if (this.transitionCooldown <= 0) {
       const tile = this.activeMap.getTile(this.player.col, this.player.row);
-      if (!this.inInterior && tile === TILES.PORTAL) {
+      if (!this.inInterior && !this.inRaid && tile === TILES.PORTAL) {
         this._beginTransition(() => this._enterInterior('player_house'));
-      } else if (!this.inInterior && tile === TILES.DOOR) {
+      } else if (!this.inInterior && !this.inRaid && tile === TILES.DOOR) {
         const key = `${this.player.col},${this.player.row}`;
         const intId = this.world.doorMap.get(key);
         if (intId && this.interiors.has(intId)) {
@@ -653,6 +702,9 @@ export class Game {
       if (pi.type === 'house_shop') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) this.houseShopOpen = true;
+      } else if (pi.type === 'dungeon_master') {
+        const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
+        if (dist <= 2) this.raidMenuOpen = true;
       } else if (pi.type === 'shop') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) this.shopOpen = true;
@@ -710,6 +762,7 @@ export class Game {
         // Start attacking the mob now that we're close
         if (!pi.mob.dead) {
           this.combat.setTarget(pi.mob);
+          if (this.network) this.network.sendStartCombat(pi.mob.id);
           this.player.currentAction = 'fight';
           this.player.skillAnim = 1.0;  // suppress stab until first real attack fires
           // Face toward the mob
@@ -811,7 +864,48 @@ export class Game {
 
     this.camera.follow(this.player.cx, this.player.cy, dt);
     this.notifications.update(dt);
-    this.mobManager.update(dt, this.world, this.player);
+    // Server drives all mob AI when networked; local sim only in offline mode.
+    if (!this.network && !this.inRaid) {
+      this.mobManager.update(dt, this.world, this.player);
+    }
+
+    // ── Raid tick ──────────────────────────────────────────────────────────
+    if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
+      const raid = this.activeRaid;
+
+      // Award kill XP for newly-dead mobs (once per mob)
+      for (const mob of raid.mobContainer.mobs) {
+        if (mob.dead && !mob._killCounted) {
+          mob._killCounted = true;
+          raid.onMobKilled(mob);
+        }
+      }
+
+      // Floor-clear detection: all mobs dead → start advance delay
+      const liveMobCount = raid.mobContainer.mobs.filter(m => !m.dead).length;
+      if (!raid._floorAdvancing && raid.mobContainer.mobs.length > 0 && liveMobCount === 0) {
+        raid._floorAdvancing    = true;
+        raid._floorAdvanceTimer = 1.5;
+        this.notifications.add(`Floor ${raid.currentFloorIdx + 1} cleared!`, '#f1c40f');
+      }
+
+      raid.update(dt, this.player); // mob AI + timer countdown
+
+      // Floor advance when delay timer expires
+      if (raid._floorAdvancing && raid._floorAdvanceTimer <= 0) {
+        raid._floorAdvancing = false;
+        const done = raid.advanceFloor();
+        if (done) {
+          this.notifications.add('Raid complete! Check your results.', '#27ae60');
+          this.combat.clearTarget();
+        } else {
+          this.combat.mobManager = raid.mobContainer;
+          this.notifications.add(
+            `Floor ${raid.currentFloorIdx + 1} / ${raid.totalFloors}`, '#a855f7'
+          );
+        }
+      }
+    }
   }
 
   draw() {
@@ -888,8 +982,9 @@ export class Game {
         eb.length = 0;
         eb.push(this.player);
         for (const rv of this.remotePlayers.values()) eb.push(rv);
-        for (const m of this.mobManager.mobs) eb.push(m);
-        eb.push(this.shopKeeper, this.makoverNpc, this.fishermanNpc);
+        const _mobSrc = this.inRaid && this.activeRaid ? this.activeRaid.mobContainer.mobs : this.mobManager.mobs;
+        for (const m of _mobSrc) eb.push(m);
+        if (!this.inRaid) eb.push(this.shopKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
         for (const t of treeSortables) eb.push(t);
         eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
@@ -923,7 +1018,7 @@ export class Game {
     this.camera.end(ctx);
 
     // Screen-space UI
-    if (!this.inInterior) {
+    if (!this.inInterior && !this.inRaid) {
       this.renderer.drawCircleMinimap(this.world, this.player);
     }
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
@@ -978,6 +1073,11 @@ export class Game {
     }
     if (this.contextMenu) {
       this.renderer.drawContextMenu(this.contextMenu, this.mouseScreen.x, this.mouseScreen.y);
+    }
+    if (this.raidMenuOpen) this._drawRaidMenu(ctx);
+    if (this.inRaid && this.activeRaid && this.activeRaid.complete) this._drawRaidSummary(ctx);
+    if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
+      this._drawRaidFloorHUD(ctx);
     }
 
     // Tooltip
@@ -1035,7 +1135,7 @@ export class Game {
     this.notifications.drawMessages(ctx, this.canvas.height);
     this.notifications.drawXpDrops(ctx);
 
-    if (this.inInterior) {
+    if (this.inInterior || this.inRaid) {
       this.renderer.drawInteriorHeader(this.activeMap.name);
     }
     this.renderer.drawFade(this.fadeAlpha);
@@ -2071,6 +2171,7 @@ export class Game {
     this.camera.snapTo(this.player.cx, this.player.cy);
 
     this.transitionCooldown = 1.0;
+    if (this.network && this.combat.targetMob) this.network.sendStopCombat(this.combat.targetMob.id);
     this.combat.clearTarget();
     this.actions.cancel();
     this.player.actionLocked = false;
@@ -2521,6 +2622,455 @@ export class Game {
       this.chatMessages.push({ name, text: message, time: Date.now() });
       if (this.chatMessages.length > 50) this.chatMessages.shift();
     });
+  }
+
+  // ── Raid system ──────────────────────────────────────────────────────────
+
+  _startRaid(raidIndex, diffIndex) {
+    const raidDef = RAID_DEFS[raidIndex];
+    const diffDef = RAID_DIFFICULTIES[diffIndex];
+    this.activeRaid = new RaidInstance(raidDef, diffDef, this.skills, diffIndex);
+
+    this._beginTransition(() => {
+      const arena = this.activeRaid.arenaMap;
+      this.inRaid            = true;
+      this.activeMap         = arena;
+      this.player.world      = arena;
+      this.actions.world     = arena;
+      this.combat.mobManager = this.activeRaid.mobContainer;
+
+      this.player.col = arena.entryCol;
+      this.player.row = arena.entryRow;
+      this.player.x   = arena.entryCol * TILE_SIZE + 4;
+      this.player.y   = arena.entryRow * TILE_SIZE;
+
+      this.camera.snapTo(this.player.cx, this.player.cy);
+      this.transitionCooldown = 1.0;
+      this.combat.clearTarget();
+      this.actions.cancel();
+      this.player.actionLocked = false;
+
+      this.activeRaid.startFloor();
+      this.notifications.add(
+        `Entering ${raidDef.name} — ${diffDef.name}  ·  Floor 1/${raidDef.floors.length}`,
+        '#a855f7'
+      );
+    });
+  }
+
+  _exitRaid() {
+    const raid = this.activeRaid; // capture now; will be null after callback
+    this._beginTransition(() => {
+      // Give loot to player inventory (overflow dropped at spawn)
+      const spawnCol = Math.floor(1024 / 2);
+      const spawnRow = Math.floor(768 / 2) + 5;
+      if (raid && raid.loot && raid.loot.length > 0) {
+        for (const { item, qty } of raid.loot) {
+          if (!this.inventory.isFull() || this.inventory.has(item.id)) {
+            this.inventory.add(item, qty);
+          } else {
+            this.combat.spawnGroundItem(
+              item, qty,
+              spawnCol * TILE_SIZE + TILE_SIZE / 2,
+              spawnRow * TILE_SIZE + TILE_SIZE / 2
+            );
+          }
+        }
+        this.notifications.add('Loot added to your inventory!', '#f1c40f');
+      }
+
+      // Restore world state
+      this.inRaid            = false;
+      this.activeMap         = this.world;
+      this.player.world      = this.world;
+      this.actions.world     = this.world;
+      this.combat.mobManager = this.mobManager;
+      this.combat.clearTarget();
+      this.activeRaid        = null;
+
+      // Return player to spawn
+      this.player.col        = spawnCol;
+      this.player.row        = spawnRow;
+      this.player.x          = spawnCol * TILE_SIZE + 4;
+      this.player.y          = spawnRow * TILE_SIZE;
+      this.player.path       = [];
+      this.player.moving     = false;
+      this.player.targetCol  = null;
+      this.player.targetRow  = null;
+
+      this.camera.snapTo(this.player.cx, this.player.cy);
+      this.transitionCooldown = 1.0;
+    });
+  }
+
+  // ── Raid menu panel ───────────────────────────────────────────────────────
+
+  _raidMenuPanelRect() {
+    const PW = 540, PH = 460;
+    const px = Math.floor((this.canvas.width  - PW) / 2);
+    const py = Math.floor((this.canvas.height - PH) / 2);
+    return { px, py, PW, PH };
+  }
+
+  _drawRaidMenu(ctx) {
+    const { px, py, PW, PH } = this._raidMenuPanelRect();
+    const W = this.canvas.width, H = this.canvas.height;
+    const r = this.renderer;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(15,8,30,0.97)';
+    r._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#8b3fc8';
+    ctx.lineWidth = 2;
+    r._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.stroke();
+
+    // Header
+    ctx.fillStyle = '#c9a227';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('DUNGEON MASTER', px + PW / 2, py + 26);
+    ctx.fillStyle = '#777';
+    ctx.font = '11px monospace';
+    ctx.fillText('Select a raid and difficulty, then press Start', px + PW / 2, py + 44);
+
+    const HEADER_H   = 54;
+    const FOOTER_H   = 82;
+    const BODY_H     = PH - HEADER_H - FOOTER_H;
+    const RAID_COL_W = 202;
+    const DIVIDER_X  = px + RAID_COL_W;
+    const DIFF_COL_X = DIVIDER_X + 10;
+    const bodyY      = py + HEADER_H + 18;
+
+    const raidingLvl  = this.skills.getLevel(SKILL_IDS.RAIDING);
+    const diffUnlocked = (diff) => !diff.unlockReq || raidingLvl >= diff.unlockReq.level;
+
+    // Column divider
+    ctx.strokeStyle = '#4a1f7a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(DIVIDER_X, py + HEADER_H);
+    ctx.lineTo(DIVIDER_X, py + HEADER_H + BODY_H);
+    ctx.stroke();
+
+    // Column labels
+    ctx.fillStyle = '#a855f7';
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('RAIDS', px + 10, py + HEADER_H + 13);
+    ctx.fillText('DIFFICULTY', DIFF_COL_X + 2, py + HEADER_H + 13);
+
+    // ── Raid list ──
+    const raidRowH = Math.floor(BODY_H / RAID_DEFS.length);
+    for (let i = 0; i < RAID_DEFS.length; i++) {
+      const rd  = RAID_DEFS[i];
+      const ry  = bodyY + i * raidRowH;
+      const sel = this.raidSelectedRaid === i;
+
+      ctx.fillStyle = sel ? 'rgba(168,85,247,0.22)' : (i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'transparent');
+      ctx.fillRect(px + 4, ry, RAID_COL_W - 8, raidRowH - 3);
+      if (sel) {
+        ctx.strokeStyle = '#7b2fbf';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(px + 4, ry, RAID_COL_W - 8, raidRowH - 3);
+      }
+
+      ctx.fillStyle = rd.iconColor;
+      ctx.beginPath();
+      ctx.arc(px + 18, ry + raidRowH / 2, 6, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = sel ? '#e0c8f8' : '#bbb';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(rd.name, px + 32, ry + raidRowH / 2 - 5);
+      ctx.fillStyle = '#555';
+      ctx.font = '10px monospace';
+      ctx.fillText(`${rd.floors.length} floors  Lv.${rd.recLevel}+`, px + 32, ry + raidRowH / 2 + 9);
+    }
+
+    // ── Difficulty list ──
+    const diffColW  = PW - RAID_COL_W - 10;
+    const diffRowH  = Math.floor(BODY_H / RAID_DIFFICULTIES.length);
+    for (let i = 0; i < RAID_DIFFICULTIES.length; i++) {
+      const diff    = RAID_DIFFICULTIES[i];
+      const ry      = bodyY + i * diffRowH;
+      const sel     = this.raidSelectedDiff === i;
+      const unlocked = diffUnlocked(diff);
+
+      ctx.fillStyle = sel && unlocked ? 'rgba(168,85,247,0.22)' : 'rgba(255,255,255,0.02)';
+      ctx.fillRect(DIFF_COL_X - 2, ry, diffColW, diffRowH - 3);
+      if (sel && unlocked) {
+        ctx.strokeStyle = diff.color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(DIFF_COL_X - 2, ry, diffColW, diffRowH - 3);
+      }
+
+      ctx.fillStyle = unlocked ? diff.color : '#444';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(diff.name, DIFF_COL_X + 6, ry + diffRowH / 2 + 4);
+
+      ctx.font = '10px monospace';
+      if (!unlocked) {
+        ctx.fillStyle = '#555';
+        ctx.fillText(`Requires Raiding ${diff.unlockReq.level}`, DIFF_COL_X + 90, ry + diffRowH / 2 + 4);
+      } else {
+        ctx.fillStyle = '#777';
+        ctx.fillText(`×${diff.xpMult} XP  ×${diff.goldMult} Gold`, DIFF_COL_X + 90, ry + diffRowH / 2 + 4);
+      }
+    }
+
+    // ── Footer ──
+    const footerY  = py + HEADER_H + BODY_H + 10;
+    const selRaid  = RAID_DEFS[this.raidSelectedRaid];
+    ctx.fillStyle  = '#666';
+    ctx.font       = '11px monospace';
+    ctx.textAlign  = 'left';
+    ctx.fillText(selRaid.description, px + 12, footerY + 14);
+
+    ctx.fillStyle = '#a855f7';
+    ctx.font      = '10px monospace';
+    ctx.fillText(`Your Raiding level: ${raidingLvl}`, px + 12, footerY + 32);
+
+    const canStart = diffUnlocked(RAID_DIFFICULTIES[this.raidSelectedDiff]);
+    const btnW = 124, btnH = 32;
+    const btnX = px + PW - btnW - 12;
+    const btnY = footerY + 6;
+    ctx.fillStyle = canStart ? '#4a1070' : '#251535';
+    r._roundRect(ctx, btnX, btnY, btnW, btnH, 5);
+    ctx.fill();
+    ctx.strokeStyle = canStart ? '#a855f7' : '#3a2050';
+    ctx.lineWidth = 1;
+    r._roundRect(ctx, btnX, btnY, btnW, btnH, 5);
+    ctx.stroke();
+    ctx.fillStyle = canStart ? '#dbb8f8' : '#5a4070';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(canStart ? 'Start Raid' : 'Locked', btnX + btnW / 2, btnY + 21);
+    ctx.textAlign = 'left';
+  }
+
+  _handleRaidMenuClick(sx, sy) {
+    const { px, py, PW, PH } = this._raidMenuPanelRect();
+    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this.raidMenuOpen = false;
+      return;
+    }
+
+    const HEADER_H   = 54;
+    const FOOTER_H   = 82;
+    const BODY_H     = PH - HEADER_H - FOOTER_H;
+    const RAID_COL_W = 202;
+    const DIVIDER_X  = px + RAID_COL_W;
+    const DIFF_COL_X = DIVIDER_X + 10;
+    const bodyY      = py + HEADER_H + 18;
+
+    const raidingLvl  = this.skills.getLevel(SKILL_IDS.RAIDING);
+    const diffUnlocked = (diff) => !diff.unlockReq || raidingLvl >= diff.unlockReq.level;
+
+    // Raid selection (left column)
+    const raidRowH = Math.floor(BODY_H / RAID_DEFS.length);
+    if (sx >= px && sx < DIVIDER_X && sy >= bodyY && sy < bodyY + BODY_H) {
+      const i = Math.floor((sy - bodyY) / raidRowH);
+      if (i >= 0 && i < RAID_DEFS.length) {
+        this.raidSelectedRaid = i;
+        return;
+      }
+    }
+
+    // Difficulty selection (right column)
+    const diffRowH = Math.floor(BODY_H / RAID_DIFFICULTIES.length);
+    if (sx >= DIFF_COL_X && sx < px + PW && sy >= bodyY && sy < bodyY + BODY_H) {
+      const i = Math.floor((sy - bodyY) / diffRowH);
+      if (i >= 0 && i < RAID_DIFFICULTIES.length) {
+        if (diffUnlocked(RAID_DIFFICULTIES[i])) {
+          this.raidSelectedDiff = i;
+        } else {
+          const req = RAID_DIFFICULTIES[i].unlockReq;
+          this.notifications.add(`Need Raiding level ${req.level} for ${RAID_DIFFICULTIES[i].name}.`, '#e74c3c');
+        }
+        return;
+      }
+    }
+
+    // Start button
+    const footerY  = py + HEADER_H + BODY_H + 10;
+    const btnW = 124, btnH = 32;
+    const btnX = px + PW - btnW - 12;
+    const btnY = footerY + 6;
+    if (sx >= btnX && sx <= btnX + btnW && sy >= btnY && sy <= btnY + btnH) {
+      if (!diffUnlocked(RAID_DIFFICULTIES[this.raidSelectedDiff])) return;
+      this.raidMenuOpen = false;
+      this._startRaid(this.raidSelectedRaid, this.raidSelectedDiff);
+    }
+  }
+
+  // ── Raid summary panel ────────────────────────────────────────────────────
+
+  _drawRaidSummary(ctx) {
+    const PW = 440, PH = 490;
+    const W  = this.canvas.width, H = this.canvas.height;
+    const px = Math.floor((W - PW) / 2);
+    const py = Math.floor((H - PH) / 2);
+    const r  = this.renderer;
+    const raid  = this.activeRaid;
+    const rank  = raid.getRank();
+    const score = raid.getScore();
+
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = 'rgba(8,12,24,0.97)';
+    r._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.fill();
+    ctx.strokeStyle = rank.color;
+    ctx.lineWidth = 2;
+    r._roundRect(ctx, px, py, PW, PH, 8);
+    ctx.stroke();
+
+    // Header
+    ctx.fillStyle = rank.color;
+    ctx.font = 'bold 17px monospace';
+    ctx.textAlign = 'center';
+    const outcome = raid.failed ? 'RAID FAILED' : 'RAID COMPLETE';
+    ctx.fillText(`${outcome} — ${rank.label} RANK`, px + PW / 2, py + 28);
+    ctx.fillStyle = '#888';
+    ctx.font = '11px monospace';
+    ctx.fillText(`${raid.raidDef.name}  ·  ${raid.diff.name}`, px + PW / 2, py + 46);
+
+    ctx.fillStyle = rank.color;
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText(`Score: ${score}`, px + PW / 2, py + 72);
+
+    // Stats
+    const statsY = py + 90;
+    const mins   = Math.floor(raid.timer / 60);
+    const secs   = Math.floor(raid.timer % 60);
+    const stats  = [
+      ['Floors Cleared',  `${raid.floorsCleared} / ${raid.totalFloors}`],
+      ['Time',            `${mins}m ${secs}s`],
+      ['Kills',           String(raid.killCount)],
+      ['Damage Taken',    String(Math.round(raid.damageTaken))],
+      ['Deaths',          String(raid.deaths)],
+      ['Raiding XP',      `+${raid.xpEarned}`],
+    ];
+    ctx.font = '12px monospace';
+    ctx.textAlign = 'left';
+    for (let i = 0; i < stats.length; i++) {
+      const sy2 = statsY + i * 22;
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(255,255,255,0.04)';
+        ctx.fillRect(px + 8, sy2 - 2, PW - 16, 21);
+      }
+      ctx.fillStyle = '#777';
+      ctx.fillText(stats[i][0], px + 16, sy2 + 14);
+      ctx.fillStyle = '#ddd';
+      ctx.textAlign = 'right';
+      ctx.fillText(stats[i][1], px + PW - 16, sy2 + 14);
+      ctx.textAlign = 'left';
+    }
+
+    // Loot divider
+    const divY = statsY + stats.length * 22 + 10;
+    ctx.strokeStyle = '#2a2a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px + 10, divY);
+    ctx.lineTo(px + PW - 10, divY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#c9a227';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('LOOT:', px + 16, divY + 18);
+
+    if (!raid.loot || raid.loot.length === 0) {
+      ctx.fillStyle = '#444';
+      ctx.font = '11px monospace';
+      ctx.fillText('Nothing dropped.', px + 60, divY + 18);
+    } else {
+      const maxShow = Math.min(raid.loot.length, 5);
+      for (let i = 0; i < maxShow; i++) {
+        const { item, qty } = raid.loot[i];
+        ctx.fillStyle = '#ccc';
+        ctx.font = '11px monospace';
+        ctx.fillText(`• ${item.name}${qty > 1 ? ` ×${qty}` : ''}`, px + 24, divY + 36 + i * 22);
+      }
+      if (raid.loot.length > 5) {
+        ctx.fillStyle = '#555';
+        ctx.font = '10px monospace';
+        ctx.fillText(`  …and ${raid.loot.length - 5} more`, px + 24, divY + 36 + 5 * 22);
+      }
+    }
+
+    // Return button
+    const btnW = 150, btnH = 34;
+    const btnX = px + Math.floor((PW - btnW) / 2);
+    const btnY = py + PH - btnH - 14;
+    ctx.fillStyle = '#0e2a1a';
+    r._roundRect(ctx, btnX, btnY, btnW, btnH, 5);
+    ctx.fill();
+    ctx.strokeStyle = '#27ae60';
+    ctx.lineWidth = 1;
+    r._roundRect(ctx, btnX, btnY, btnW, btnH, 5);
+    ctx.stroke();
+    ctx.fillStyle = '#27ae60';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Return to World', btnX + btnW / 2, btnY + 23);
+    ctx.textAlign = 'left';
+  }
+
+  _handleRaidSummaryClick(sx, sy) {
+    const PW = 440, PH = 490;
+    const px = Math.floor((this.canvas.width  - PW) / 2);
+    const py = Math.floor((this.canvas.height - PH) / 2);
+    const btnW = 150, btnH = 34;
+    const btnX = px + Math.floor((PW - btnW) / 2);
+    const btnY = py + PH - btnH - 14;
+    if (sx >= btnX && sx <= btnX + btnW && sy >= btnY && sy <= btnY + btnH) {
+      this._exitRaid();
+    }
+  }
+
+  // ── Raid floor HUD (top-center banner) ───────────────────────────────────
+
+  _drawRaidFloorHUD(ctx) {
+    const raid = this.activeRaid;
+    if (!raid) return;
+    const W        = this.canvas.width;
+    const panW     = 200, panH = 40;
+    const panX     = Math.floor((W - panW) / 2);
+    const panY     = 12;
+    const liveMobs = raid.mobContainer.mobs.filter(m => !m.dead).length;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(15,8,30,0.87)';
+    ctx.beginPath();
+    ctx.roundRect(panX, panY, panW, panH, 6);
+    ctx.fill();
+    ctx.strokeStyle = '#8b3fc8';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.fillStyle = '#a855f7';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Floor ${raid.currentFloorIdx + 1} / ${raid.totalFloors}`, panX + panW / 2, panY + 16);
+
+    ctx.fillStyle = liveMobs > 0 ? '#e74c3c' : '#27ae60';
+    ctx.font = '10px monospace';
+    ctx.fillText(
+      liveMobs > 0
+        ? `${liveMobs} enem${liveMobs === 1 ? 'y' : 'ies'} remaining`
+        : raid._floorAdvancing ? 'Next floor incoming...' : 'Floor cleared!',
+      panX + panW / 2, panY + 31
+    );
+    ctx.restore();
   }
 
   _upsertRemotePlayer(snap) {

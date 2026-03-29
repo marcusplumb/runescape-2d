@@ -2,6 +2,19 @@ import { TILE_SIZE, WORLD_COLS, WORLD_ROWS, TILES, AGGRO_RANGE, MOB_RESPAWN_TIME
 import { BIOMES, getBiome } from './biomes.js';
 import { ITEMS } from './items.js';
 
+// Seeded PRNG (mulberry32) — same algorithm as world.js so mob spawn positions
+// are deterministic across page refreshes as long as the world seed is unchanged.
+const MOB_SEED = 137;
+function makeRng(seed) {
+  let s = seed >>> 0;
+  return () => {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export const MOB_DEFS = {
   // ── Passive mobs (spawn in safe areas) ──────────────────
   chicken: {
@@ -187,6 +200,8 @@ const FLEE_SPREAD     = 14;
 // Radius (tiles) predator wildlife scans when looking for killable prey mobs.
 const HUNT_RANGE      = 8;
 
+const AGGRO_LOSE_RANGE = AGGRO_RANGE + 1;
+
 // Auto-build flee table: prey animals automatically know which predators to run from
 const _fleeFrom = {};
 for (const [type, def] of Object.entries(MOB_DEFS)) {
@@ -261,6 +276,17 @@ export class Mob {
 
     this.attackCooldown = Math.max(0, this.attackCooldown - dt);
 
+    // Drop aggro if the player escapes far enough
+    if (this.aggressive && this.inCombat && this.combatTarget === player) {
+      const pdx = player.cx - this.cx;
+      const pdy = player.cy - this.cy;
+      const distTiles = Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE;
+
+      if (distTiles > AGGRO_LOSE_RANGE) {
+        this._startReturn();
+      }
+    }
+
     const myDef = MOB_DEFS[this.type];
 
     // ── 1. Aggressive mobs self-detect the player ─────────────────────
@@ -277,7 +303,6 @@ export class Mob {
     // When in combat, skip ALL other AI and move straight toward the player.
     
     if (this.inCombat && this.combatTarget) {
-      console.log(this.name, 'combat:', this.inCombat, !!this.combatTarget);
       this.state   = 'chasing';
       this.targetX = this.combatTarget.cx - this.w / 2;
       this.targetY = this.combatTarget.cy - this.h / 2;
@@ -340,8 +365,8 @@ export class Mob {
           break;
 
         case 'fleeing':
-          if (!this.targetX ||
-              Math.hypot(this.targetX - this.x, this.targetY - this.y) <= 4) {
+          if (this.targetX === null || this.targetY === null ||
+            Math.hypot(this.targetX - this.x, this.targetY - this.y) <= 4) {
             this._transitionIdle();
           }
           break;
@@ -389,42 +414,67 @@ export class Mob {
       }
     }
 
-    // ── 4. Move toward target ─────────────────────────────────────────
-    this.moving = false;
-    if (this.targetX !== null) {
-      const dx   = this.targetX - this.x;
-      const dy   = this.targetY - this.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
+  // ── 4. Move toward target ─────────────────────────────────────────
+  this.moving = false;
+  if (this.targetX !== null && this.targetY !== null) {
+    const dx = this.targetX - this.x;
+    const dy = this.targetY - this.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
 
-      if (dist > 2) {
-        const nx = dx / dist;
-        const ny = dy / dist;
-        if (dx < 0) this.facingLeft = true;
-        else if (dx > 0) this.facingLeft = false;
-        this.moving = true;
+    if (dist > 2) {
+      const nx = dx / dist;
+      const ny = dy / dist;
 
-        const newX = this.x + nx * this.speed * dt;
-        if (!world.isBlocked(newX, this.y, this.w, this.h)) {
-          this.x = newX;
-        } else if (this.state === 'wandering') {
-          this._startWander();
-        }
+      if (dx < 0) this.facingLeft = true;
+      else if (dx > 0) this.facingLeft = false;
 
-        const newY = this.y + ny * this.speed * dt;
-        if (!world.isBlocked(this.x, newY, this.w, this.h)) this.y = newY;
+      const prevX = this.x;
+      const prevY = this.y;
 
-        this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
-        this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
-      } else if (this.state === 'wandering') {
-        this.state       = 'idle';
-        this.targetX     = null;
-        this.targetY     = null;
-        this.wanderTimer = this.idleTime + Math.random() * 2;
+      let blockedX = false;
+      let blockedY = false;
+
+      const newX = this.x + nx * this.speed * dt;
+      if (!world.isBlocked(newX, this.y, this.w, this.h)) {
+        this.x = newX;
       } else {
-        this.targetX = null;
-        this.targetY = null;
+        blockedX = true;
       }
+
+      const newY = this.y + ny * this.speed * dt;
+      if (!world.isBlocked(this.x, newY, this.w, this.h)) {
+        this.y = newY;
+      } else {
+        blockedY = true;
+      }
+
+      if ((blockedX || blockedY) && this.state === 'wandering') {
+        this._startWander();
+      }
+
+      if ((blockedX || blockedY) && this.state === 'returning') {
+        this._transitionIdle();
+      }
+
+      this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
+      this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
+
+      this.moving =
+        Math.abs(this.x - prevX) > 0.01 || Math.abs(this.y - prevY) > 0.01;
+    } else if (this.state === 'wandering') {
+      this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
+      this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+      this.state = 'idle';
+      this.targetX = null;
+      this.targetY = null;
+      this.wanderTimer = this.idleTime + Math.random() * 2;
+    } else {
+      this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
+      this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+      this.targetX = null;
+      this.targetY = null;
     }
+  }
 
     // ── 5. Walk animation ─────────────────────────────────────────────
     if (this.moving) {
@@ -443,6 +493,8 @@ export class Mob {
 
   /** Clear all combat/movement state and return to idle standing. */
   _transitionIdle() {
+    this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
+    this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
     this.inCombat     = false;
     this.combatTarget = null;
     this.state        = 'idle';
@@ -458,10 +510,11 @@ export class Mob {
   _startWander() {
     const angle  = Math.random() * Math.PI * 2;
     const radius = (0.5 + Math.random() * 0.5) * WANDER_RADIUS * TILE_SIZE;
-    const tx = this.spawnX + Math.cos(angle) * radius;
-    const ty = this.spawnY + Math.sin(angle) * radius;
-    this.targetX = Math.max(0, Math.min(tx, WORLD_COLS * TILE_SIZE - this.w));
-    this.targetY = Math.max(0, Math.min(ty, WORLD_ROWS * TILE_SIZE - this.h));
+    // Snap to tile grid so the mob always walks to a whole tile, never stops mid-tile
+    const tCol = Math.round((this.spawnX + Math.cos(angle) * radius) / TILE_SIZE);
+    const tRow = Math.round((this.spawnY + Math.sin(angle) * radius) / TILE_SIZE);
+    this.targetX = Math.max(0, Math.min(tCol * TILE_SIZE, (WORLD_COLS - 1) * TILE_SIZE));
+    this.targetY = Math.max(0, Math.min(tRow * TILE_SIZE, (WORLD_ROWS - 1) * TILE_SIZE));
     this.state   = 'wandering';
   }
 
@@ -480,8 +533,11 @@ export class Mob {
     const dy     = predator.cy - this.cy;
     const d      = Math.sqrt(dx * dx + dy * dy) || 1;
     const spread = FLEE_SPREAD * TILE_SIZE;
-    this.targetX = Math.max(0, Math.min(this.x - (dx / d) * spread, WORLD_COLS * TILE_SIZE - this.w));
-    this.targetY = Math.max(0, Math.min(this.y - (dy / d) * spread, WORLD_ROWS * TILE_SIZE - this.h));
+    // Snap flee destination to tile grid
+    const tCol = Math.round((this.x - (dx / d) * spread) / TILE_SIZE);
+    const tRow = Math.round((this.y - (dy / d) * spread) / TILE_SIZE);
+    this.targetX = Math.max(0, Math.min(tCol * TILE_SIZE, (WORLD_COLS - 1) * TILE_SIZE));
+    this.targetY = Math.max(0, Math.min(tRow * TILE_SIZE, (WORLD_ROWS - 1) * TILE_SIZE));
     this.state   = 'fleeing';
   }
 
@@ -1213,7 +1269,10 @@ export class MobManager {
     this.mobs = [];
     this.spawnTopUpTimer = 0;
     this.desiredCounts = this._buildDesiredCounts(world);
-    this._spawnMissing(world, Infinity); // initial fill
+    // Use a seeded RNG for the initial fill so spawn positions are identical
+    // on every page load (same world seed → same mob positions).
+    const rng = makeRng(MOB_SEED);
+    this._spawnMissing(world, Infinity, rng);
   }
 
   _buildDesiredCounts(world) {
@@ -1258,7 +1317,7 @@ export class MobManager {
     return counts;
   }
 
-  _trySpawnOne(world, type) {
+  _trySpawnOne(world, type, rng = Math.random) {
     const def = MOB_DEFS[type];
     const { w, h } = def;
 
@@ -1268,8 +1327,8 @@ export class MobManager {
     while (attempts < maxAttempts) {
       attempts++;
 
-      const col = 5 + Math.floor(Math.random() * (world.cols - 10));
-      const row = 5 + Math.floor(Math.random() * (world.rows - 10));
+      const col = 5 + Math.floor(rng() * (world.cols - 10));
+      const row = 5 + Math.floor(rng() * (world.rows - 10));
       const tile = world.getTile(col, row);
       const biome = getBiome(col, row);
 
@@ -1308,7 +1367,7 @@ export class MobManager {
     return false;
   }
 
-  _spawnMissing(world, maxToSpawn = 8) {
+  _spawnMissing(world, maxToSpawn = 8, rng = Math.random) {
     const counts = this._currentCounts();
     let spawned = 0;
 
@@ -1316,7 +1375,7 @@ export class MobManager {
       let missing = desired - (counts[type] || 0);
 
       while (missing > 0 && spawned < maxToSpawn) {
-        const ok = this._trySpawnOne(world, type);
+        const ok = this._trySpawnOne(world, type, rng);
         if (!ok) break;
 
         missing--;

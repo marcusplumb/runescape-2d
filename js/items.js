@@ -2287,6 +2287,264 @@ ITEMS.FURN_PLANT = makeDirectionalFurniture({
   },
 });
 
+// ═══════════════════════════════════════════════════════════════════
+//  RAID-EXCLUSIVE ITEMS
+//  Added via Object.assign so they don't disturb the main ITEMS block.
+// ═══════════════════════════════════════════════════════════════════
+Object.assign(ITEMS, {
+
+  // ── Raid currency ────────────────────────────────────────────────
+  RAID_TOKEN: {
+    id: 'raid_token', name: 'Raid Token', stackable: true,
+    draw(ctx, x, y, s) {
+      // Octagonal gold coin with a shield emblem
+      ctx.fillStyle = '#c9a227';
+      ctx.beginPath();
+      ctx.arc(x + s * 0.5, y + s * 0.5, s * 0.33, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#8b6914';
+      ctx.lineWidth = s * 0.06;
+      ctx.stroke();
+      // Inner shield
+      ctx.fillStyle = '#a855f7';
+      ctx.fillRect(x + s * 0.38, y + s * 0.3, s * 0.24, s * 0.28);
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x + s * 0.43, y + s * 0.52, s * 0.14, s * 0.08);
+    },
+  },
+
+  CHAOS_FRAGMENT: {
+    id: 'chaos_fragment', name: 'Chaos Fragment', stackable: true,
+    draw(ctx, x, y, s) {
+      // Purple jagged crystal shard
+      ctx.fillStyle = '#6d28d9';
+      ctx.beginPath();
+      ctx.moveTo(x + s * 0.5,  y + s * 0.1);
+      ctx.lineTo(x + s * 0.75, y + s * 0.45);
+      ctx.lineTo(x + s * 0.62, y + s * 0.55);
+      ctx.lineTo(x + s * 0.78, y + s * 0.85);
+      ctx.lineTo(x + s * 0.38, y + s * 0.72);
+      ctx.lineTo(x + s * 0.22, y + s * 0.88);
+      ctx.lineTo(x + s * 0.28, y + s * 0.50);
+      ctx.lineTo(x + s * 0.18, y + s * 0.35);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#a855f7';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      // Sparkle highlight
+      ctx.fillStyle = '#ddd6fe';
+      ctx.fillRect(x + s * 0.45, y + s * 0.15, s * 0.08, s * 0.18);
+    },
+  },
+
+  // ── Raid weapons ─────────────────────────────────────────────────
+
+  RAID_BLADE: {
+    id: 'raid_blade', name: "Raider's Blade", stackable: false, equipSlot: 'weapon',
+    draw(ctx, x, y, s) {
+      // Purple-tinted balanced sword
+      ctx.fillStyle = '#4a2060'; ctx.fillRect(x+s*.36, y+s*.6, s*.12, s*.32); // grip
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(x+s*.3,  y+s*.55, s*.24, s*.07); // guard
+      ctx.fillStyle = '#7c3aed'; ctx.fillRect(x+s*.4,  y+s*.12, s*.14, s*.46); // blade
+      ctx.fillStyle = '#c4b5fd'; ctx.fillRect(x+s*.44, y+s*.12, s*.05, s*.42); // edge highlight
+      // Glow tip
+      ctx.fillStyle = '#a855f7'; ctx.fillRect(x+s*.4, y+s*.1, s*.14, s*.05);
+    },
+  },
+
+  VOIDBANE_SWORD: {
+    id: 'voidbane_sword', name: 'Voidbane Sword', stackable: false, equipSlot: 'weapon',
+    draw(ctx, x, y, s) {
+      // Void-black blade with teal edge glow
+      ctx.fillStyle = '#2a1a3a'; ctx.fillRect(x+s*.36, y+s*.6, s*.12, s*.32); // grip
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(x+s*.28, y+s*.54, s*.28, s*.08); // guard
+      ctx.fillStyle = '#0f0a1a'; ctx.fillRect(x+s*.39, y+s*.1,  s*.16, s*.46); // blade
+      ctx.fillStyle = '#00ffe0'; ctx.fillRect(x+s*.39, y+s*.1,  s*.03, s*.46); // left glow
+      ctx.fillStyle = '#00ffe0'; ctx.fillRect(x+s*.52, y+s*.1,  s*.03, s*.46); // right glow
+      ctx.fillStyle = '#00ffe0'; ctx.fillRect(x+s*.39, y+s*.08, s*.16, s*.04); // tip glow
+    },
+  },
+
+  CHAOS_EDGE: {
+    id: 'chaos_edge', name: 'Chaos Edge', stackable: false, equipSlot: 'weapon',
+    draw(ctx, x, y, s) {
+      // Jagged orange-red chaos blade (fast, high-crit)
+      ctx.fillStyle = '#3a1a0a'; ctx.fillRect(x+s*.36, y+s*.62, s*.12, s*.3); // grip
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(x+s*.27, y+s*.56, s*.26, s*.07); // guard
+      // Jagged blade silhouette
+      ctx.fillStyle = '#c2410c';
+      ctx.beginPath();
+      ctx.moveTo(x+s*.42, y+s*.58); ctx.lineTo(x+s*.36, y+s*.45);
+      ctx.lineTo(x+s*.4,  y+s*.38); ctx.lineTo(x+s*.34, y+s*.26);
+      ctx.lineTo(x+s*.42, y+s*.2);  ctx.lineTo(x+s*.5,  y+s*.1);
+      ctx.lineTo(x+s*.56, y+s*.22); ctx.lineTo(x+s*.52, y+s*.3);
+      ctx.lineTo(x+s*.58, y+s*.42); ctx.lineTo(x+s*.52, y+s*.5);
+      ctx.lineTo(x+s*.54, y+s*.58);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#fdba74'; ctx.fillRect(x+s*.46, y+s*.1, s*.06, s*.4); // bright edge
+    },
+  },
+
+  DUNGEON_GREATAXE: {
+    id: 'dungeon_greataxe', name: 'Dungeon Greataxe', stackable: false, equipSlot: 'weapon',
+    draw(ctx, x, y, s) {
+      // Massive dark two-handed axe
+      ctx.fillStyle = '#3a2a18'; ctx.fillRect(x+s*.44, y+s*.2, s*.1, s*.7); // haft
+      // Large axe head
+      ctx.fillStyle = '#374151';
+      ctx.beginPath();
+      ctx.moveTo(x+s*.54, y+s*.2); ctx.lineTo(x+s*.82, y+s*.1);
+      ctx.lineTo(x+s*.85, y+s*.45); ctx.lineTo(x+s*.54, y+s*.45);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#9ca3af'; // blade highlight
+      ctx.fillRect(x+s*.76, y+s*.11, s*.07, s*.32);
+      // Back spike
+      ctx.fillStyle = '#4b5563';
+      ctx.beginPath();
+      ctx.moveTo(x+s*.44, y+s*.22); ctx.lineTo(x+s*.22, y+s*.18);
+      ctx.lineTo(x+s*.26, y+s*.38); ctx.lineTo(x+s*.44, y+s*.38);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#6b7280'; ctx.fillRect(x+s*.22, y+s*.22, s*.06, s*.12);
+    },
+  },
+
+  // ── Raider's Armour Set (EPIC) ───────────────────────────────────
+
+  RAIDERS_HELM: {
+    id: 'raiders_helm', name: "Raider's Helm", stackable: false, equipSlot: 'helmet',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#4c1d95'; ctx.fillRect(x+s*.2, y+s*.3, s*.6, s*.5); // dome
+      ctx.beginPath(); ctx.arc(x+s*.5, y+s*.38, s*.3, Math.PI, 0); ctx.fill();
+      ctx.fillStyle = '#c9a227'; ctx.fillRect(x+s*.2, y+s*.6, s*.6, s*.06); // band
+      ctx.fillStyle = '#2d1260'; ctx.fillRect(x+s*.28, y+s*.66, s*.44, s*.18); // face
+      ctx.fillStyle = '#c4b5fd'; ctx.fillRect(x+s*.3, y+s*.32, s*.06, s*.2); // left ridge
+      ctx.fillRect(x+s*.64, y+s*.32, s*.06, s*.2); // right ridge
+      ctx.fillStyle = '#7c3aed'; ctx.fillRect(x+s*.38, y+s*.3, s*.24, s*.06); // crest base
+    },
+  },
+
+  RAIDERS_PLATE: {
+    id: 'raiders_plate', name: "Raider's Plate", stackable: false, equipSlot: 'chestplate',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(x+s*.15, y+s*.2, s*.7, s*.65); // main body
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x+s*.15, y+s*.2, s*.7, s*.06); // top trim
+      ctx.fillRect(x+s*.15, y+s*.82, s*.7, s*.04); // bottom trim
+      ctx.fillStyle = '#2d1260';
+      ctx.fillRect(x+s*.38, y+s*.26, s*.24, s*.54); // chest centre
+      ctx.fillStyle = '#c4b5fd';
+      ctx.fillRect(x+s*.2, y+s*.28, s*.06, s*.5); // left plate line
+      ctx.fillRect(x+s*.74, y+s*.28, s*.06, s*.5); // right plate line
+      ctx.fillStyle = '#a855f7';
+      ctx.fillRect(x+s*.38, y+s*.26, s*.24, s*.06); // chest rune band
+    },
+  },
+
+  RAIDERS_LEGS: {
+    id: 'raiders_legs', name: "Raider's Legs", stackable: false, equipSlot: 'leggings',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(x+s*.2, y+s*.1, s*.6, s*.3);  // waistband
+      ctx.fillRect(x+s*.2, y+s*.4, s*.26, s*.5); // left leg
+      ctx.fillRect(x+s*.54, y+s*.4, s*.26, s*.5); // right leg
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x+s*.2, y+s*.1, s*.6, s*.05);  // top trim
+      ctx.fillRect(x+s*.2, y+s*.38, s*.6, s*.04); // mid trim
+      ctx.fillStyle = '#c4b5fd';
+      ctx.fillRect(x+s*.25, y+s*.44, s*.06, s*.4); // left ridge
+      ctx.fillRect(x+s*.69, y+s*.44, s*.06, s*.4); // right ridge
+    },
+  },
+
+  RAIDERS_GAUNTLETS: {
+    id: 'raiders_gauntlets', name: "Raider's Gauntlets", stackable: false, equipSlot: 'gloves',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(x+s*.2, y+s*.25, s*.6, s*.55);
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x+s*.2, y+s*.25, s*.6, s*.05); // cuff band
+      ctx.fillRect(x+s*.2, y+s*.77, s*.6, s*.04); // knuckle band
+      ctx.fillStyle = '#c4b5fd';
+      ctx.fillRect(x+s*.25, y+s*.32, s*.1, s*.4);  // knuckle plate left
+      ctx.fillRect(x+s*.65, y+s*.32, s*.1, s*.4);  // knuckle plate right
+      ctx.fillStyle = '#a855f7';
+      ctx.fillRect(x+s*.38, y+s*.45, s*.24, s*.15); // palm rune
+    },
+  },
+
+  // ── Voidguard Armour Set (LEGENDARY) ────────────────────────────
+
+  VOIDGUARD_HELM: {
+    id: 'voidguard_helm', name: 'Voidguard Helm', stackable: false, equipSlot: 'helmet',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#0f0a1a'; ctx.fillRect(x+s*.2, y+s*.3, s*.6, s*.5);
+      ctx.beginPath(); ctx.arc(x+s*.5, y+s*.38, s*.3, Math.PI, 0);
+      ctx.fillStyle = '#0f0a1a'; ctx.fill();
+      ctx.strokeStyle = '#00ffe0'; ctx.lineWidth = s*.04;
+      ctx.beginPath(); ctx.arc(x+s*.5, y+s*.38, s*.3, Math.PI, 0); ctx.stroke();
+      ctx.strokeRect(x+s*.2, y+s*.3, s*.6, s*.5);
+      ctx.fillStyle = '#2d1260'; ctx.fillRect(x+s*.28, y+s*.66, s*.44, s*.18);
+      // Glowing eye slits
+      ctx.fillStyle = '#00ffe0'; ctx.fillRect(x+s*.3, y+s*.7, s*.14, s*.06);
+      ctx.fillRect(x+s*.56, y+s*.7, s*.14, s*.06);
+      ctx.fillStyle = 'rgba(0,255,224,0.3)';
+      ctx.fillRect(x+s*.28, y+s*.68, s*.18, s*.1);
+      ctx.fillRect(x+s*.54, y+s*.68, s*.18, s*.1);
+    },
+  },
+
+  VOIDGUARD_PLATE: {
+    id: 'voidguard_plate', name: 'Voidguard Plate', stackable: false, equipSlot: 'chestplate',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#0f0a1a'; ctx.fillRect(x+s*.15, y+s*.2, s*.7, s*.65);
+      ctx.strokeStyle = '#00ffe0'; ctx.lineWidth = s*.04;
+      ctx.strokeRect(x+s*.15, y+s*.2, s*.7, s*.65);
+      // Rune lines
+      ctx.strokeStyle = '#00ffe0'; ctx.lineWidth = s*.025;
+      ctx.beginPath();
+      ctx.moveTo(x+s*.5, y+s*.22); ctx.lineTo(x+s*.5, y+s*.84); ctx.stroke();
+      ctx.moveTo(x+s*.17, y+s*.5);  ctx.lineTo(x+s*.83, y+s*.5);  ctx.stroke();
+      ctx.fillStyle = 'rgba(0,255,224,0.15)';
+      ctx.fillRect(x+s*.16, y+s*.21, s*.68, s*.63);
+    },
+  },
+
+  VOIDGUARD_LEGS: {
+    id: 'voidguard_legs', name: 'Voidguard Legs', stackable: false, equipSlot: 'leggings',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#0f0a1a';
+      ctx.fillRect(x+s*.2, y+s*.1, s*.6, s*.3);
+      ctx.fillRect(x+s*.2, y+s*.4, s*.26, s*.5);
+      ctx.fillRect(x+s*.54, y+s*.4, s*.26, s*.5);
+      ctx.strokeStyle = '#00ffe0'; ctx.lineWidth = s*.03;
+      ctx.strokeRect(x+s*.2, y+s*.1, s*.6, s*.3);
+      ctx.strokeRect(x+s*.2, y+s*.4, s*.26, s*.5);
+      ctx.strokeRect(x+s*.54, y+s*.4, s*.26, s*.5);
+      ctx.fillStyle = 'rgba(0,255,224,0.1)';
+      ctx.fillRect(x+s*.21, y+s*.11, s*.58, s*.28);
+    },
+  },
+
+  VOIDGUARD_BOOTS: {
+    id: 'voidguard_boots', name: 'Voidguard Boots', stackable: false, equipSlot: 'boots',
+    draw(ctx, x, y, s) {
+      ctx.fillStyle = '#0f0a1a';
+      ctx.fillRect(x+s*.15, y+s*.15, s*.28, s*.7);
+      ctx.fillRect(x+s*.57, y+s*.15, s*.28, s*.7);
+      ctx.fillRect(x+s*.1,  y+s*.75, s*.35, s*.15);
+      ctx.fillRect(x+s*.55, y+s*.75, s*.35, s*.15);
+      ctx.strokeStyle = '#00ffe0'; ctx.lineWidth = s*.03;
+      ctx.strokeRect(x+s*.15, y+s*.15, s*.28, s*.7);
+      ctx.strokeRect(x+s*.57, y+s*.15, s*.28, s*.7);
+      ctx.fillStyle = 'rgba(0,255,224,0.2)';
+      ctx.fillRect(x+s*.16, y+s*.16, s*.26, s*.68);
+    },
+  },
+
+});
+
 /** Maps equipment slot IDs → inventory item defs for equip/unequip */
 export const EQUIP_ID_TO_ITEM = {
   // ── Weapons ──────────────────────────────────────────
@@ -2340,4 +2598,19 @@ export const EQUIP_ID_TO_ITEM = {
   green_cape:        ITEMS.GREEN_CAPE,
   warrior_cape:      ITEMS.WARRIOR_CAPE,
   berserker_cape:    ITEMS.BERSERKER_CAPE,
+  // ── Raid weapons ──────────────────────────────────────────────────
+  raid_blade:           ITEMS.RAID_BLADE,
+  voidbane_sword:       ITEMS.VOIDBANE_SWORD,
+  chaos_edge:           ITEMS.CHAOS_EDGE,
+  dungeon_greataxe:     ITEMS.DUNGEON_GREATAXE,
+  // ── Raider's Set (EPIC) ────────────────────────────────────────────
+  raiders_helm:         ITEMS.RAIDERS_HELM,
+  raiders_plate:        ITEMS.RAIDERS_PLATE,
+  raiders_legs:         ITEMS.RAIDERS_LEGS,
+  raiders_gauntlets:    ITEMS.RAIDERS_GAUNTLETS,
+  // ── Voidguard Set (LEGENDARY) ─────────────────────────────────────
+  voidguard_helm:       ITEMS.VOIDGUARD_HELM,
+  voidguard_plate:      ITEMS.VOIDGUARD_PLATE,
+  voidguard_legs:       ITEMS.VOIDGUARD_LEGS,
+  voidguard_boots:      ITEMS.VOIDGUARD_BOOTS,
 };

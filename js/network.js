@@ -50,6 +50,16 @@ export class Network {
     this.socket.emit('mob_hit', { mobId, damage });
   }
 
+  /** Tell the server this player started attacking a mob (server steers mob toward player). */
+  sendStartCombat(mobId) {
+    this.socket.emit('start_combat', { mobId });
+  }
+
+  /** Tell the server this player stopped attacking a mob. */
+  sendStopCombat(mobId) {
+    this.socket.emit('stop_combat', { mobId });
+  }
+
   /** Send a chat message to all players. */
   sendChat(message) {
     this.socket.emit('chat', { message });

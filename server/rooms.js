@@ -76,6 +76,7 @@ function attachRooms(io) {
     };
     online.set(socket.id, snapshot);
     onlineByUser.set(username, socket.id);
+    mobSim.setPlayerPos(socket.id, snapshot.col, snapshot.row);
 
     // Send this player the current world state (everyone else online)
     const others = [...online.values()].filter(p => p.id !== socket.id);
@@ -107,6 +108,7 @@ function attachRooms(io) {
       p.col = col;
       p.row = row;
       p.dir = dir ?? p.dir;
+      mobSim.setPlayerPos(socket.id, col, row);
       socket.broadcast.emit('player_moved', { id: socket.id, col, row, dir: p.dir });
     });
 
@@ -142,6 +144,16 @@ function attachRooms(io) {
       socket.broadcast.emit('tile_change', { col, row, tile });
     });
 
+    socket.on('start_combat', ({ mobId }) => {
+      if (typeof mobId !== 'number') return;
+      mobSim.startCombat(socket.id, mobId);
+    });
+
+    socket.on('stop_combat', ({ mobId }) => {
+      if (typeof mobId !== 'number') return;
+      mobSim.stopCombat(socket.id, mobId);
+    });
+
     socket.on('mob_hit', ({ mobId, damage }) => {
       if (typeof mobId !== 'number' || typeof damage !== 'number') return;
       if (damage < 0 || damage > 500) return; // sanity cap
@@ -168,6 +180,7 @@ function attachRooms(io) {
     });
 
     socket.on('disconnect', () => {
+      mobSim.removePlayer(socket.id);
       online.delete(socket.id);
       // Only remove from onlineByUser if this socket is still the current session
       if (onlineByUser.get(username) === socket.id) {

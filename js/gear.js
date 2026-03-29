@@ -256,6 +256,78 @@ export const GEAR = {
   BERSERKER_CAPE:   g('berserker_cape',   "Berserker's Cape",  'cape', 'EPIC',
     { strength: 50 }, { armour: 5, power: 18, critChance: 0.05 },
     'Radiates primal fury — amplifies the rage within.'),
+
+  /* ──────────────────────────────────────────────────────
+     RAID WEAPONS
+     Obtainable only from raid loot tables.
+     All require the listed Attack level; some also need Strength.
+     setId wires up the future set-bonus system when implemented.
+     ────────────────────────────────────────────────────── */
+
+  // ── Balanced EPIC — solid all-rounder with crit flair ───────────
+  RAID_BLADE:       g('raid_blade',       "Raider's Blade",    'weapon', 'EPIC',
+    { attack: 60 }, { accuracy: 65, power: 55, critChance: 0.12 },
+    'Forged in dungeon heat. Precise and deadly.'),
+
+  // ── LEGENDARY void sword — best-in-slot weapon ──────────────────
+  VOIDBANE_SWORD:   g('voidbane_sword',   'Voidbane Sword',    'weapon', 'LEGENDARY',
+    { attack: 75 }, { accuracy: 90, power: 70, critChance: 0.08 },
+    'Absorbs void essence. Even the air around it feels wrong.'),
+
+  // ── Fast crit EPIC — glass cannon for skilled players ───────────
+  CHAOS_EDGE:       g('chaos_edge',       'Chaos Edge',        'weapon', 'EPIC',
+    { attack: 55 }, { accuracy: 55, power: 35, critChance: 0.25, speed: 0.85 },
+    'Chaotic energies make every strike unpredictable. Crits often, crits hard.'),
+
+  // ── Slow heavy EPIC — enormous damage, sluggish swing ───────────
+  DUNGEON_GREATAXE: g('dungeon_greataxe', 'Dungeon Greataxe',  'weapon', 'EPIC',
+    { attack: 60, strength: 55 }, { accuracy: 40, power: 100, critChance: 0.10, speed: 1.20 },
+    'Slow enough to plan a meal around. Each hit shakes the earth.'),
+
+  /* ──────────────────────────────────────────────────────
+     RAIDER'S ARMOUR SET  (EPIC)
+     Full set: Helm + Plate + Legs + Gauntlets
+     Future hook: setId: 'raiders' for set-bonus counting.
+     ────────────────────────────────────────────────────── */
+
+  RAIDERS_HELM:       g('raiders_helm',       "Raider's Helm",       'helmet',     'EPIC',
+    { defence: 55 }, { armour: 45, power: 8 },
+    "A purple-alloy helm worn by veteran dungeon runners."),
+
+  RAIDERS_PLATE:      g('raiders_plate',      "Raider's Plate",      'chestplate', 'EPIC',
+    { defence: 55 }, { armour: 90, power: 12 },
+    "Heavy plate reinforced with raid-tempered alloy. Exceptional protection."),
+
+  RAIDERS_LEGS:       g('raiders_legs',       "Raider's Legs",       'leggings',   'EPIC',
+    { defence: 55 }, { armour: 50 },
+    "Sturdy greaves that let you move freely even in the deepest dungeon."),
+
+  RAIDERS_GAUNTLETS:  g('raiders_gauntlets',  "Raider's Gauntlets",  'gloves',     'EPIC',
+    { defence: 55 }, { armour: 18, power: 10 },
+    "Power-infused gauntlets that add force to every punch and parry."),
+
+  /* ──────────────────────────────────────────────────────
+     VOIDGUARD ARMOUR SET  (LEGENDARY)
+     Full set: Helm + Plate + Legs + Boots
+     Best-in-slot armour. Drops only on Elite/Master difficulty.
+     Future hook: setId: 'voidguard' for set-bonus counting.
+     ────────────────────────────────────────────────────── */
+
+  VOIDGUARD_HELM:     g('voidguard_helm',     'Voidguard Helm',      'helmet',     'LEGENDARY',
+    { defence: 70 }, { armour: 60, accuracy: 10 },
+    "Void-forged metal. The teal runes pulse with dimensional energy."),
+
+  VOIDGUARD_PLATE:    g('voidguard_plate',    'Voidguard Plate',     'chestplate', 'LEGENDARY',
+    { defence: 70 }, { armour: 120, accuracy: 15 },
+    "The finest chest armour in existence. Void-hardened, nearly impenetrable."),
+
+  VOIDGUARD_LEGS:     g('voidguard_legs',     'Voidguard Legs',      'leggings',   'LEGENDARY',
+    { defence: 70 }, { armour: 65 },
+    "Legs forged from the same void-metal as the plate. Light despite its strength."),
+
+  VOIDGUARD_BOOTS:    g('voidguard_boots',    'Voidguard Boots',     'boots',      'LEGENDARY',
+    { defence: 70 }, { armour: 20, speed: 0.97 },
+    "Void-energy enhances footwork. You move just a touch faster wearing these."),
 };
 
 /* ════════════════════════════════════════════════════════

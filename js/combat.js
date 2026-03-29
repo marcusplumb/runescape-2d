@@ -196,6 +196,7 @@ export class Combat {
         }
         if (mobDmg > 0) {
           this.player.hp = Math.max(0, this.player.hp - mobDmg);
+          if (this.onPlayerDamaged) this.onPlayerDamaged(mobDmg);
           this.hitSplats.push({
             wx: this.player.x + (this.player.w ?? 24) / 2,
             wy: this.player.y + (this.player.h ?? 32) * 0.25,
@@ -217,6 +218,7 @@ export class Combat {
 
     if (this.player.hp <= 0) {
       this.notif.add('You have been defeated! Respawning...', '#e74c3c');
+      if (this.onPlayerDeath) this.onPlayerDeath();
       this._respawnPlayer();
     }
   }

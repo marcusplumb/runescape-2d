@@ -227,8 +227,9 @@ export const SKILL_IDS = {
   MINING:      8,
   ARCHITECT:   9,
   FORGERY:     10,
+  RAIDING:     11,
 };
-export const SKILL_NAMES  = ['Woodcutting', 'Firemaking', 'Fishing', 'Cooking', 'Attack', 'Strength', 'Defence', 'Hitpoints', 'Mining', 'Architect', 'Forgery'];
+export const SKILL_NAMES  = ['Woodcutting', 'Firemaking', 'Fishing', 'Cooking', 'Attack', 'Strength', 'Defence', 'Hitpoints', 'Mining', 'Architect', 'Forgery', 'Raiding'];
 
 // ── Skill unlock tables ───────────────────────────────────
 // Indexed by SKILL_IDS. Each entry: { level, text, icon? }
@@ -379,8 +380,17 @@ export const SKILL_UNLOCKS = [
     { level: 80, text: 'Smelt Moonstone Ingot; Smith Moonstone Staff',    icon: 'bar_moonstone' },
     { level: 99, text: 'Grand Forgemaster — all recipes available',       icon: null },
   ],
+  // 11 — Raiding
+  [
+    { level:  1, text: 'Goblin Cave — Novice difficulty unlocked',        icon: null },
+    { level:  5, text: 'Adept difficulty unlocked',                       icon: null },
+    { level: 20, text: 'Veteran difficulty + Dungeon Depths unlocked',    icon: null },
+    { level: 45, text: 'Elite difficulty + Abyssal Sanctum unlocked',     icon: null },
+    { level: 70, text: 'Master difficulty unlocked',                      icon: null },
+    { level: 99, text: 'Grand Raider — maximum raid mastery',             icon: null },
+  ],
 ];
-export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392b', '#8e44ad', '#2980b9', '#ec407a', '#95a5a6', '#d4a017', '#b7410e'];
+export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392b', '#8e44ad', '#2980b9', '#ec407a', '#95a5a6', '#d4a017', '#b7410e', '#a855f7'];
 
 // XP table — Runescape-inspired curve
 export const XP_TABLE = (() => {
