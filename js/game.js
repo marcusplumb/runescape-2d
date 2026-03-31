@@ -155,6 +155,8 @@ export class Game {
     this._mobById      = new Map(); // mob id   → Mob object (server-synced)
     this._lastSentAction       = 'idle';
     this._lastSentActionLocked = false;
+    this._lastSentCombatLevel  = 1;
+    this._lastSentHp           = null; // null = not yet sent
     if (this.network) {
       this._setupNetworkHandlers();
       this.network.onForceLogout(({ reason }) => {
@@ -164,6 +166,10 @@ export class Game {
       // Relay mob hits to the server so all clients see the same HP
       this.combat.onMobDamaged = (mob, damage) => {
         if (!this.inRaid && mob.id !== undefined) this.network.sendMobHit(mob.id, damage);
+      };
+      // Relay attack swing animation to other clients
+      this.combat.onPlayerAttack = () => {
+        this.network.sendAttack();
       };
     }
 
@@ -304,6 +310,13 @@ export class Game {
     this.combat.onPlayerDamaged = (dmg) => {
       if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
         this.activeRaid.onPlayerDamaged(dmg);
+      }
+      if (this.network && !this.inRaid) {
+        // Splat positioned at centre-top of the player sprite
+        const wx = this.player.x + (this.player.w ?? 24) / 2;
+        const wy = this.player.y + (this.player.h ?? 32) * 0.25;
+        this.network.sendPlayerSplat(dmg, wx, wy);
+        this.network.sendPlayerHp(this.player.hp, this.player.maxHp);
       }
     };
 
@@ -630,6 +643,18 @@ export class Game {
       (this.skills.getLevel(SKILL_IDS.ATTACK)    + this.skills.getLevel(SKILL_IDS.STRENGTH) +
        this.skills.getLevel(SKILL_IDS.DEFENCE)   + this.skills.getLevel(SKILL_IDS.HITPOINTS)) / 4
     ));
+
+    // Sync combat level and HP changes to other players
+    if (this.network) {
+      if (this.player.combatLevel !== this._lastSentCombatLevel) {
+        this._lastSentCombatLevel = this.player.combatLevel;
+        this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
+      }
+      if (this.player.hp !== this._lastSentHp) {
+        this._lastSentHp = this.player.hp;
+        this.network.sendPlayerHp(this.player.hp, this.player.maxHp);
+      }
+    }
 
     // Interpolate and animate remote players
     for (const view of this.remotePlayers.values()) {
@@ -2542,7 +2567,7 @@ export class Game {
       view.currentAction = currentAction;
       view.actionLocked  = currentAction !== 'idle' && currentAction !== 'fight';
       view.actionTarget  = actionTarget || null;
-      if (currentAction === 'fight') view.skillAnim = 1.0;
+      if (currentAction === 'fight') view.skillAnim = 0; // start at 0 so the swing anim plays immediately
       else if (currentAction === 'idle') view.skillAnim = 0;
     });
 
@@ -2552,6 +2577,25 @@ export class Game {
         this.notifications.add(`${view.name} left.`, '#888');
         this.remotePlayers.delete(id);
       }
+    });
+
+    net.on('player_hp', ({ id, hp, maxHp }) => {
+      const view = this.remotePlayers.get(id);
+      if (!view) return;
+      view.hp    = hp;
+      view.maxHp = maxHp;
+    });
+
+    net.on('player_splat', ({ id, damage, wx, wy }) => {
+      const view = this.remotePlayers.get(id);
+      if (!view) return;
+      this.remoteHitSplats.push({ wx, wy, value: damage, timer: 0, maxTimer: 1.5, isPlayer: true });
+    });
+
+    net.on('player_attack', ({ id }) => {
+      const view = this.remotePlayers.get(id);
+      if (!view) return;
+      view.skillAnim = 0; // reset swing animation so the stab plays
     });
 
     // Shared world state: tile changes from other players
@@ -2596,10 +2640,14 @@ export class Game {
         mob.animFrame  = s.animFrame;
         mob.moving     = s.moving;
       }
-      // Remove any client-only mobs not in the server snapshot
+      // Remove any mobs not in the server snapshot — this includes the
+      // locally-spawned mobs (id === undefined) created by MobManager's
+      // constructor before the network connected.  Keeping them would cause
+      // getMobAt() to return phantom mobs that the server never tracks,
+      // making mob_hit events silently dropped (typeof undefined !== 'number').
       this.mobManager.mobs = this.mobManager.mobs.filter(m => {
-        if (m.id === undefined || seen.has(m.id)) return true;
-        this._mobById.delete(m.id);
+        if (seen.has(m.id)) return true;
+        if (m.id !== undefined) this._mobById.delete(m.id);
         return false;
       });
     });
@@ -3085,9 +3133,12 @@ export class Game {
       view._toX   = sx;        view._toY   = sy;
       view.moveT  = REMOTE_MOVE_TIME; // mark as "arrived"
       view.dir    = snap.dir ?? view.dir;
-      if (snap.equipment) view.equipment = snap.equipment;
-      if (snap.style)     view.style     = snap.style;
-      if (snap.name)      view.name      = snap.name;
+      if (snap.equipment)                  view.equipment   = snap.equipment;
+      if (snap.style)                      view.style       = snap.style;
+      if (snap.name)                       view.name        = snap.name;
+      if (snap.combatLevel != null)        view.combatLevel = snap.combatLevel;
+      if (snap.hp    != null)              view.hp          = snap.hp;
+      if (snap.maxHp != null)              view.maxHp       = snap.maxHp;
       return;
     }
     // Create a duck-type object that Player.prototype.draw can render
@@ -3113,11 +3164,16 @@ export class Game {
       actionLocked:  false,
       currentAction: snap.currentAction || 'idle',
       actionTarget:  snap.actionTarget  || null,
-      hp:            10,
-      maxHp:         10,
+      hp:            snap.hp    ?? 10,
+      maxHp:         snap.maxHp ?? 10,
       style:         { ...{ hair:'#4a3520',skin:'#deb887',shirt:'#b04040',pants:'#3d3424',hairStyle:'short',shirtStyle:'tunic' }, ...(snap.style || {}) },
       equipment:     { helmet:'none',chestplate:'none',leggings:'none',gloves:'none',boots:'none',cape:'none',weapon:'none', ...(snap.equipment || {}) },
-      combatLevel:   snap.combatLevel || 1,
+      combatLevel:   snap.combatLevel ?? 1,
+      // Player.prototype.draw calls these sub-methods via `this`; add them so
+      // the duck-typed view object doesn't throw "is not a function" when another
+      // player chops/mines/fishes and the action-tool/rod drawing code is reached.
+      _drawActionTool: Player.prototype._drawActionTool,
+      _drawFishingRod: Player.prototype._drawFishingRod,
       draw(ctx) { Player.prototype.draw.call(this, ctx); },
     };
     this.remotePlayers.set(snap.id, view);

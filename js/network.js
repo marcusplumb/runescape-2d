@@ -60,6 +60,21 @@ export class Network {
     this.socket.emit('stop_combat', { mobId });
   }
 
+  /** Notify other clients of this player's current HP (health bar sync). */
+  sendPlayerHp(hp, maxHp) {
+    this.socket.emit('player_hp', { hp, maxHp });
+  }
+
+  /** Notify other clients of a hit splat on this player (mob attacking player). */
+  sendPlayerSplat(damage, wx, wy) {
+    this.socket.emit('player_splat', { damage, wx, wy });
+  }
+
+  /** Notify other clients that this player just performed an attack swing (animation sync). */
+  sendAttack() {
+    this.socket.emit('player_attack');
+  }
+
   /** Send a chat message to all players. */
   sendChat(message) {
     this.socket.emit('chat', { message });

@@ -71,6 +71,8 @@ function attachRooms(io) {
       style:         save.style     || {},
       equipment:     save.equipment || {},
       combatLevel:   1,
+      hp:            10,
+      maxHp:         10,
       currentAction: 'idle',
       actionTarget:  null,
     };
@@ -112,17 +114,19 @@ function attachRooms(io) {
       socket.broadcast.emit('player_moved', { id: socket.id, col, row, dir: p.dir });
     });
 
-    socket.on('equip', ({ equipment, style, name }) => {
+    socket.on('equip', ({ equipment, style, name, combatLevel }) => {
       const p = online.get(socket.id);
       if (!p) return;
-      if (equipment) p.equipment = equipment;
-      if (style)     p.style     = style;
-      if (name)      p.name      = name;
+      if (equipment)              p.equipment    = equipment;
+      if (style)                  p.style        = style;
+      if (name)                   p.name         = name;
+      if (typeof combatLevel === 'number') p.combatLevel = combatLevel;
       socket.broadcast.emit('player_updated', {
-        id: socket.id,
-        equipment: p.equipment,
-        style:     p.style,
-        name:      p.name,
+        id:          socket.id,
+        equipment:   p.equipment,
+        style:       p.style,
+        name:        p.name,
+        combatLevel: p.combatLevel,
       });
     });
 
@@ -163,6 +167,25 @@ function attachRooms(io) {
         // Send hit splat to all OTHER clients (sender already shows their own)
         socket.broadcast.emit('mob_splat', { id: result.id, damage, wx: result.wx, wy: result.wy });
       }
+    });
+
+    socket.on('player_hp', ({ hp, maxHp }) => {
+      if (typeof hp !== 'number' || typeof maxHp !== 'number') return;
+      const p = online.get(socket.id);
+      if (!p) return;
+      p.hp    = Math.max(0, hp);
+      p.maxHp = Math.max(1, maxHp);
+      socket.broadcast.emit('player_hp', { id: socket.id, hp: p.hp, maxHp: p.maxHp });
+    });
+
+    socket.on('player_splat', ({ damage, wx, wy }) => {
+      if (typeof damage !== 'number' || typeof wx !== 'number' || typeof wy !== 'number') return;
+      if (damage < 0 || damage > 500) return;
+      socket.broadcast.emit('player_splat', { id: socket.id, damage, wx, wy });
+    });
+
+    socket.on('player_attack', () => {
+      socket.broadcast.emit('player_attack', { id: socket.id });
     });
 
     // Chat rate-limit: 1 message per second

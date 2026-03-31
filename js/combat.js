@@ -37,6 +37,8 @@ export class Combat {
 
     // Optional callback(mob, damage) fired after each successful hit — used by Game to sync damage to server
     this.onMobDamaged = null;
+    // Optional callback() fired each attack tick (hit or miss) — used by Game to sync swing animation
+    this.onPlayerAttack = null;
   }
 
   /* ── Public: player clicks a mob to initiate combat ──── */
@@ -123,6 +125,7 @@ export class Combat {
     const gear = getTotalStats(this.player.equipment);
     this.attackTimer = COMBAT_TICK * gear.speed;
     this.player.skillAnim = 0;  // sync stab animation to this attack
+    if (this.onPlayerAttack) this.onPlayerAttack();
 
     // ── Player attacks mob ────────────────────────────────
     const atkLvl = this.skills.getLevel(SKILL_IDS.ATTACK);
@@ -384,7 +387,7 @@ function _rollHit(attackLevel, defenceLevel, accuracy = 0, armour = 0) {
 }
 
 function _getMaxHit(strengthLevel, power = 0) {
-  return Math.max(1, Math.floor(strengthLevel * 0.5 + power * 0.3 + 1));
+  return Math.max(1, Math.floor(strengthLevel * 0.5 + power * 0.3 + 1)/3);
 }
 
 function _rollDamage(strengthLevel, power = 0, critChance = 0) {
