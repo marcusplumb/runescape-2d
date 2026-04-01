@@ -81,7 +81,7 @@ const TILE_TOOLTIPS = {
 const ITEM_BY_ID = new Map(Object.values(ITEMS).map(item => [item.id, item]));
 
 export class Game {
-  constructor(canvas, savedState = null, token = null, username = null) {
+  constructor(canvas, savedState = null, username = null) {
     this.canvas = canvas;
     this.resizeCanvas();
 
@@ -149,8 +149,9 @@ export class Game {
     // Always use the authenticated username — overrides any stale save value
     if (username) this.player.name = username;
 
-    // Multiplayer network connection
-    this.network       = token ? new Network(token) : null;
+    // Multiplayer network — created whenever a username is present (logged in).
+    // Auth is handled by the HttpOnly session cookie; no token needed here.
+    this.network       = username ? new Network() : null;
     this.remotePlayers = new Map(); // socketId → remote player view
     this._mobById      = new Map(); // mob id   → Mob object (server-synced)
     this._lastSentAction       = 'idle';
@@ -174,16 +175,17 @@ export class Game {
     }
 
     // Auto-save every 30 s + on page unload
-    if (token) {
-      this._saveToken    = token;
+    if (username) {
+      // _saveToken repurposed as a truthy "logged-in" guard (no longer holds a JWT)
+      this._saveToken    = true;
+      this._loggingOut   = false; // set true in _logout() to suppress false 401 alarms
       this._saveUsername = username;
       setInterval(() => this._saveToServer(), 30_000);
-      // keepalive fetch works during beforeunload; sendBeacon as fallback
       window.addEventListener('beforeunload', () => this._saveToServer(true));
     }
 
-    // Idle auto-logout: 3 min idle → logout; warn at 2m30s
-    this._idleTimeout  = 3 * 60;  // seconds
+    // Idle auto-logout: 20 min idle → logout; warn at 30 s remaining
+    this._idleTimeout  = 20 * 60; // seconds
     this._idleWarnAt   = 30;       // warn when this many seconds remain
     this._idleTimer    = this._idleTimeout;
     this._idleWarned   = false;
@@ -2346,12 +2348,15 @@ export class Game {
   }
 
   _logout() {
+    // Flag first so the save's 401 handler doesn't also trigger a reload —
+    // the session will be intentionally invalidated a moment later.
+    this._loggingOut = true;
     this._saveToServer();
     if (this.network) this.network.disconnect();
-    localStorage.removeItem('rw_token');
-    localStorage.removeItem('rw_username');
-    // Small delay so the save beacon can fire before reload
-    setTimeout(() => location.reload(), 300);
+    // Tell the server to invalidate the session and clear the cookie,
+    // then reload so the login screen is shown again.
+    fetch('/auth/logout', { method: 'POST', credentials: 'include' })
+      .finally(() => setTimeout(() => location.reload(), 300));
   }
 
   _saveToServer(isUnload = false) {
@@ -2365,28 +2370,30 @@ export class Game {
     }
 
     if (isUnload && navigator.sendBeacon) {
-      // sendBeacon is fire-and-forget but survives page close
+      // sendBeacon survives page close. The browser includes the session cookie
+      // automatically for same-origin requests — no Authorization header needed.
       const blob = new Blob([body], { type: 'application/json' });
-      const ok = navigator.sendBeacon(
-        `/save?token=${encodeURIComponent(this._saveToken)}`, blob
-      );
+      const ok   = navigator.sendBeacon('/save', blob);
       if (!ok) console.warn('[Save] sendBeacon rejected (payload too large?)');
       return;
     }
 
-    // Regular saves use fetch so failures are visible in the console
+    // Regular saves use fetch with credentials so the session cookie is sent.
     fetch('/save', {
-      method:    'POST',
-      headers:   { 'Content-Type': 'application/json', 'Authorization': `Bearer ${this._saveToken}` },
+      method:      'POST',
+      headers:     { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body,
-      keepalive: true,
+      keepalive:   true,
     })
       .then(r => {
         if (r.status === 401) {
-          // Token expired or secret changed — clear it and force re-login
-          console.warn('[Save] token rejected (401) — session expired');
-          localStorage.removeItem('rw_token');
-          localStorage.removeItem('rw_username');
+          // If we're already in the middle of a voluntary logout the session is
+          // intentionally being invalidated — don't double-reload or show a
+          // spurious "session expired" notification.
+          if (this._loggingOut) return;
+          // Genuine session expiry — stop saving and prompt re-login.
+          console.warn('[Save] session rejected (401)');
           this._saveToken = null;
           this.notifications.add('Session expired — please log in again.', '#e74c3c');
           setTimeout(() => location.reload(), 3000);
@@ -2529,8 +2536,31 @@ export class Game {
   _setupNetworkHandlers() {
     const net = this.network;
 
+    // On every (re)connect, push our current state to the server so other
+    // players immediately see our correct position, appearance, and HP.
+    net.on('connect', () => {
+      // Reset dedup guards so all values are re-sent on the next update tick
+      this.network._lastCol         = null;
+      this.network._lastRow         = null;
+      this.network._lastDir         = null;
+      this._lastSentHp              = null;
+      this._lastSentCombatLevel     = 0; // < any real level → forces sendEquip
+      // Send appearance and HP immediately (don't wait for a change)
+      this.network.sendEquip(
+        this.player.equipment, this.player.style,
+        this.player.name,      this.player.combatLevel
+      );
+      this.network.sendPlayerHp(this.player.hp, this.player.maxHp);
+      // Position is sent on the next update tick once sendMove dedup is cleared
+    });
+
     net.on('world_state', (players) => {
       for (const snap of players) this._upsertRemotePlayer(snap);
+      if (players.length === 1) {
+        this.notifications.add(`${players[0].name} is already online.`, '#6a9');
+      } else if (players.length > 1) {
+        this.notifications.add(`${players.length} other players are already online.`, '#6a9');
+      }
     });
 
     net.on('player_joined', (snap) => {

@@ -1,44 +1,63 @@
 'use strict';
-const jwt    = require('jsonwebtoken');
-const db     = require('./db');
-const mobSim = require('./mobSim');
+const db       = require('./db');
+const mobSim   = require('./mobSim');
+const sessions = require('./sessions');
+const { COOKIE_NAME } = require('./auth');
 
 /**
- * Manages the set of connected players and broadcasts real-time position/
- * equipment updates to all other clients.
+ * Parse a single named cookie from a raw Cookie header string.
+ * Used to extract the session ID from Socket.io handshake headers.
+ * We parse manually here because cookie-parser is Express middleware and
+ * does not run on WebSocket upgrade requests.
+ */
+function parseCookie(cookieHeader, name) {
+  if (!cookieHeader) return null;
+  for (const part of cookieHeader.split(';')) {
+    const eq  = part.indexOf('=');
+    if (eq === -1) continue;
+    const key = part.slice(0, eq).trim();
+    if (key === name) {
+      try { return decodeURIComponent(part.slice(eq + 1).trim()); }
+      catch { return null; }
+    }
+  }
+  return null;
+}
+
+/**
+ * Manages the set of connected players and broadcasts real-time updates.
  *
- * Each entry in `online` maps  socketId → PlayerSnapshot:
- *   { id, username, name, col, row, dir, style, equipment }
+ * Each entry in `online` maps socketId → PlayerSnapshot:
+ *   { id, username, name, col, row, dir, style, equipment, combatLevel,
+ *     hp, maxHp, currentAction, actionTarget }
  */
 function attachRooms(io) {
-  // Require valid JWT in Socket.io handshake
+  // Security-critical: validate the session cookie on every WebSocket connection.
+  // Rejects connections with missing, invalid, or expired sessions.
   io.use((socket, next) => {
-    const token = socket.handshake.auth?.token;
-    if (!token) return next(new Error('Authentication required.'));
-    try {
-      const payload = jwt.verify(token, process.env.JWT_SECRET);
-      socket.username = payload.sub;
-      next();
-    } catch {
-      next(new Error('Invalid or expired token.'));
-    }
+    const cookieHeader = socket.handshake.headers.cookie || '';
+    const sessionId    = parseCookie(cookieHeader, COOKIE_NAME);
+    const session      = sessions.getSession(sessionId);
+
+    if (!session) return next(new Error('Authentication required. Please log in.'));
+
+    sessions.renewSession(sessionId); // keep session alive while playing
+    socket.username  = session.username;
+    socket.sessionId = sessionId;
+    next();
   });
 
   const online         = new Map(); // socketId  → snapshot
   const onlineByUser   = new Map(); // username  → socketId
-  const worldOverrides = new Map(); // "col,row" → tile — shared world state for late joiners
+  const worldOverrides = new Map(); // "col,row" → tile
 
-  // ── Start mob simulation (async; connections accepted immediately) ──
+  // ── Start mob simulation ──────────────────────────────────────────────────
   mobSim.init().then(() => {
-    // Tick mob AI + broadcast positions every 100 ms
     setInterval(() => {
       mobSim.update(0.1);
-      if (online.size > 0) {
-        io.emit('mob_state', mobSim.getSnapshot());
-      }
+      if (online.size > 0) io.emit('mob_state', mobSim.getSnapshot());
     }, 100);
 
-    // Send current mob state to any players already connected during init
     for (const [sid] of online) {
       const sock = io.sockets.sockets.get(sid);
       if (sock) sock.emit('mob_state', mobSim.getSnapshot());
@@ -48,23 +67,32 @@ function attachRooms(io) {
   io.on('connection', (socket) => {
     const username = socket.username;
 
-    // Kick any existing session for this username
+    // Single-session enforcement: kick any existing socket for this username,
+    // BUT only if it belongs to a different HTTP session (genuine new login from
+    // another device/browser). A reconnect from the same session (e.g. Socket.io
+    // dropping and re-establishing the transport) must NOT trigger force_logout —
+    // that would cause a logout→session-invalidated→"session expired" cascade.
     const existingId = onlineByUser.get(username);
     if (existingId) {
-      const existingSocket = io.sockets.sockets.get(existingId);
-      if (existingSocket) {
-        existingSocket.emit('force_logout', { reason: 'Logged in from another location.' });
-        existingSocket.disconnect(true);
+      const existingSnap = online.get(existingId);
+      const isReconnect  = existingSnap?.sessionId === socket.sessionId;
+      if (!isReconnect) {
+        // Genuinely a different login — kick the old session.
+        const existingSock = io.sockets.sockets.get(existingId);
+        if (existingSock) {
+          existingSock.emit('force_logout', { reason: 'You logged in from another location.' });
+          existingSock.disconnect(true);
+        }
       }
       online.delete(existingId);
     }
 
-    // Build initial snapshot from saved data (style/equipment preserved from save)
     const save = db.loadSave(username) || {};
     const snapshot = {
       id:            socket.id,
+      sessionId:     socket.sessionId, // used above to detect reconnects vs new logins
       username,
-      name:          username,
+      name:          save.name      || username,
       col:           save.col       ?? 512,
       row:           save.row       ?? 389,
       dir:           0,
@@ -80,11 +108,10 @@ function attachRooms(io) {
     onlineByUser.set(username, socket.id);
     mobSim.setPlayerPos(socket.id, snapshot.col, snapshot.row);
 
-    // Send this player the current world state (everyone else online)
-    const others = [...online.values()].filter(p => p.id !== socket.id);
-    socket.emit('world_state', others);
+    // Send this player the current world (everyone else online)
+    socket.emit('world_state', [...online.values()].filter(p => p.id !== socket.id));
 
-    // Send accumulated tile changes so the new player sees the shared world
+    // Send accumulated world tile changes
     if (worldOverrides.size > 0) {
       const overrides = [];
       for (const [key, tile] of worldOverrides) {
@@ -94,15 +121,11 @@ function attachRooms(io) {
       socket.emit('world_overrides', overrides);
     }
 
-    // Send current mob state if simulation is already ready
-    if (mobSim.ready) {
-      socket.emit('mob_state', mobSim.getSnapshot());
-    }
+    if (mobSim.ready) socket.emit('mob_state', mobSim.getSnapshot());
 
-    // Tell everyone else this player joined
     socket.broadcast.emit('player_joined', snapshot);
 
-    // ── Incoming events ──────────────────────────────────
+    // ── Incoming events ───────────────────────────────────────────────────
 
     socket.on('move', ({ col, row, dir }) => {
       const p = online.get(socket.id);
@@ -117,10 +140,10 @@ function attachRooms(io) {
     socket.on('equip', ({ equipment, style, name, combatLevel }) => {
       const p = online.get(socket.id);
       if (!p) return;
-      if (equipment)              p.equipment    = equipment;
-      if (style)                  p.style        = style;
-      if (name)                   p.name         = name;
-      if (typeof combatLevel === 'number') p.combatLevel = combatLevel;
+      if (equipment)                       p.equipment    = equipment;
+      if (style)                           p.style        = style;
+      if (name)                            p.name         = name;
+      if (typeof combatLevel === 'number') p.combatLevel  = combatLevel;
       socket.broadcast.emit('player_updated', {
         id:          socket.id,
         equipment:   p.equipment,
@@ -133,40 +156,13 @@ function attachRooms(io) {
     socket.on('action', ({ currentAction, actionTarget }) => {
       const p = online.get(socket.id);
       if (!p) return;
-      const allowed = ['idle','chop','mine','fish','cook','fight'];
+      const allowed = ['idle', 'chop', 'mine', 'fish', 'cook', 'fight'];
       if (!allowed.includes(currentAction)) return;
       p.currentAction = currentAction;
       p.actionTarget  = actionTarget || null;
-      socket.broadcast.emit('player_action', { id: socket.id, currentAction, actionTarget: p.actionTarget });
-    });
-
-    socket.on('tile_change', ({ col, row, tile }) => {
-      if (typeof col !== 'number' || typeof row !== 'number' || typeof tile !== 'number') return;
-      if (col < 0 || col > 4096 || row < 0 || row > 4096) return;
-      worldOverrides.set(`${col},${row}`, tile);
-      mobSim.setTile(col, row, tile); // keep mob pathfinding world in sync
-      socket.broadcast.emit('tile_change', { col, row, tile });
-    });
-
-    socket.on('start_combat', ({ mobId }) => {
-      if (typeof mobId !== 'number') return;
-      mobSim.startCombat(socket.id, mobId);
-    });
-
-    socket.on('stop_combat', ({ mobId }) => {
-      if (typeof mobId !== 'number') return;
-      mobSim.stopCombat(socket.id, mobId);
-    });
-
-    socket.on('mob_hit', ({ mobId, damage }) => {
-      if (typeof mobId !== 'number' || typeof damage !== 'number') return;
-      if (damage < 0 || damage > 500) return; // sanity cap
-      const result = mobSim.applyDamage(mobId, damage);
-      if (result) {
-        io.emit('mob_damage', { id: result.id, hp: result.hp, dead: result.dead });
-        // Send hit splat to all OTHER clients (sender already shows their own)
-        socket.broadcast.emit('mob_splat', { id: result.id, damage, wx: result.wx, wy: result.wy });
-      }
+      socket.broadcast.emit('player_action', {
+        id: socket.id, currentAction, actionTarget: p.actionTarget,
+      });
     });
 
     socket.on('player_hp', ({ hp, maxHp }) => {
@@ -188,16 +184,44 @@ function attachRooms(io) {
       socket.broadcast.emit('player_attack', { id: socket.id });
     });
 
-    // Chat rate-limit: 1 message per second
+    socket.on('tile_change', ({ col, row, tile }) => {
+      if (typeof col !== 'number' || typeof row !== 'number' || typeof tile !== 'number') return;
+      if (col < 0 || col > 4096 || row < 0 || row > 4096) return;
+      worldOverrides.set(`${col},${row}`, tile);
+      mobSim.setTile(col, row, tile);
+      socket.broadcast.emit('tile_change', { col, row, tile });
+    });
+
+    socket.on('start_combat', ({ mobId }) => {
+      if (typeof mobId !== 'number') return;
+      mobSim.startCombat(socket.id, mobId);
+    });
+
+    socket.on('stop_combat', ({ mobId }) => {
+      if (typeof mobId !== 'number') return;
+      mobSim.stopCombat(socket.id, mobId);
+    });
+
+    socket.on('mob_hit', ({ mobId, damage }) => {
+      if (typeof mobId !== 'number' || typeof damage !== 'number') return;
+      if (damage < 0 || damage > 500) return;
+      const result = mobSim.applyDamage(mobId, damage);
+      if (result) {
+        io.emit('mob_damage', { id: result.id, hp: result.hp, dead: result.dead });
+        socket.broadcast.emit('mob_splat', { id: result.id, damage, wx: result.wx, wy: result.wy });
+      }
+    });
+
+    // Chat rate-limit: 1 message per second per connection
     let lastChatTime = 0;
     socket.on('chat', ({ message }) => {
       if (typeof message !== 'string') return;
       const text = message.trim().slice(0, 120);
       if (!text) return;
       const now = Date.now();
-      if (now - lastChatTime < 1000) return; // rate limit
+      if (now - lastChatTime < 1000) return;
       lastChatTime = now;
-      const p = online.get(socket.id);
+      const p    = online.get(socket.id);
       const name = p ? (p.name || username) : username;
       io.emit('chat_message', { name, message: text });
     });
@@ -205,10 +229,7 @@ function attachRooms(io) {
     socket.on('disconnect', () => {
       mobSim.removePlayer(socket.id);
       online.delete(socket.id);
-      // Only remove from onlineByUser if this socket is still the current session
-      if (onlineByUser.get(username) === socket.id) {
-        onlineByUser.delete(username);
-      }
+      if (onlineByUser.get(username) === socket.id) onlineByUser.delete(username);
       io.emit('player_left', { id: socket.id });
     });
   });
