@@ -6,10 +6,15 @@
  */
 export class Network {
   constructor() {
-    // withCredentials: true makes the browser include cookies (including the
-    // HttpOnly session cookie) in the Socket.io handshake request.
+    // withCredentials: true makes the browser include cookies
+    // in the Socket.io handshake request.
+    // transports:['websocket'] avoids long-polling/sticky-session issues
+    // in multi-instance production.
     // eslint-disable-next-line no-undef
-    this.socket = io({ withCredentials: true });
+    this.socket = io({
+      withCredentials: true,
+      transports: ['websocket'],
+    });
 
     this._lastCol = null;
     this._lastRow = null;
@@ -18,6 +23,7 @@ export class Network {
     this.socket.on('connect', () => {
       console.log('[Network] connected', this.socket.id);
     });
+
     this.socket.on('connect_error', (err) => {
       console.warn('[Network] connection error:', err.message);
     });
