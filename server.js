@@ -4,8 +4,13 @@ try { require('dotenv').config(); } catch {}
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
-const { createClient } = require('redis');
-const { createAdapter } = require('@socket.io/redis-adapter');
+let createClient = null;
+let createAdapter = null;
+
+if (process.env.REDIS_URL) {
+  ({ createClient } = require('redis'));
+  ({ createAdapter } = require('@socket.io/redis-adapter'));
+}
 const cookieParser = require('cookie-parser');
 const path = require('path');
 const db = require('./server/db');
