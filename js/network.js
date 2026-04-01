@@ -1,13 +1,15 @@
 /**
  * Network — thin wrapper around Socket.io.
- * Connects to the server with a JWT token and exposes
- * methods for sending updates and registering event callbacks.
+ *
+ * Auth is now handled by the HttpOnly session cookie that the browser sends
+ * automatically with the WebSocket upgrade request. No token is passed here.
  */
 export class Network {
-  constructor(token) {
-    // io() is provided by /socket.io/socket.io.js loaded in index.html
+  constructor() {
+    // withCredentials: true makes the browser include cookies (including the
+    // HttpOnly session cookie) in the Socket.io handshake request.
     // eslint-disable-next-line no-undef
-    this.socket = io({ auth: { token } });
+    this.socket = io({ withCredentials: true });
 
     this._lastCol = null;
     this._lastRow = null;
@@ -50,7 +52,7 @@ export class Network {
     this.socket.emit('mob_hit', { mobId, damage });
   }
 
-  /** Tell the server this player started attacking a mob (server steers mob toward player). */
+  /** Tell the server this player started attacking a mob. */
   sendStartCombat(mobId) {
     this.socket.emit('start_combat', { mobId });
   }
@@ -60,12 +62,27 @@ export class Network {
     this.socket.emit('stop_combat', { mobId });
   }
 
+  /** Notify other clients of this player's current HP (health bar sync). */
+  sendPlayerHp(hp, maxHp) {
+    this.socket.emit('player_hp', { hp, maxHp });
+  }
+
+  /** Notify other clients of a hit splat on this player (mob attacking player). */
+  sendPlayerSplat(damage, wx, wy) {
+    this.socket.emit('player_splat', { damage, wx, wy });
+  }
+
+  /** Notify other clients that this player just performed an attack swing (animation sync). */
+  sendAttack() {
+    this.socket.emit('player_attack');
+  }
+
   /** Send a chat message to all players. */
   sendChat(message) {
     this.socket.emit('chat', { message });
   }
 
-  on(event, cb) { this.socket.on(event, cb); }
+  on(event, cb)  { this.socket.on(event, cb); }
   off(event, cb) { this.socket.off(event, cb); }
 
   /** Register a callback that fires when the server kicks this session. */
