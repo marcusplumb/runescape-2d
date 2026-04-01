@@ -72,6 +72,7 @@ export const SELL_PRICES = {
   obsidian_cleaver: 1200,
   moonstone_staff:  2500,
   iron_axe:         65,
+  iron_legs:        65,
   steel_axe:        160,
   iron_pickaxe:     65,
   steel_pickaxe:    160,
