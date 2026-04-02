@@ -13,6 +13,7 @@ import { getTotalStats } from './gear.js';
 
 const COMBAT_SIDE_GAP = 6;       // pixels between player and mob
 const COMBAT_SLOT_EPSILON = 10;  // how close mob must get to its slot before fighting
+const MELEE_RANGE = 1.5;         // tiles — must match mobs.js
 
 export class Combat {
   constructor(player, mobManager, inventory, skills, notifications, actions) {
