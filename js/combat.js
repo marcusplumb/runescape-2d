@@ -26,6 +26,10 @@ export class Combat {
     // The mob the player is currently attacking (or null)
     this.targetMob    = null;
 
+    // Single combat: the one mob currently allowed to deal damage to the player.
+    // Others chase but wait their turn.
+    this.activeAttacker  = null;
+
     // Cooldown timer — counts down to the next auto-attack tick
     this.attackTimer     = 0;
     // Seconds since the player was last in active melee range
@@ -45,6 +49,22 @@ export class Combat {
   setTarget(mob) {
     if (mob === this.targetMob) return;
 
+    // Single combat: once locked in a fight (active attacker in range, or the
+    // current targetMob has reached melee range), can't switch to a different mob.
+    const lockedAttacker = this.activeAttacker && !this.activeAttacker.dead ? this.activeAttacker
+      : (this.targetMob && this.targetMob.atMeleeStop && !this.targetMob.dead ? this.targetMob : null);
+    if (mob && lockedAttacker && mob !== lockedAttacker) {
+      this.notif.add(`You are already in combat!`, '#e74c3c');
+      return;
+    }
+
+    // Don't steal a mob another player is already fighting (multiplayer fairness).
+    // multiCombat flag on the mob def allows shared fights.
+    if (mob && mob.isPlayerTarget && !mob.multiCombat) {
+      this.notif.add(`That mob is already in combat!`, '#e74c3c');
+      return;
+    }
+
     if (this.targetMob) {
       this._releaseMob(this.targetMob);
     }
@@ -55,14 +75,17 @@ export class Combat {
 
     if (mob) {
       this._engageMob(mob);
+      // activeAttacker will be set by _processMobAttacks once the mob reaches
+      // melee range (atMeleeStop). Don't set it here — mob might still be walking over.
       this.notif.add(`Attacking ${mob.name}...`, '#e74c3c');
     }
   }
 
   clearTarget() {
     if (this.targetMob) {
-      this._releaseMob(this.targetMob);
+      this._releaseMob(this.targetMob);  // also clears activeAttacker if it matches
     }
+    this.activeAttacker  = null;
     this.targetMob       = null;
     this.attackTimer     = 0;
     this.combatIdleTimer = 0;
@@ -79,6 +102,10 @@ export class Combat {
 
     for (const s of this.hitSplats) s.timer += dt;
     this.hitSplats = this.hitSplats.filter(s => s.timer < s.maxTimer);
+
+    // Mob-initiated attacks run independently of whether the player has a target.
+    this._processMobAttacks(dt);
+    if (this.player.hp <= 0) return;  // player was killed by a mob attack this frame
 
     if (!this.targetMob) return;
 
@@ -180,64 +207,6 @@ export class Combat {
       this.notif.add(`You miss ${this.targetMob.name}.`, '#aaa');
     }
 
-    // ── Mob attacks player ────────────────────────────────
-    if (this.targetMob && !this.targetMob.dead) {
-      const mobHit = _rollHit(
-        this.targetMob.attackLevel,
-        this.skills.getLevel(SKILL_IDS.DEFENCE),
-        0, gear.armour
-      );
-
-      let mobDmg = 0;
-      let mobMaxHit = _getMaxHit(this.targetMob.strengthLevel);
-
-      const pCol = Math.floor(this.player.cx / TILE_SIZE);
-      const pRow = Math.floor(this.player.cy / TILE_SIZE);
-      const hasDmgReduce =
-        this.actions && this.actions.getFirePerks(pCol, pRow).has('DMG_REDUCE');
-
-      // Reduce the maximum possible incoming damage on the same basis
-      // as the real damage, so Defence XP reflects damage avoided.
-      if (hasDmgReduce) {
-        mobMaxHit = Math.max(1, Math.ceil(mobMaxHit * 0.85));
-      }
-
-      if (mobHit) {
-        mobDmg = _rollDamage(this.targetMob.strengthLevel);
-
-        if (hasDmgReduce && mobDmg > 0) {
-          mobDmg = Math.max(1, Math.ceil(mobDmg * 0.85));
-        }
-
-        if (mobDmg > 0) {
-          this.player.hp = Math.max(0, this.player.hp - mobDmg);
-          if (this.onPlayerDamaged) this.onPlayerDamaged(mobDmg);
-          this.hitSplats.push({
-            wx: this.player.x + (this.player.w ?? 24) / 2,
-            wy: this.player.y + (this.player.h ?? 32) * 0.25,
-            value: mobDmg,
-            isPlayer: true,
-            timer: 0,
-            maxTimer: 1.5,
-          });
-          this.notif.add(`${this.targetMob.name} hits you for ${mobDmg}!`, '#e74c3c');
-        }
-      }
-
-      const defXp = Math.max(0, (mobMaxHit - mobDmg) * 4);
-      if (defXp > 0) {
-        const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
-        if (defRes.leveled) {
-          this.notif.add(`🎉 Defence level ${defRes.newLevel}!`, '#f1c40f');
-        }
-      }
-    }
-
-    if (this.player.hp <= 0) {
-      this.notif.add('You have been defeated! Respawning...', '#e74c3c');
-      if (this.onPlayerDeath) this.onPlayerDeath();
-      this._respawnPlayer();
-    }
   }
 
   _pickCombatSide(mob) {
@@ -310,9 +279,92 @@ export class Combat {
     mob.inCombat = false;
     mob.combatTarget = null;
     mob.isPlayerTarget = false;
+    mob.atMeleeStop = false;
     mob.combatSide = null;
     mob.combatSlotX = null;
     mob.combatSlotY = null;
+    if (this.activeAttacker === mob) this.activeAttacker = null;
+  }
+
+  /**
+   * Process mob-initiated attacks (runs every frame regardless of player target).
+   * Enforces single combat: only the activeAttacker may deal damage.
+   * Elects a new activeAttacker from any aggressive mob that has reached melee range.
+   */
+  _processMobAttacks(dt) {
+    // Clear dead active attacker
+    if (this.activeAttacker && this.activeAttacker.dead) {
+      this.activeAttacker = null;
+    }
+
+    // Elect a new active attacker if we don't have one.
+    // Use atMeleeStop (set by mobs.js) as the authoritative "in range" signal
+    // rather than recomputing distance here — avoids the snap-induced jitter
+    // that caused mobs to appear in/out of range every other frame.
+    if (!this.activeAttacker) {
+      for (const mob of this.mobManager.mobs) {
+        if (mob.dead || !mob.inCombat || mob.combatTarget !== this.player) continue;
+        if (mob.atMeleeStop) {
+          this.activeAttacker = mob;
+          break;
+        }
+      }
+    }
+
+    if (!this.activeAttacker) return;
+
+    // Verify active attacker is still considered in range by mobs.js
+    if (!this.activeAttacker.atMeleeStop) return;
+
+    this.activeAttacker.attackCooldown -= dt;
+    if (this.activeAttacker.attackCooldown > 0) return;
+    this.activeAttacker.attackCooldown = COMBAT_TICK;
+
+    const gear = getTotalStats(this.player.equipment);
+    const pCol = Math.floor(this.player.cx / TILE_SIZE);
+    const pRow = Math.floor(this.player.cy / TILE_SIZE);
+    const hasDmgReduce = this.actions && this.actions.getFirePerks(pCol, pRow).has('DMG_REDUCE');
+
+    const mobHit = _rollHit(
+      this.activeAttacker.attackLevel,
+      this.skills.getLevel(SKILL_IDS.DEFENCE),
+      0, gear.armour
+    );
+
+    let mobMaxHit = _getMaxHit(this.activeAttacker.strengthLevel);
+    if (hasDmgReduce) mobMaxHit = Math.max(1, Math.ceil(mobMaxHit * 0.85));
+
+    let mobDmg = 0;
+    if (mobHit) {
+      mobDmg = _rollDamage(this.activeAttacker.strengthLevel);
+      if (hasDmgReduce && mobDmg > 0) mobDmg = Math.max(1, Math.ceil(mobDmg * 0.85));
+
+      if (mobDmg > 0) {
+        this.player.hp = Math.max(0, this.player.hp - mobDmg);
+        if (this.onPlayerDamaged) this.onPlayerDamaged(mobDmg);
+        this.hitSplats.push({
+          wx: this.player.x + (this.player.w ?? 24) / 2,
+          wy: this.player.y + (this.player.h ?? 32) * 0.25,
+          value: mobDmg,
+          isPlayer: true,
+          timer: 0,
+          maxTimer: 1.5,
+        });
+        this.notif.add(`${this.activeAttacker.name} hits you for ${mobDmg}!`, '#e74c3c');
+      }
+    }
+
+    const defXp = Math.max(0, (mobMaxHit - mobDmg) * 4);
+    if (defXp > 0) {
+      const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
+      if (defRes.leveled) this.notif.add(`🎉 Defence level ${defRes.newLevel}!`, '#f1c40f');
+    }
+
+    if (this.player.hp <= 0) {
+      this.notif.add('You have been defeated! Respawning...', '#e74c3c');
+      if (this.onPlayerDeath) this.onPlayerDeath();
+      this._respawnPlayer();
+    }
   }
 
   _handleMobDeath(mob) {
@@ -341,7 +393,8 @@ export class Combat {
       this._releaseMob(this.targetMob);
     }
 
-    this.targetMob = null;
+    this.targetMob       = null;
+    this.activeAttacker  = null;
 
     this.player.hp = this.player.maxHp;
 

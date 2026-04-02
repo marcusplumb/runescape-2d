@@ -200,7 +200,7 @@ const FLEE_SPREAD     = 14;
 // Radius (tiles) predator wildlife scans when looking for killable prey mobs.
 const HUNT_RANGE      = 8;
 
-const AGGRO_LOSE_RANGE = AGGRO_RANGE + 1;
+const AGGRO_LOSE_RANGE = AGGRO_RANGE + 4;  // tiles before aggro mob gives up and returns
 
 // Auto-build flee table: prey animals automatically know which predators to run from
 const _fleeFrom = {};
@@ -254,6 +254,9 @@ export class Mob {
     this.combatTarget    = null;   // reference to player
     this.isPlayerTarget  = false;  // true when combat.js is actively targeting this mob
     this.attackCooldown  = 0;      // seconds until next attack
+    // True once the mob has snapped to a tile at melee range — prevents jitter.
+    // Only cleared when player moves far enough away (hysteresis).
+    this.atMeleeStop     = false;
 
     // Movement state machine
     // States: 'idle' | 'wandering' | 'chasing' | 'returning' | 'fleeing'
@@ -303,16 +306,30 @@ export class Mob {
     // When in combat, skip ALL other AI and move straight toward the player.
     
     if (this.inCombat && this.combatTarget) {
-      this.state   = 'chasing';
-      this.targetX = this.combatTarget.cx - this.w / 2;
-      this.targetY = this.combatTarget.cy - this.h / 2;
-
-      // Stop moving when in melee range — combat.js fires the actual hits
+      this.state = 'chasing';
       const tdx = this.combatTarget.cx - this.cx;
       const tdy = this.combatTarget.cy - this.cy;
-      if (Math.sqrt(tdx * tdx + tdy * tdy) / TILE_SIZE <= MELEE_RANGE) {
+      const distTiles = Math.sqrt(tdx * tdx + tdy * tdy) / TILE_SIZE;
+
+      if (distTiles <= MELEE_RANGE) {
+        // First time entering melee range: snap once to nearest tile.
+        if (!this.atMeleeStop) {
+          this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
+          this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+          this.atMeleeStop = true;
+        }
         this.targetX = null;
         this.targetY = null;
+      } else if (this.atMeleeStop && distTiles <= MELEE_RANGE + 1.0) {
+        // Hysteresis: player moved slightly but mob stays put until they're
+        // clearly far enough away. Prevents rapid in/out oscillation.
+        this.targetX = null;
+        this.targetY = null;
+      } else {
+        // Player has moved away — chase again.
+        this.atMeleeStop = false;
+        this.targetX = this.combatTarget.cx - this.w / 2;
+        this.targetY = this.combatTarget.cy - this.h / 2;
       }
     } else {
       // ── 3. Non-combat AI ─────────────────────────────────────────────
@@ -348,6 +365,9 @@ export class Mob {
             const dx = this.targetX - this.x;
             const dy = this.targetY - this.y;
             if (Math.sqrt(dx * dx + dy * dy) <= 4) {
+              // Snap to the wander target tile so the mob rests on a whole tile.
+              this.x           = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
+              this.y           = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
               this.state       = 'idle';
               this.targetX     = null;
               this.targetY     = null;
@@ -497,6 +517,7 @@ export class Mob {
     this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
     this.inCombat     = false;
     this.combatTarget = null;
+    this.atMeleeStop  = false;
     this.state        = 'idle';
     this.targetX      = null;
     this.targetY      = null;
@@ -522,6 +543,7 @@ export class Mob {
   _startReturn() {
     this.inCombat     = false;
     this.combatTarget = null;
+    this.atMeleeStop  = false;
     this.state        = 'returning';
     this.targetX      = this.spawnX;
     this.targetY      = this.spawnY;
