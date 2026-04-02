@@ -49,22 +49,6 @@ export class Combat {
   setTarget(mob) {
     if (mob === this.targetMob) return;
 
-    // Single combat: once locked in a fight (active attacker in range, or the
-    // current targetMob has reached melee range), can't switch to a different mob.
-    const lockedAttacker = this.activeAttacker && !this.activeAttacker.dead ? this.activeAttacker
-      : (this.targetMob && this.targetMob.atMeleeStop && !this.targetMob.dead ? this.targetMob : null);
-    if (mob && lockedAttacker && mob !== lockedAttacker) {
-      this.notif.add(`You are already in combat!`, '#e74c3c');
-      return;
-    }
-
-    // Don't steal a mob another player is already fighting (multiplayer fairness).
-    // multiCombat flag on the mob def allows shared fights.
-    if (mob && mob.isPlayerTarget && !mob.multiCombat) {
-      this.notif.add(`That mob is already in combat!`, '#e74c3c');
-      return;
-    }
-
     if (this.targetMob) {
       this._releaseMob(this.targetMob);
     }
@@ -292,6 +276,8 @@ export class Combat {
    * Elects a new activeAttacker from any aggressive mob that has reached melee range.
    */
   _processMobAttacks(dt) {
+    if (!this.mobManager) return;
+
     // Clear dead active attacker
     if (this.activeAttacker && this.activeAttacker.dead) {
       this.activeAttacker = null;
