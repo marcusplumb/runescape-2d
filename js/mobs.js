@@ -202,6 +202,50 @@ const HUNT_RANGE      = 8;
 
 const AGGRO_LOSE_RANGE = AGGRO_RANGE + 4;  // tiles before aggro mob gives up and returns
 
+/**
+ * Bresenham tile-walk line-of-sight check.
+ * Returns true if there are no solid tiles between (cx0,cy0) and (cx1,cy1).
+ * The start and end tiles are not checked — only the tiles in between.
+ * Pass world=null (server-side) to always return true.
+ */
+function hasLineOfSight(world, cx0, cy0, cx1, cy1) {
+  if (!world) return true;
+
+  let c = Math.floor(cx0 / TILE_SIZE);
+  let r = Math.floor(cy0 / TILE_SIZE);
+  const ec = Math.floor(cx1 / TILE_SIZE);
+  const er = Math.floor(cy1 / TILE_SIZE);
+
+  const dc = Math.abs(ec - c);
+  const dr = Math.abs(er - r);
+  const sc = c < ec ? 1 : -1;
+  const sr = r < er ? 1 : -1;
+  let err = dc - dr;
+
+  while (c !== ec || r !== er) {
+    const e2 = 2 * err;
+    if (e2 > -dr) { err -= dr; c += sc; }
+    if (e2 <  dc) { err += dc; r += sr; }
+    if (c === ec && r === er) break; // reached destination tile — don't check it
+    if (world.isSolid(c, r)) return false;
+  }
+  return true;
+}
+
+/**
+ * Snap a mob to the nearest tile-aligned resting position.
+ * Feet (y + h) land on the tile's bottom edge, matching the player's foot alignment.
+ * Center (cx) lands on the tile's horizontal centre.
+ */
+function _snap(mob) {
+  const feetRow  = Math.round((mob.y + mob.h) / TILE_SIZE);
+  const centerCol = Math.floor(mob.cx    / TILE_SIZE);
+  mob.y   = feetRow  * TILE_SIZE - mob.h;
+  mob.x   = centerCol * TILE_SIZE + TILE_SIZE / 2 - mob.w / 2;
+  mob.row = feetRow - 1;
+  mob.col = centerCol;
+}
+
 // Auto-build flee table: prey animals automatically know which predators to run from
 const _fleeFrom = {};
 for (const [type, def] of Object.entries(MOB_DEFS)) {
@@ -221,8 +265,6 @@ export class Mob {
     const def = MOB_DEFS[type];
     this.type  = type;
     this.name  = def.name;
-    this.x     = x;
-    this.y     = y;
     this.w     = def.w;
     this.h     = def.h;
     this.hp    = def.hp;
@@ -236,8 +278,17 @@ export class Mob {
     this.drops = def.drops;
 
     // Spawn anchor — mob returns here when not chasing
-    this.spawnX = x;
-    this.spawnY = y;
+    const spawnCol    = Math.round(x / TILE_SIZE);
+    const spawnRow    = Math.round(y / TILE_SIZE);
+    this.spawnCol     = spawnCol;
+    this.spawnRow     = spawnRow;
+    // Feet-aligned initial position (feet at tile bottom, centre on tile centre)
+    this.spawnX  = spawnCol * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
+    this.spawnY  = spawnRow * TILE_SIZE + TILE_SIZE      - this.h;
+    this.col     = spawnCol;
+    this.row     = spawnRow;
+    this.x       = this.spawnX;
+    this.y       = this.spawnY;
 
     this.targetX     = null;
     this.targetY     = null;
@@ -297,7 +348,8 @@ export class Mob {
     if (this.aggressive && player && !this.inCombat) {
       const pdx = player.cx - this.cx;
       const pdy = player.cy - this.cy;
-      if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= AGGRO_RANGE) {
+      if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= AGGRO_RANGE &&
+          hasLineOfSight(world, this.cx, this.cy, player.cx, player.cy)) {
         this.inCombat     = true;
         this.combatTarget = player;
       }
@@ -313,21 +365,17 @@ export class Mob {
       const distTiles = Math.sqrt(tdx * tdx + tdy * tdy) / TILE_SIZE;
 
       if (distTiles <= MELEE_RANGE) {
-        // First time entering melee range: snap once to nearest tile.
         if (!this.atMeleeStop) {
-          this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
-          this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+          _snap(this);
           this.atMeleeStop = true;
         }
         this.targetX = null;
         this.targetY = null;
       } else if (this.atMeleeStop && distTiles <= MELEE_RANGE + 1.0) {
-        // Hysteresis: player moved slightly but mob stays put until they're
-        // clearly far enough away. Prevents rapid in/out oscillation.
+        // Hysteresis: stay put until player is clearly far enough away.
         this.targetX = null;
         this.targetY = null;
       } else {
-        // Player has moved away — chase again.
         this.atMeleeStop = false;
         this.targetX = this.combatTarget.cx - this.w / 2;
         this.targetY = this.combatTarget.cy - this.h / 2;
@@ -366,9 +414,7 @@ export class Mob {
             const dx = this.targetX - this.x;
             const dy = this.targetY - this.y;
             if (Math.sqrt(dx * dx + dy * dy) <= 4) {
-              // Snap to the wander target tile so the mob rests on a whole tile.
-              this.x           = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
-              this.y           = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+              _snap(this);
               this.state       = 'idle';
               this.targetX     = null;
               this.targetY     = null;
@@ -470,7 +516,9 @@ export class Mob {
       }
 
       if ((blockedX || blockedY) && this.state === 'wandering') {
-        this._startWander();
+        // Pause briefly instead of immediately re-picking a direction — prevents
+        // rapid left/right oscillation when surrounded by obstacles.
+        this._transitionIdle();
       }
 
       if ((blockedX || blockedY) && this.state === 'returning') {
@@ -482,16 +530,9 @@ export class Mob {
 
       this.moving =
         Math.abs(this.x - prevX) > 0.01 || Math.abs(this.y - prevY) > 0.01;
-    } else if (this.state === 'wandering') {
-      this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
-      this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
-      this.state = 'idle';
-      this.targetX = null;
-      this.targetY = null;
-      this.wanderTimer = this.idleTime + Math.random() * 2;
     } else {
-      this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
-      this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
+      // Arrived — snap to tile with feet-aligned position
+      _snap(this);
       this.targetX = null;
       this.targetY = null;
     }
@@ -514,8 +555,6 @@ export class Mob {
 
   /** Clear all combat/movement state and return to idle standing. */
   _transitionIdle() {
-    this.x = Math.round(this.x / TILE_SIZE) * TILE_SIZE;
-    this.y = Math.round(this.y / TILE_SIZE) * TILE_SIZE;
     this.inCombat     = false;
     this.combatTarget = null;
     this.atMeleeStop  = false;
@@ -523,6 +562,7 @@ export class Mob {
     this.targetX      = null;
     this.targetY      = null;
     this.wanderTimer  = 1 + Math.random() * 2;
+    _snap(this);
   }
 
   /**
@@ -531,12 +571,13 @@ export class Mob {
    */
   _startWander() {
     const angle  = Math.random() * Math.PI * 2;
-    const radius = (0.5 + Math.random() * 0.5) * WANDER_RADIUS * TILE_SIZE;
-    // Snap to tile grid so the mob always walks to a whole tile, never stops mid-tile
-    const tCol = Math.round((this.spawnX + Math.cos(angle) * radius) / TILE_SIZE);
-    const tRow = Math.round((this.spawnY + Math.sin(angle) * radius) / TILE_SIZE);
-    this.targetX = Math.max(0, Math.min(tCol * TILE_SIZE, (WORLD_COLS - 1) * TILE_SIZE));
-    this.targetY = Math.max(0, Math.min(tRow * TILE_SIZE, (WORLD_ROWS - 1) * TILE_SIZE));
+    const radius = (0.5 + Math.random() * 0.5) * WANDER_RADIUS; // in tiles
+    const tCol   = Math.round(this.spawnCol + Math.cos(angle) * radius);
+    const tRow   = Math.round(this.spawnRow + Math.sin(angle) * radius);
+    const col    = Math.max(0, Math.min(tCol, WORLD_COLS - 1));
+    const row    = Math.max(0, Math.min(tRow, WORLD_ROWS - 1));
+    this.targetX = col * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
+    this.targetY = row * TILE_SIZE + TILE_SIZE      - this.h;
     this.state   = 'wandering';
   }
 
@@ -555,14 +596,15 @@ export class Mob {
     const dx     = predator.cx - this.cx;
     const dy     = predator.cy - this.cy;
     const d      = Math.sqrt(dx * dx + dy * dy) || 1;
-    const spread = FLEE_SPREAD * TILE_SIZE;
-    // Snap flee destination to tile grid
-    const tCol = Math.round((this.x - (dx / d) * spread) / TILE_SIZE);
-    const tRow = Math.round((this.y - (dy / d) * spread) / TILE_SIZE);
-    this.targetX = Math.max(0, Math.min(tCol * TILE_SIZE, (WORLD_COLS - 1) * TILE_SIZE));
-    this.targetY = Math.max(0, Math.min(tRow * TILE_SIZE, (WORLD_ROWS - 1) * TILE_SIZE));
+    const tCol   = Math.round(this.col - (dx / d) * FLEE_SPREAD);
+    const tRow   = Math.round(this.row - (dy / d) * FLEE_SPREAD);
+    const col    = Math.max(0, Math.min(tCol, WORLD_COLS - 1));
+    const row    = Math.max(0, Math.min(tRow, WORLD_ROWS - 1));
+    this.targetX = col * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
+    this.targetY = row * TILE_SIZE + TILE_SIZE      - this.h;
     this.state   = 'fleeing';
   }
+
 
   takeDamage(amount) {
     this.hp = Math.max(0, this.hp - amount);
@@ -1416,14 +1458,16 @@ export class MobManager {
         if (mob.respawnTimer <= 0) {
           mob.hp           = mob.maxHp;
           mob.dead         = false;
+          mob.col          = mob.spawnCol;
+          mob.row          = mob.spawnRow;
           mob.x            = mob.spawnX;
           mob.y            = mob.spawnY;
+          mob.targetX      = null;
+          mob.targetY      = null;
           mob.inCombat     = false;
           mob.combatTarget = null;
           mob.isPlayerTarget = false;
           mob.state        = 'idle';
-          mob.targetX      = null;
-          mob.targetY      = null;
           mob.wanderTimer  = 1 + Math.random() * 3;
         }
       } else {

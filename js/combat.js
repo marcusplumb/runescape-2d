@@ -318,12 +318,16 @@ export class Combat {
       this.attackTimer = 0;
       this.combatIdleTimer = 0;
       this._engageMob(this.activeAttacker);
+      this.player.currentAction = 'fight';
       this.notif.add(`${this.activeAttacker.name} is attacking you!`, '#e74c3c');
     }
 
     this.activeAttacker.attackCooldown -= dt;
     if (this.activeAttacker.attackCooldown > 0) return;
     this.activeAttacker.attackCooldown = COMBAT_TICK;
+
+    // Mob faces the player each time it swings
+    this.activeAttacker.facingLeft = this.player.cx < this.activeAttacker.cx;
 
     const gear = getTotalStats(this.player.equipment);
     const pCol = Math.floor(this.player.cx / TILE_SIZE);
@@ -347,17 +351,19 @@ export class Combat {
       if (mobDmg > 0) {
         this.player.hp = Math.max(0, this.player.hp - mobDmg);
         if (this.onPlayerDamaged) this.onPlayerDamaged(mobDmg);
-        this.hitSplats.push({
-          wx: this.player.x + (this.player.w ?? 24) / 2,
-          wy: this.player.y + (this.player.h ?? 32) * 0.25,
-          value: mobDmg,
-          isPlayer: true,
-          timer: 0,
-          maxTimer: 1.5,
-        });
         this.notif.add(`${this.activeAttacker.name} hits you for ${mobDmg}!`, '#e74c3c');
       }
     }
+
+    // Always show a hitsplat — blue 0 for miss, red value for damage
+    this.hitSplats.push({
+      wx: this.player.x + (this.player.w ?? 24) / 2,
+      wy: this.player.y + (this.player.h ?? 32) * 0.25,
+      value: mobDmg,
+      isPlayer: true,
+      timer: 0,
+      maxTimer: 1.5,
+    });
 
     const defXp = Math.max(0, (mobMaxHit - mobDmg) * 4);
     if (defXp > 0) {

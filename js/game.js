@@ -2189,12 +2189,19 @@ export class Game {
     this.actions.world = interior;
 
     // Place player at interior entry point
-    this.player.col = interior.entryCol;
-    this.player.row = interior.entryRow;
-    this.player.x   = interior.entryCol * 32 + 4;
-    this.player.y   = interior.entryRow * 32;
+    this.player.col       = interior.entryCol;
+    this.player.row       = interior.entryRow;
+    this.player.x         = interior.entryCol * 32 + 4;
+    this.player.y         = interior.entryRow * 32;
+    // Clear any in-progress movement so the player doesn't slide to a stale world tile
+    this.player.targetCol = null;
+    this.player.targetRow = null;
+    this.player.moveT     = 0;
+    this.player.moving    = false;
+    this.player.path      = [];
 
-    // Snap camera to interior (small map — centre it)
+    // Set bounds to interior size so the camera centres the small map
+    this.camera.setBounds(interior.cols * TILE_SIZE, interior.rows * TILE_SIZE);
     this.camera.snapTo(this.player.cx, this.player.cy);
 
     this.transitionCooldown = 1.0;
@@ -2213,11 +2220,18 @@ export class Game {
 
     // Return to saved position (one tile south of door)
     const rc = this.returnPos ?? { col: Math.floor(1024 / 2), row: Math.floor(768 / 2) + 6 };
-    this.player.col = rc.col;
-    this.player.row = rc.row;
-    this.player.x   = rc.col * 32 + 4;
-    this.player.y   = rc.row * 32;
+    this.player.col       = rc.col;
+    this.player.row       = rc.row;
+    this.player.x         = rc.col * 32 + 4;
+    this.player.y         = rc.row * 32;
+    // Clear any in-progress movement so the player doesn't slide to a stale interior tile
+    this.player.targetCol = null;
+    this.player.targetRow = null;
+    this.player.moveT     = 0;
+    this.player.moving    = false;
+    this.player.path      = [];
 
+    this.camera.setBounds(); // reset to world bounds
     this.camera.snapTo(this.player.cx, this.player.cy);
     this.transitionCooldown = 1.0;
   }
@@ -2722,6 +2736,7 @@ export class Game {
       this.player.x   = arena.entryCol * TILE_SIZE + 4;
       this.player.y   = arena.entryRow * TILE_SIZE;
 
+      this.camera.setBounds(arena.cols * TILE_SIZE, arena.rows * TILE_SIZE);
       this.camera.snapTo(this.player.cx, this.player.cy);
       this.transitionCooldown = 1.0;
       this.combat.clearTarget();
