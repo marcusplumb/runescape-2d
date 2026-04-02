@@ -277,12 +277,13 @@ export class Mob {
       return;
     }
 
-    this.attackCooldown = Math.max(0, this.attackCooldown - dt);
-
-    // Drop aggro if the player escapes far enough
-    if (this.aggressive && this.inCombat && this.combatTarget === player) {
-      const pdx = player.cx - this.cx;
-      const pdy = player.cy - this.cy;
+    // Drop aggro if the combat target escapes far enough.
+    // Compare against combatTarget directly (not the player parameter) so this
+    // works on both the client (combatTarget = player) and the server
+    // (combatTarget = position proxy { cx, cy }).
+    if (this.aggressive && this.inCombat && this.combatTarget) {
+      const pdx = this.combatTarget.cx - this.cx;
+      const pdy = this.combatTarget.cy - this.cy;
       const distTiles = Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE;
 
       if (distTiles > AGGRO_LOSE_RANGE) {

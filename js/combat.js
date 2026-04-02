@@ -298,14 +298,18 @@ export class Combat {
     }
 
     // Elect a new active attacker if we don't have one.
-    // Use atMeleeStop (set by mobs.js) as the authoritative "in range" signal
-    // rather than recomputing distance here — avoids the snap-induced jitter
-    // that caused mobs to appear in/out of range every other frame.
+    // Use direct distance so this works in BOTH modes:
+    //   - Offline: mob.update() runs, mobs chase the real player object.
+    //   - Online: server drives mob positions via mob_state; mob.combatTarget
+    //     is never set on the client, so we can't rely on it.
     if (!this.activeAttacker) {
       for (const mob of this.mobManager.mobs) {
-        if (mob.dead || !mob.inCombat || mob.combatTarget !== this.player) continue;
-        if (mob.atMeleeStop) {
+        if (mob.dead || !mob.aggressive) continue;
+        const dx = this.player.cx - mob.cx;
+        const dy = this.player.cy - mob.cy;
+        if (Math.sqrt(dx * dx + dy * dy) / TILE_SIZE <= MELEE_RANGE + 0.5) {
           this.activeAttacker = mob;
+          this.activeAttacker.attackCooldown = 0; // first hit fires immediately
           break;
         }
       }
@@ -313,8 +317,22 @@ export class Combat {
 
     if (!this.activeAttacker) return;
 
-    // Verify active attacker is still considered in range by mobs.js
-    if (!this.activeAttacker.atMeleeStop) return;
+    // Drop active attacker if it moved away (or player ran)
+    const _adx = this.player.cx - this.activeAttacker.cx;
+    const _ady = this.player.cy - this.activeAttacker.cy;
+    if (Math.sqrt(_adx * _adx + _ady * _ady) / TILE_SIZE > MELEE_RANGE + 1.0) {
+      this.activeAttacker = null;
+      return;
+    }
+
+    // Auto-retaliate: if the player has no target, automatically fight back.
+    if (!this.targetMob || this.targetMob.dead) {
+      this.targetMob = this.activeAttacker;
+      this.attackTimer = 0;
+      this.combatIdleTimer = 0;
+      this._engageMob(this.activeAttacker);
+      this.notif.add(`${this.activeAttacker.name} is attacking you!`, '#e74c3c');
+    }
 
     this.activeAttacker.attackCooldown -= dt;
     if (this.activeAttacker.attackCooldown > 0) return;
