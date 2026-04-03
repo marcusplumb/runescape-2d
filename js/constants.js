@@ -79,6 +79,14 @@ export const TILES = {
   YEW_TREE:    50,
   MAGIC_TREE:  51,
   ELDER_TREE:  52,
+  // ── Village props & surfaces ──────────────────────────
+  PATH:          53,  // worn cobblestone path (walkable)
+  PLASTER_WALL:  54,  // half-timber cottage wall (solid)
+  THATCH_ROOF:   55,  // thatched cottage roof (walkable)
+  FENCE:         56,  // wooden picket fence (solid)
+  WELL:          57,  // stone village well (solid)
+  BARREL:        58,  // wooden barrel prop (solid)
+  SIGN:          59,  // wooden signpost (walkable)
 };
 
 // Which tiles block movement
@@ -119,6 +127,11 @@ export const SOLID_TILES = new Set([
   TILES.YEW_TREE,
   TILES.MAGIC_TREE,
   TILES.ELDER_TREE,
+  // Village props (solid obstacles)
+  TILES.PLASTER_WALL,
+  TILES.FENCE,
+  TILES.WELL,
+  TILES.BARREL,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -183,6 +196,14 @@ export const TILE_COLORS = {
   [TILES.YEW_TREE]:    '#1e3a18',
   [TILES.MAGIC_TREE]:  '#1a1640',
   [TILES.ELDER_TREE]:  '#4a5a40',
+  // Village props
+  [TILES.PATH]:         '#8a7a6a',
+  [TILES.PLASTER_WALL]: '#c8bca8',
+  [TILES.THATCH_ROOF]:  '#c09038',
+  [TILES.FENCE]:        '#8b5e3c',
+  [TILES.WELL]:         '#7a6a5a',
+  [TILES.BARREL]:       '#6b3a1a',
+  [TILES.SIGN]:         '#8b6914',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -205,6 +226,9 @@ export const TILE_HAS_DETAIL = new Set([
   TILES.FURNACE, TILES.ANVIL,
   TILES.ROCK_TIN, TILES.ROCK_SILVER, TILES.ROCK_TUNGSTEN,
   TILES.ROCK_OBSIDIAN, TILES.ROCK_MOONSTONE,
+  // Village props
+  TILES.PATH, TILES.PLASTER_WALL, TILES.THATCH_ROOF,
+  TILES.FENCE, TILES.WELL, TILES.BARREL, TILES.SIGN,
 ]);
 
 // ── Inventory ────────────────────────────────────────────

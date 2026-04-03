@@ -295,14 +295,9 @@ export class World {
 
     // ── Phase 6: Structures and roads ────────────────────
     this.doorMap = placeAllStructures(map, this.rows, this.cols, rng);
-
-    // ── Phase 7: Spawn building ───────────────────────────
-    this._placeBuilding(
-      map,
-      Math.floor(this.cols / 2) - 3,
-      Math.floor(this.rows / 2) - 3,
-      7, 7
-    );
+    this.propGroundMap = new Map(); // underlying tile for transparent props
+    this.roofBounds    = [];        // { c, r, rW, rH, bC, bR, bW, bH } per roofed building
+    this.signLabels    = new Map(); // "col,row" → text label rendered on that SIGN tile
 
     // Clear a generous area around spawn so the player never starts stuck
     const spawnC = Math.floor(this.cols / 2);
@@ -317,22 +312,11 @@ export class World {
       }
     }
 
-    // ── Portal to player house (6 tiles west of spawn) ───
-    const portalC = spawnC - 6;
-    const portalR = spawnR;
-    map[portalR][portalC] = TILES.PORTAL;
-    // Clear a small grass pad around the portal
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -2; dc <= 1; dc++) {
-        if (dr === 0 && dc === 0) continue;
-        const rr = portalR + dr, cc = portalC + dc;
-        if (rr >= 0 && rr < this.rows && cc >= 0 && cc < this.cols) {
-          if (map[rr][cc] !== TILES.PORTAL) map[rr][cc] = TILES.GRASS;
-        }
-      }
-    }
-    this.portalCol = portalC;
-    this.portalRow = portalR;
+    // ── Phase 7b: Spawn village houses ───────────────────
+    this._placeSpawnVillage(map, spawnC);
+
+    // ── Phase 7c: Portal to player house ─────────────────
+    this._placePortal(map, spawnC, spawnR);
 
     // ── Phase 8: Forge (smithy) ──────────────────────────
     this._placeForge(map, spawnC, spawnR);
@@ -343,10 +327,151 @@ export class World {
     return map;
   }
 
+  _placePortal(map, spawnC, spawnR) {
+    const portalC = spawnC - 6;  // 506
+    const portalR = spawnR;      // 389
+
+    // Clear a generous 9×7 area so the grand arch visual has breathing room
+    for (let dr = -3; dr <= 3; dr++) {
+      for (let dc = -4; dc <= 4; dc++) {
+        const rr = portalR + dr, cc = portalC + dc;
+        if (rr >= 0 && rr < this.rows && cc >= 0 && cc < this.cols)
+          map[rr][cc] = TILES.GRASS;
+      }
+    }
+
+    // Cobblestone approach directly south of portal (continuation of main street)
+    for (let dc = -1; dc <= 1; dc++) {
+      if (portalR + 1 < this.rows) map[portalR + 1][portalC + dc] = TILES.PATH;
+      if (portalR + 2 < this.rows) map[portalR + 2][portalC + dc] = TILES.PATH;
+    }
+
+    map[portalR][portalC] = TILES.PORTAL;
+    this.portalCol = portalC;
+    this.portalRow = portalR;
+  }
+
+  _placeSpawnVillage(map, spawnC) {
+    // Spawn building occupies rows [bldTop, bldTop+6], cols [spawnC-3, spawnC+3]
+    const bldTop = Math.floor(this.rows / 2) - 3;   // 381
+    const spawnR = Math.floor(this.rows / 2) + 5;   // 389
+
+    // ── Helpers ───────────────────────────────────────────────
+    const safe = (r, c, t) => {
+      if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) map[r][c] = t;
+    };
+    // Set PATH only on walkable/open tiles (never overwrite buildings or furniture)
+    const SKIP = new Set([
+      TILES.WALL, TILES.PLASTER_WALL, TILES.DOOR, TILES.PORTAL,
+      TILES.FURNACE, TILES.ANVIL, TILES.WELL, TILES.BARREL, TILES.SIGN,
+      TILES.FENCE, TILES.FLOWERS, TILES.STONE,
+    ]);
+    const safePath = (r, c) => {
+      if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) return;
+      if (!SKIP.has(map[r][c])) map[r][c] = TILES.PATH;
+    };
+    // Place a prop tile, recording the tile underneath for transparent rendering
+    const safeProp = (r, c, t) => {
+      if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) return;
+      this.propGroundMap.set(`${c},${r}`, map[r][c]);
+      map[r][c] = t;
+    };
+
+    // ── THREE RESIDENTIAL COTTAGES (PLASTER_WALL + THATCH_ROOF) ───────
+    // Positions chosen so the pair of side houses flank the central one,
+    // with a clear path network between them and the town square below.
+    const HW = 7, HH = 6;
+    const houses = [
+      { left: spawnC - 16, top: bldTop - 12 },  // NW: cols 496-502, rows 369-374
+      { left: spawnC -  5, top: bldTop - 14 },  // N:  cols 507-513, rows 367-372
+      { left: spawnC +  5, top: bldTop - 12 },  // NE: cols 517-523, rows 369-374
+    ];
+
+    houses.forEach(({ left, top }, id) => {
+      // Cottage walls and thatch roof
+      for (let dr = 0; dr < HH; dr++) {
+        for (let dc = 0; dc < HW; dc++) {
+          const rr = top + dr, cc = left + dc;
+          if (rr < 0 || rr >= this.rows || cc < 0 || cc >= this.cols) continue;
+          const isEdge = dr === 0 || dr === HH - 1 || dc === 0 || dc === HW - 1;
+          map[rr][cc] = isEdge ? TILES.PLASTER_WALL : TILES.PLANK;
+        }
+      }
+      // Interactable door on south wall (centre)
+      const doorC = left + Math.floor(HW / 2);
+      const doorR = top + HH - 1;
+      // Record roof bounds: interior region + full footprint + door position
+      this.roofBounds.push({ c: left + 1, r: top + 1, rW: HW - 2, rH: HH - 2,
+                             bC: left, bR: top, bW: HW, bH: HH,
+                             doorC, doorR, doorFace: 'south' });
+      safe(doorR, doorC, TILES.DOOR);
+      this.doorMap.set(`${doorC},${doorR}`, `spawn_village_house_${id}`);
+
+      // Picket fence immediately south of the house; gap in front of door
+      const fenceR = doorR + 1;
+      for (let dc = 0; dc < HW; dc++) {
+        const fc = left + dc;
+        if (fc === doorC) safe(fenceR, fc, TILES.PATH);
+        else safeProp(fenceR, fc, TILES.FENCE);
+      }
+
+      // Short cobblestone gate path from house to town square
+      for (let r = fenceR + 1; r <= bldTop - 2; r++) safePath(r, doorC);
+
+      // Flower beds flanking garden gate
+      safe(fenceR + 1, left + 1,       TILES.FLOWERS);
+      safe(fenceR + 1, left + HW - 2,  TILES.FLOWERS);
+
+      if (id === 1) {
+        // Shop counter — 3-tile wide table across the north half of the interior
+        safe(top + 2, left + 2, TILES.FURN_TABLE);
+        safe(top + 2, left + 3, TILES.FURN_TABLE);
+        safe(top + 2, left + 4, TILES.FURN_TABLE);
+        // Exterior sign labelled 'SHOP', placed right of the gate path
+        safeProp(fenceR + 1, doorC + 1, TILES.SIGN);
+        this.signLabels.set(`${doorC + 1},${fenceR + 1}`, 'SHOP');
+      }
+    });
+
+    // ── TOWN SQUARE — cobblestone plaza between houses and spawn building
+    for (let r = bldTop - 6; r < bldTop; r++) {
+      for (let c = spawnC - 16; c <= spawnC + 12; c++) {
+        safePath(r, c);
+      }
+    }
+
+    // ── STONE WELL at plaza centre ─────────────────────────────────────
+    safeProp(bldTop - 4, spawnC - 1, TILES.WELL);
+
+    // ── COBBLESTONE PATHS alongside spawn building ─────────────────────
+    // Two narrow lanes flanking the spawn building let the player walk
+    // between the town square (north) and the main street (south).
+    for (let r = bldTop; r < spawnR; r++) {
+      safePath(r, spawnC - 5);   // west lane (col 507)
+      safePath(r, spawnC + 4);   // east lane  (col 516)
+    }
+    // One tile approach south of building door
+    safePath(spawnR - 1, spawnC);
+
+    // ── MAIN EAST–WEST COBBLESTONE STREET (at spawnR row) ─────────────
+    // Runs from the forge entrance in the west to the fishing harbour path east.
+    for (let c = spawnC - 18; c <= spawnC + 14; c++) safePath(spawnR, c);
+
+    // (Forge props — barrels & sign — are placed in _placeForge after that
+    // method clears the surrounding area, so they don't get wiped.)
+
+    // Flower tufts at the four corners of the town square
+    for (const [fr, fc] of [
+      [bldTop - 6, spawnC - 15], [bldTop - 6, spawnC + 11],
+      [bldTop - 2, spawnC - 15], [bldTop - 2, spawnC + 11],
+    ]) safe(fr, fc, TILES.FLOWERS);
+
+  }
+
   _placeForge(map, spawnC, spawnR) {
     // Open-air forge: 9 wide × 4 tall, west of portal, north of spawn
-    // Forge is 22 tiles west of spawn center, 3 tiles north
-    const FC = spawnC - 22;  // forge left col
+    // Forge is 18 tiles west of spawn center, 3 tiles north
+    const FC = spawnC - 18;  // forge left col
     const FR = spawnR - 6;   // forge top row
 
     // Clear the area first
@@ -375,24 +500,30 @@ export class World {
           map[r][c] = TILES.STONE;
       }
     }
-    // Place Furnace (left side of back wall row)
+    // Place Furnace and Anvil; record underlying STONE for transparent rendering
     const furnC = FC + 2, furnR = FR + 1;
     const anvilC = FC + 6, anvilR = FR + 2;
-    if (furnR < this.rows && furnC < this.cols) map[furnR][furnC] = TILES.FURNACE;
-    if (anvilR < this.rows && anvilC < this.cols) map[anvilR][anvilC] = TILES.ANVIL;
+    if (furnR < this.rows && furnC < this.cols) {
+      this.propGroundMap.set(`${furnC},${furnR}`, TILES.STONE);
+      map[furnR][furnC] = TILES.FURNACE;
+    }
+    if (anvilR < this.rows && anvilC < this.cols) {
+      this.propGroundMap.set(`${anvilC},${anvilR}`, TILES.STONE);
+      map[anvilR][anvilC] = TILES.ANVIL;
+    }
 
     // Open south entrance (remove the bottom wall, replace with dirt path)
     for (let c = FC + 3; c <= FC + 5; c++) {
       if (FR + 3 >= 0 && FR + 3 < this.rows && c >= 0 && c < this.cols)
         map[FR + 3][c] = TILES.STONE; // keep floor, no wall
     }
-    // Dirt path from spawn to forge entrance
+    // Cobblestone path from forge entrance south to main street
     const pathR = FR + 4;
     for (let r = pathR; r <= spawnR; r++) {
       for (let c = FC + 3; c <= FC + 5; c++) {
         if (r >= 0 && r < this.rows && c >= 0 && c < this.cols &&
             map[r][c] !== TILES.PORTAL && map[r][c] !== TILES.WALL)
-          map[r][c] = TILES.DIRT;
+          map[r][c] = TILES.PATH;
       }
     }
 
@@ -401,6 +532,17 @@ export class World {
     this.furnaceRow = furnR;
     this.anvilCol   = anvilC;
     this.anvilRow   = anvilR;
+
+    // Decorative props outside the forge (placed after the clear-zone pass)
+    const safeProp = (r, c, t) => {
+      if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+        this.propGroundMap.set(`${c},${r}`, map[r][c]);
+        map[r][c] = t;
+      }
+    };
+    safeProp(FR + 1, FC - 1, TILES.BARREL);   // stacked barrels west of forge
+    safeProp(FR + 2, FC - 1, TILES.BARREL);
+    safeProp(spawnR - 1, FC + 2, TILES.SIGN); // smithy sign on path approach
   }
 
   _placeFishingHarbor(map) {
@@ -413,10 +555,22 @@ export class World {
     const R2    = spawnR + 5;   // 394 — south water edge
     const SHORE = R2 + 1;       // 395 — walkable south shore
 
-    // Fill the lake
-    for (let r = R1; r <= R2; r++) {
-      for (let c = C1; c <= C2; c++) {
-        if (r >= 0 && r < this.rows && c >= 0 && c < this.cols)
+    // Irregular lake: ellipse with sine-wave boundary distortion (less square)
+    const cx2 = (C1 + C2) / 2;
+    const cy2 = (R1 + R2) / 2;
+    const rx2 = (C2 - C1) / 2 + 2;  // slightly wider than rectangle
+    const ry2 = (R2 - R1) / 2 + 2;  // slightly taller
+    for (let r = R1 - 2; r <= R2 + 2; r++) {
+      for (let c = C1 - 2; c <= C2 + 2; c++) {
+        if (r < 0 || r >= this.rows || c < 0 || c >= this.cols) continue;
+        const dc2 = (c - cx2) / rx2;
+        const dr2 = (r - cy2) / ry2;
+        const angle = Math.atan2(dr2, dc2);
+        // 3-lobe organic distortion for a natural shoreline
+        const boundary = 1
+          + 0.12 * Math.sin(angle * 2.8 + 0.6)
+          + 0.07 * Math.sin(angle * 5.1 - 0.4);
+        if (dc2 * dc2 + dr2 * dr2 <= boundary)
           map[r][c] = TILES.WATER;
       }
     }

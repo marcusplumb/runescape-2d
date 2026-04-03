@@ -31,6 +31,11 @@ const ANIMATED_TILES = new Set([
   TILES.FISH_SPOT, TILES.FISH_SPOT_SALMON, TILES.FISH_SPOT_LOBSTER,
   TILES.FIRE, TILES.PORTAL,
 ]);
+// Prop tiles that don't fill their cell — rendered on top of the underlying ground tile
+const PROP_TILES = new Set([
+  TILES.BARREL, TILES.SIGN, TILES.FENCE, TILES.WELL,
+  TILES.FURNACE, TILES.ANVIL,
+]);
 const CHUNK_TILES = 16;                        // tiles per chunk side
 const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
 
@@ -49,6 +54,9 @@ export class Renderer {
 
     // Tree sprite cache — keyed by seed+biome, built once per unique tree variant
     this._treeCache = new Map(); // key → OffscreenCanvas
+
+    // Multi-tile roof texture cache — keyed by "WxH" pixel dimensions
+    this._roofCache = new Map();
 
     // Animated time for tile effects
     this.time = 0;
@@ -138,6 +146,85 @@ export class Renderer {
     }
   }
 
+  /** Draw open-door floor + panel. Call BEFORE entities so the player walks over it. */
+  drawOpenDoors(world, playerCol, playerRow) {
+    if (!world.roofBounds) return;
+    const ctx = this.ctx;
+    for (const { doorC, doorR, doorFace, bC, bR, bW, bH } of world.roofBounds) {
+      if (doorC === undefined) continue;
+      if (playerCol < bC || playerCol >= bC + bW) continue;
+      if (playerRow < bR || playerRow >= bR + bH) continue;
+
+      const dx = doorC * TILE_SIZE;
+      const dy = doorR * TILE_SIZE;
+      const T  = TILE_SIZE;
+
+      // Floor beneath the open door
+      ctx.fillStyle = '#7a4e22'; ctx.fillRect(dx, dy, T, T);
+      const planks = ['#8b5c2a','#7e5224','#966030','#7a4c20'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = planks[i];                ctx.fillRect(dx, dy + i * 8, T, 7);
+        ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(dx, dy + i * 8, T, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.16)';       ctx.fillRect(dx, dy + i * 8 + 7, T, 1);
+      }
+
+      // Door panel swung open against the jamb
+      const panelX = doorFace === 'north' ? dx + T - 5 : dx;
+      const panelY = dy + 2;
+      const panelW = 5, panelH = T - 4;
+      ctx.fillStyle = '#4a2a0e'; ctx.fillRect(panelX, panelY, panelW, panelH);
+      ctx.fillStyle = 'rgba(200,130,50,0.55)'; ctx.fillRect(panelX, panelY, 1, panelH);
+      ctx.fillStyle = 'rgba(0,0,0,0.50)'; ctx.fillRect(panelX + panelW - 1, panelY, 1, panelH);
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(panelX, panelY + Math.floor(panelH * 0.35), panelW, 1);
+      ctx.fillRect(panelX, panelY + Math.floor(panelH * 0.65), panelW, 1);
+      ctx.fillStyle = '#c8a040';
+      ctx.fillRect(panelX + 1, panelY + 4, 2, 2);
+      ctx.fillRect(panelX + 1, panelY + panelH - 6, 2, 2);
+      const shadowX = doorFace === 'north' ? panelX - 3 : panelX + panelW;
+      ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(shadowX, panelY, 3, panelH);
+    }
+  }
+
+  /** Draw roof overlays. Call AFTER entities so roofs cover them. */
+  drawRoofOverlays(world, camX, camY, playerCol, playerRow) {
+    const ctx = this.ctx;
+    const startCol = Math.floor(camX / TILE_SIZE) - 2;
+    const startRow = Math.floor(camY / TILE_SIZE) - 2;
+    const endCol   = startCol + Math.ceil(this.canvas.width  / TILE_SIZE) + 5;
+    const endRow   = startRow + Math.ceil(this.canvas.height / TILE_SIZE) + 5;
+    const OVER_TOP = TILE_SIZE, OVER_BOT = TILE_SIZE >> 2, OVER_SIDE = TILE_SIZE;
+
+    if (world.roofBounds) {
+      for (const { c, r, rW, rH, bC, bR, bW, bH } of world.roofBounds) {
+        if (c + rW < startCol - 2 || c > endCol + 2) continue;
+        if (r + rH < startRow - 2 || r > endRow + 2) continue;
+        if (playerCol >= bC && playerCol < bC + bW &&
+            playerRow >= bR && playerRow < bR + bH) continue;
+        ctx.drawImage(
+          this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT),
+          c * TILE_SIZE - OVER_SIDE,
+          r * TILE_SIZE - OVER_TOP,
+        );
+      }
+    } else {
+      for (let r = startRow - 1; r <= endRow; r++) {
+        for (let c = startCol; c <= endCol; c++) {
+          if (world.getTile(c, r) !== TILES.THATCH_ROOF) continue;
+          if (world.getTile(c - 1, r) === TILES.THATCH_ROOF) continue;
+          if (world.getTile(c, r - 1) === TILES.THATCH_ROOF) continue;
+          let rW = 0; while (world.getTile(c + rW, r) === TILES.THATCH_ROOF) rW++;
+          let rH = 0; while (world.getTile(c, r + rH) === TILES.THATCH_ROOF) rH++;
+          ctx.drawImage(
+            this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT),
+            c * TILE_SIZE - OVER_SIDE,
+            r * TILE_SIZE - OVER_TOP,
+          );
+        }
+      }
+    }
+  }
+
   /** Pre-render a 16×16-tile chunk to an OffscreenCanvas (static tiles only). */
   _renderChunk(cx, cy, world) {
     const oc  = new OffscreenCanvas(CHUNK_PX, CHUNK_PX);
@@ -151,13 +238,162 @@ export class Renderer {
         const tile = world.getTile(col, row);
         const px   = dc * TILE_SIZE;
         const py   = dr * TILE_SIZE;
-        ctx.fillStyle = TILE_COLORS[tile] || '#000';
-        ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
-        if (TILE_HAS_DETAIL.has(tile) && !ANIMATED_TILES.has(tile)) {
+        if (PROP_TILES.has(tile)) {
+          // Render the underlying ground tile first so the prop sits on top of it
+          const groundId = world.propGroundMap?.get(`${col},${row}`) ?? TILES.GRASS;
+          ctx.fillStyle = TILE_COLORS[groundId] || '#000';
+          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+          if (TILE_HAS_DETAIL.has(groundId) && !ANIMATED_TILES.has(groundId))
+            this._drawTileDetail(ctx, groundId, px, py, col, row, world);
+        } else {
+          ctx.fillStyle = TILE_COLORS[tile] || '#000';
+          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+        }
+        // THATCH_ROOF detail is replaced by the multi-tile overlay pass in drawWorld
+        if (TILE_HAS_DETAIL.has(tile) && !ANIMATED_TILES.has(tile) && tile !== TILES.THATCH_ROOF) {
           this._drawTileDetail(ctx, tile, px, py, col, row, world);
         }
       }
     }
+    return oc;
+  }
+
+  /** Build (or return cached) a single cohesive thatched roof texture of the given pixel size.
+   *  Simulates a gabled roof viewed at a classic RPG angle: the ridge is at the back (top of
+   *  texture, darkest), and the roof surface slopes toward the viewer, getting lighter and more
+   *  detailed toward the front eave (bottom of texture). Straw courses are foreshortened —
+   *  tighter at the top (far), wider at the bottom (near). A visible eave fascia at the bottom
+   *  gives depth, as if you're looking slightly upward at the front overhang.
+   */
+  _getOrBuildRoofTexture(pw, ph) {
+    const key = `${pw}x${ph}`;
+    if (this._roofCache.has(key)) return this._roofCache.get(key);
+
+    const oc  = new OffscreenCanvas(pw, ph);
+    const ctx = oc.getContext('2d');
+    const w = pw, h = ph;
+    const R0 = 194, G0 = 152, B0 = 58;   // golden straw base
+
+    // ── Main surface gradient: dark at top (ridge/far) → bright at bottom (eave/near) ──
+    const gMain = ctx.createLinearGradient(0, 0, 0, h);
+    gMain.addColorStop(0,    `rgb(${R0-62},${G0-48},${B0-30})`);
+    gMain.addColorStop(0.30, `rgb(${R0-28},${G0-22},${B0-12})`);
+    gMain.addColorStop(0.65, `rgb(${R0+8},${G0+6},${B0+3})`);
+    gMain.addColorStop(1,    `rgb(${R0+16},${G0+12},${B0+5})`);
+    ctx.fillStyle = gMain;
+    ctx.fillRect(0, 0, w, h);
+
+    // ── Foreshortened straw courses: tight at top, wider at bottom ─────
+    let cy = 0, ci = 0;
+    while (cy < h) {
+      const t       = cy / h;                                   // 0=top 1=bottom
+      const cH      = Math.round(6 + t * 6);                   // 6px top → 12px bottom
+      const bandH   = Math.min(cH - 1, h - cy);
+      if (bandH < 1) break;
+
+      // Alternating light/dark tint — more contrast near bottom (closer)
+      const alpha = 0.07 + t * 0.10;
+      ctx.fillStyle = ci % 2 === 0
+        ? `rgba(255,225,95,${alpha})` : `rgba(0,0,0,${alpha * 1.2})`;
+      ctx.fillRect(0, cy, w, bandH);
+
+      // Mortar/gap line
+      ctx.fillStyle = `rgba(45,28,4,${0.22 + t * 0.18})`;
+      ctx.fillRect(0, cy + cH - 1, w, 1);
+
+      // Strand highlights — brighter and more visible near the bottom
+      for (let sx = 0; sx < w; sx += 6) {
+        const wobble = Math.round(Math.sin(sx * 0.14 + ci * 0.9) * (t * 1.5));
+        ctx.fillStyle = `rgba(255,210,75,${0.06 + t * 0.14})`;
+        ctx.fillRect(sx, cy + 1 + wobble, 5, 1);
+      }
+
+      // Bundle separators (staggered)
+      const bOff = (ci % 2) * 5;
+      for (let bx = bOff; bx < w; bx += 9 + (ci % 2) * 2) {
+        ctx.fillStyle = `rgba(0,0,0,${0.09 + t * 0.08})`;
+        ctx.fillRect(bx, cy, 1, bandH);
+      }
+
+      cy += cH;
+      ci++;
+    }
+
+    // ── Ridge cap at top — the back peak of the gable ──────────────────
+    const RIDGE = 11;
+    ctx.fillStyle = `rgb(${R0-58},${G0-45},${B0-28})`;
+    ctx.fillRect(0, 0, w, RIDGE);
+    // Cap tile segments along the ridge
+    const CAP_W = 13;
+    for (let rx = 0; rx < w; rx += CAP_W) {
+      const cw = Math.min(CAP_W - 1, w - rx);
+      ctx.fillStyle = (Math.floor(rx / CAP_W) % 2 === 0)
+        ? 'rgba(255,200,80,0.18)' : 'rgba(0,0,0,0.12)';
+      ctx.fillRect(rx, 2, cw, RIDGE - 3);
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      ctx.fillRect(rx + cw, 0, 1, RIDGE);
+    }
+    // Very dark top edge — roof meets the back wall
+    ctx.fillStyle = 'rgba(0,0,0,0.72)';
+    ctx.fillRect(0, 0, w, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.30)';
+    ctx.fillRect(0, 2, w, 1);
+    // Ridge-to-body shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.42)';
+    ctx.fillRect(0, RIDGE, w, 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx.fillRect(0, RIDGE + 2, w, 1);
+
+    // ── Front eave fascia — the face of the roof overhang near the viewer ──
+    // This strip reads as "the front edge of the roof seen head-on"
+    const FASCIA = 16;
+    const fy = h - FASCIA;
+    // Slightly warmer/brighter than the slope body
+    ctx.fillStyle = `rgb(${R0+4},${G0+3},${B0+1})`;
+    ctx.fillRect(0, fy, w, FASCIA);
+    // Highlight at top of fascia (light catching the exposed eave edge)
+    ctx.fillStyle = 'rgba(255,228,110,0.46)';
+    ctx.fillRect(0, fy, w, 3);
+    ctx.fillStyle = 'rgba(255,215,90,0.22)';
+    ctx.fillRect(0, fy + 3, w, 2);
+    // Horizontal thatching lines on the fascia face
+    for (let ey = fy + 5; ey < h - 4; ey += 3) {
+      ctx.fillStyle = 'rgba(0,0,0,0.14)';
+      ctx.fillRect(0, ey, w, 1);
+      ctx.fillStyle = 'rgba(255,200,70,0.10)';
+      ctx.fillRect(0, ey + 1, w, 1);
+    }
+    // Underside shadow at bottom of fascia
+    ctx.fillStyle = 'rgba(0,0,0,0.62)';
+    ctx.fillRect(0, h - 3, w, 3);
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(0, h - 5, w, 2);
+    // Straw fringe hanging from the eave
+    for (let fx = 3; fx < w - 3; fx += 4) {
+      const flen = 4 + (fx * 11 + 23) % 5;
+      ctx.fillStyle = `rgba(${R0+10},${G0+8},${B0+3},0.90)`;
+      ctx.fillRect(fx, h - flen, 1, flen);
+      ctx.fillStyle = 'rgba(0,0,0,0.40)';
+      ctx.fillRect(fx + 1, h - flen + 1, 1, flen - 1);
+    }
+
+    // ── Side gable edges — hard dark lines + shadow vignette ───────────
+    const GABLE_VIG = 18;
+    const gL = ctx.createLinearGradient(0, 0, GABLE_VIG, 0);
+    gL.addColorStop(0, 'rgba(0,0,0,0.52)');
+    gL.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = gL; ctx.fillRect(0, 0, GABLE_VIG, h);
+
+    const gR = ctx.createLinearGradient(w - GABLE_VIG, 0, w, 0);
+    gR.addColorStop(0, 'rgba(0,0,0,0)');
+    gR.addColorStop(1, 'rgba(0,0,0,0.52)');
+    ctx.fillStyle = gR; ctx.fillRect(w - GABLE_VIG, 0, GABLE_VIG, h);
+
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(0, 0, 2, h);
+    ctx.fillRect(w - 2, 0, 2, h);
+
+    this._roofCache.set(key, oc);
     return oc;
   }
 
@@ -1106,35 +1342,121 @@ export class Renderer {
       return;
     }
 
-    // ── Portal ────────────────────────────────────────────
+    // ── Portal — grand 3-tile-wide arch ───────────────────
     if (tile === TILES.PORTAL) {
       const t = this.time;
-      // Stone base arch
-      ctx.fillStyle = '#2a1a3a'; ctx.fillRect(px + 2, py + 4, 28, 26);
-      ctx.fillStyle = '#3a2a4a'; ctx.fillRect(px + 5, py + 2, 22, 4);  // arch top
-      ctx.fillStyle = '#2e2040'; ctx.fillRect(px + 2, py + 4, 4, 26);  // left pillar
-      ctx.fillStyle = '#2e2040'; ctx.fillRect(px + 26, py + 4, 4, 26); // right pillar
-
-      // Swirling energy fill — two pulsing layers
       const pulse = 0.5 + 0.5 * Math.sin(t * 2.5);
-      ctx.fillStyle = `rgba(100,50,200,${0.55 + pulse * 0.25})`;
-      ctx.fillRect(px + 6, py + 6, 20, 22);
-      ctx.fillStyle = `rgba(160,80,255,${0.3 + pulse * 0.2})`;
-      ctx.fillRect(px + 9,  py + 9,  14, 14);
-      ctx.fillStyle = `rgba(220,160,255,${0.15 + pulse * 0.25})`;
-      ctx.fillRect(px + 12, py + 12, 8, 8);
 
-      // Sparkle particles (4 fixed positions animated with offset phases)
-      const sparks = [[8,8,0],[22,10,1.1],[10,22,2.2],[21,20,3.3]];
-      for (const [sx,sy,phase] of sparks) {
-        const a = Math.abs(Math.sin(t * 3 + phase));
-        ctx.fillStyle = `rgba(220,180,255,${a * 0.9})`;
-        ctx.fillRect(px + sx, py + sy, 2, 2);
+      // Arch geometry: extends 28px left, 28px right, 42px upward from tile top
+      const AL = px - 28;   // arch left edge
+      const AW = 88;        // total arch width
+      const PW = 13;        // pillar width
+      const LP = AL + 2;    // left pillar x
+      const RP = AL + AW - 2 - PW;  // right pillar x
+      const IX = LP + PW;   // portal energy left x
+      const IW = RP - IX;   // portal energy width
+      const PT = py - 42;   // pillar top y
+      const PH = 54;        // pillar height (to py+12)
+      const IT = PT + 10;   // energy field top
+      const IH = PH - 10;   // energy field height
+
+      // Stone base slab
+      ctx.fillStyle = '#2d2320'; ctx.fillRect(AL + 4, py + 16, AW - 8, 16);
+      ctx.fillStyle = '#3d3028'; ctx.fillRect(AL,     py + 10, AW,     8);
+      ctx.fillStyle = '#4d4036'; ctx.fillRect(AL,     py + 10, AW,     2); // top highlight
+
+      // Left pillar
+      ctx.fillStyle = '#2a2422'; ctx.fillRect(LP, PT, PW, PH);
+      ctx.fillStyle = '#4a3e3c'; ctx.fillRect(LP, PT,  3, PH);      // lit left edge
+      ctx.fillStyle = '#1a1412'; ctx.fillRect(LP + PW - 2, PT, 2, PH); // shadow right
+      for (let ly = 4; ly < PH; ly += 9) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(LP, PT + ly, PW, 1);
+      }
+      // Rune carvings
+      const ra = 0.28 + 0.18 * Math.sin(t * 1.5);
+      ctx.fillStyle = `rgba(155,75,255,${ra})`;
+      ctx.fillRect(LP + 4, PT + 13, 5, 1); ctx.fillRect(LP + 4, PT + 14, 1, 5); ctx.fillRect(LP + 8, PT + 14, 1, 5);
+      ctx.fillRect(LP + 4, PT + 25, 5, 1); ctx.fillRect(LP + 6, PT + 26, 1, 5);
+      ctx.fillRect(LP + 4, PT + 36, 5, 1); ctx.fillRect(LP + 4, PT + 37, 1, 4); ctx.fillRect(LP + 8, PT + 37, 1, 4); ctx.fillRect(LP + 4, PT + 41, 5, 1);
+
+      // Right pillar (mirror)
+      ctx.fillStyle = '#2a2422'; ctx.fillRect(RP, PT, PW, PH);
+      ctx.fillStyle = '#4a3e3c'; ctx.fillRect(RP + PW - 3, PT, 3, PH);
+      ctx.fillStyle = '#1a1412'; ctx.fillRect(RP, PT, 2, PH);
+      for (let ly = 4; ly < PH; ly += 9) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(RP, PT + ly, PW, 1);
+      }
+      ctx.fillStyle = `rgba(155,75,255,${ra})`;
+      ctx.fillRect(RP + 4, PT + 13, 5, 1); ctx.fillRect(RP + 4, PT + 14, 1, 5); ctx.fillRect(RP + 8, PT + 14, 1, 5);
+      ctx.fillRect(RP + 4, PT + 25, 5, 1); ctx.fillRect(RP + 6, PT + 26, 1, 5);
+      ctx.fillRect(RP + 4, PT + 36, 5, 1); ctx.fillRect(RP + 4, PT + 37, 1, 4); ctx.fillRect(RP + 8, PT + 37, 1, 4); ctx.fillRect(RP + 4, PT + 41, 5, 1);
+
+      // Lintel (horizontal crossbeam connecting pillars)
+      const LW = RP + PW - LP;
+      ctx.fillStyle = '#2a2422'; ctx.fillRect(LP, PT - 4, LW, 10);
+      ctx.fillStyle = '#4a3e3c'; ctx.fillRect(LP, PT - 4, LW,  3);  // top highlight
+      ctx.fillStyle = '#1a1412'; ctx.fillRect(LP, PT + 4,  LW,  2); // bottom shadow
+
+      // Keystone at arch peak
+      const KX = LP + Math.floor(LW / 2) - 7;
+      ctx.fillStyle = '#1e1620'; ctx.fillRect(KX, PT - 11, 14, 8);
+      ctx.fillStyle = `rgba(195,120,255,${0.4 + 0.28 * Math.sin(t * 1.9)})`;
+      ctx.fillRect(KX + 4, PT -  9, 6, 2);
+      ctx.fillRect(KX + 6, PT -  7, 2, 4);
+
+      // Portal energy — dark void + layered glow
+      ctx.fillStyle = 'rgba(13,3,34,0.97)';              ctx.fillRect(IX, IT, IW, IH);
+      ctx.fillStyle = `rgba(65,22,148,${0.55 + pulse * 0.22})`; ctx.fillRect(IX + 1, IT + 1, IW - 2, IH - 2);
+      ctx.fillStyle = `rgba(115,52,205,${0.30 + pulse * 0.22})`; ctx.fillRect(IX + 4, IT + 4, IW - 8, IH - 8);
+      ctx.fillStyle = `rgba(185,108,255,${0.14 + pulse * 0.28})`; ctx.fillRect(IX + 8, IT + 8, IW - 16, IH - 16);
+      // Bright central flash
+      const cW = 8, cH = 12;
+      ctx.fillStyle = `rgba(235,200,255,${0.05 + pulse * 0.32})`;
+      ctx.fillRect(IX + Math.floor((IW - cW) / 2), IT + Math.floor((IH - cH) / 2), cW, cH);
+
+      // Expanding ripple ring
+      const rT = (t * 0.55) % 1;
+      if (rT > 0.04) {
+        ctx.strokeStyle = `rgba(195,148,255,${(1 - rT) * 0.5})`;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(
+          IX + Math.floor((IW - IW * rT) / 2),
+          IT + Math.floor((IH - IH * rT) / 2),
+          Math.ceil(IW * rT), Math.ceil(IH * rT)
+        );
       }
 
-      // Glowing top edge
-      ctx.fillStyle = `rgba(180,100,255,${0.4 + pulse * 0.3})`;
-      ctx.fillRect(px + 5, py + 2, 22, 2);
+      // Sparkle particles
+      for (const [sx, sy, ph] of [
+        [IX + 3,           IT + 4,           0.0],
+        [IX + IW - 6,      IT + 7,           1.1],
+        [IX + 5,           IT + IH - 8,      2.2],
+        [IX + IW - 8,      IT + IH - 5,      3.3],
+        [IX + IW / 2 | 0,  IT + 3,           4.4],
+        [IX + 7,           IT + IH / 2 | 0,  0.8],
+        [IX + IW - 10,     IT + IH / 2 | 0,  2.0],
+      ]) {
+        const a = Math.abs(Math.sin(t * 3.8 + ph));
+        ctx.fillStyle = `rgba(228,192,255,${a * 0.9})`;
+        ctx.fillRect(sx, sy, 2, 2);
+      }
+
+      // Floating orbs
+      const orbT = t * 0.85;
+      const ox1 = IX + IW / 2 + 8 * Math.cos(orbT),      oy1 = IT + IH / 2 + 6 * Math.sin(orbT * 1.3);
+      const ox2 = IX + IW / 2 - 6 * Math.cos(orbT * 0.7 + 1), oy2 = IT + IH / 2 - 4 * Math.sin(orbT + 0.5);
+      ctx.fillStyle = 'rgba(208,162,255,0.9)'; ctx.fillRect(Math.round(ox1), Math.round(oy1), 3, 3);
+      ctx.fillStyle = 'rgba(152,98,228,0.8)';  ctx.fillRect(Math.round(ox2), Math.round(oy2), 2, 2);
+
+      // Inner-edge glow on pillar faces (where energy meets stone)
+      ctx.fillStyle = `rgba(125,56,235,${0.32 + pulse * 0.2})`;
+      ctx.fillRect(LP + PW - 1, IT, 2, IH);
+      ctx.fillRect(RP - 1,      IT, 2, IH);
+
+      // Ground glow
+      ctx.fillStyle = `rgba(85,38,185,${0.18 + pulse * 0.10})`;
+      ctx.fillRect(AL + 8, py + 10, AW - 16, 8);
+
       return;
     }
 
@@ -1161,6 +1483,338 @@ export class Renderer {
         ctx.ellipse(px + ((c * 7 + r * 3) % 20) + 6, py + 4, 3, 2, 0, 0, Math.PI * 2);
         ctx.fill();
       }
+      return;
+    }
+
+    // ── PATH — worn cobblestone village path ─────────────────────────────
+    if (tile === TILES.PATH) {
+      // Mortar/sand base
+      ctx.fillStyle = '#4e4840'; ctx.fillRect(px, py, 32, 32);
+      // Two rows of cobblestones, pattern staggered by tile coordinate
+      const even = (c + r) % 2 === 0;
+      const stones = even
+        ? [[1,1,9,14],[11,1,9,14],[22,1,9,14],[1,17,14,14],[17,17,14,14]]
+        : [[5,1,9,14],[16,1,14,14],[1,17,9,14],[11,17,9,14],[21,17,10,14]];
+      stones.forEach(([sx, sy, sw, sh], i) => {
+        const hue = ((c * 7 + r * 5 + i * 13) % 24) - 12;
+        const L   = 108 + hue;
+        ctx.fillStyle = `rgb(${L+8},${L+2},${L-6})`; ctx.fillRect(px+sx, py+sy, sw, sh);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.fillRect(px+sx+1, py+sy+1, sw-2, 2);
+        ctx.fillRect(px+sx+1, py+sy+1, 2, sh-3);
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(px+sx+1, py+sy+sh-2, sw-2, 2);
+        ctx.fillRect(px+sx+sw-2, py+sy+2, 2, sh-4);
+      });
+      if (s2 % 6 === 0) {
+        ctx.fillStyle = 'rgba(55,80,30,0.28)';
+        ctx.fillRect(px+(s3%26)+2, py+(s1%26)+2, 2, 2);
+      }
+      return;
+    }
+
+    // ── PLASTER_WALL — half-timber cottage wall ────────────────────────
+    if (tile === TILES.PLASTER_WALL) {
+      const wallBelow = world && world.getTile(c, r + 1) === TILES.PLASTER_WALL;
+
+      if (wallBelow) {
+        // Top surface — cream plank boarding viewed from above
+        const L = 196 + (s1 % 12) - 6;
+        ctx.fillStyle = `rgb(${L+6},${L},${L-12})`; ctx.fillRect(px, py, 32, 32);
+        ctx.fillStyle = 'rgba(60,30,10,0.14)';
+        ctx.fillRect(px, py, 32, 2);
+        ctx.fillRect(px, py + 18, 32, 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(px+2, py+3, 28, 3);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(px, py, 3, 32);
+      } else {
+        // Southernmost face — plaster + timber frame cottage front
+        const TOP = 9;
+        const L   = 196 + (s1 % 12) - 6;
+        // Top walkway surface
+        ctx.fillStyle = `rgb(${L+6},${L},${L-12})`; ctx.fillRect(px, py, 32, TOP + 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px, py, 32, 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)'; ctx.fillRect(px, py, 3, TOP + 1);
+        // Ledge
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(px, py + TOP, 32, 1);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(px, py + TOP + 1, 32, 1);
+        // Plaster face
+        const fY = TOP + 2;
+        ctx.fillStyle = `rgb(${L+6},${L},${L-12})`; ctx.fillRect(px, py+fY, 32, 32-fY-5);
+        // Timber frame posts + beams
+        ctx.fillStyle = '#3a2010';
+        ctx.fillRect(px,    py+fY, 2, 32-fY-5);   // left post
+        ctx.fillRect(px+30, py+fY, 2, 32-fY-5);   // right post
+        ctx.fillRect(px,    py+fY, 32, 2);         // top beam
+        ctx.fillRect(px,    py+fY+8, 32, 2);       // mid beam
+        // Diagonal brace (left panel)
+        ctx.strokeStyle = '#3a2010'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(px+2, py+fY+8); ctx.lineTo(px+13, py+fY+2); ctx.stroke();
+        // Small casement window (right panel)
+        ctx.fillStyle = '#1a2830'; ctx.fillRect(px+17, py+fY+2, 11, 7);
+        ctx.fillStyle = 'rgba(120,185,230,0.38)';
+        ctx.fillRect(px+18, py+fY+3, 4, 5);
+        ctx.fillRect(px+24, py+fY+3, 3, 5);
+        ctx.fillStyle = '#3a2010';
+        ctx.fillRect(px+22, py+fY+2, 1, 7);   // window divider
+        ctx.fillRect(px+17, py+fY+5, 11, 1);  // window sill
+        // Cast shadow below face
+        ctx.fillStyle = 'rgba(0,0,0,0.52)'; ctx.fillRect(px, py+27, 32, 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.fillRect(px, py+29, 32, 2);
+      }
+
+      return;
+    }
+
+    // ── THATCH_ROOF — golden straw thatching ──────────────────────────
+    if (tile === TILES.THATCH_ROOF) {
+      const s4 = (c * 17 + r * 5) % 29;
+      const R0 = 192, G0 = 148, B0 = 56;  // golden straw base
+
+      // Eave overhangs into adjacent PLASTER_WALL tiles
+      const EAVE = 12;
+      const _eaveH = (ex, ey, ew, eh) => {
+        ctx.fillStyle = `rgb(${R0-20},${G0-10},${B0-4})`; ctx.fillRect(ex, ey, ew, eh);
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        for (let i = 0; i <= Math.floor(ew/8); i++) ctx.fillRect(ex+i*8, ey, 1, eh);
+        ctx.fillStyle = 'rgba(255,210,120,0.10)'; ctx.fillRect(ex+2, ey, ew-4, eh);
+        ctx.fillStyle = `rgb(${R0-32},${G0-16},${B0-8})`; ctx.fillRect(ex, ey, ew, 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.40)'; ctx.fillRect(ex, ey, ew, 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(ex, ey+eh-3, ew, 3);
+        ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.fillRect(ex, ey+eh, ew, 2);
+      };
+      const _eaveV = (ex, ey, ew, eh) => {
+        ctx.fillStyle = `rgb(${R0-20},${G0-10},${B0-4})`; ctx.fillRect(ex, ey, ew, eh);
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';
+        for (let i = 0; i <= Math.floor(eh/8); i++) ctx.fillRect(ex, ey+i*8, ew, 1);
+        ctx.fillStyle = 'rgba(255,210,120,0.10)'; ctx.fillRect(ex, ey+2, ew, eh-4);
+        ctx.fillStyle = `rgb(${R0-32},${G0-16},${B0-8})`; ctx.fillRect(ex, ey, 3, eh);
+        ctx.fillStyle = 'rgba(0,0,0,0.40)'; ctx.fillRect(ex, ey, 2, eh);
+        ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fillRect(ex+ew-3, ey, 3, eh);
+        ctx.fillStyle = 'rgba(0,0,0,0.26)'; ctx.fillRect(ex+ew, ey, 2, eh);
+      };
+      const hasPW_N = world && world.getTile(c, r-1) === TILES.PLASTER_WALL;
+      const hasPW_W = world && world.getTile(c-1, r) === TILES.PLASTER_WALL;
+      if (hasPW_N) _eaveH(px-2, py-EAVE, 36, EAVE);
+      if (hasPW_W) _eaveV(px-EAVE, py-2, EAVE, 36);
+
+      // Main thatch body — 4 rows of straw bundles
+      const SH = 8;
+      for (let row = 0; row < 4; row++) {
+        const sy      = py + row * SH;
+        const off     = (row % 2) * 5;
+        const darker  = row * 9;
+        const bR      = R0 - darker + (s1 % 6) - 3;
+        const bG      = G0 - Math.floor(darker * 0.6);
+        let sx = px - 3 + off;
+        let col2 = 0;
+        while (sx < px + 32) {
+          const sw = 8 + ((col2 * 3 + row * 5 + s2) % 4);
+          const x0 = Math.max(sx, px);
+          const x1 = Math.min(sx + sw - 1, px + 31);
+          if (x1 > x0) {
+            const sw2 = x1 - x0;
+            const hue = ((col2 * 7 + row * 3 + s3) % 9) - 4;
+            ctx.fillStyle = `rgb(${Math.max(40,bR+hue)},${Math.max(20,bG)},${B0})`;
+            ctx.fillRect(x0, sy, sw2, SH - 1);
+            ctx.fillStyle = 'rgba(255,240,180,0.28)';
+            ctx.fillRect(x0, sy, sw2, 2);
+            ctx.fillStyle = 'rgba(255,240,180,0.12)';
+            ctx.fillRect(x0, sy + 2, sw2, 1);
+            ctx.fillStyle = 'rgba(0,0,0,0.45)';
+            ctx.fillRect(x0, sy + SH - 2, sw2, 2);
+            if (sx >= px) {
+              ctx.fillStyle = 'rgba(0,0,0,0.32)'; ctx.fillRect(sx, sy, 1, SH - 1);
+              ctx.fillStyle = 'rgba(255,255,200,0.14)'; ctx.fillRect(sx+1, sy+1, 1, SH-3);
+            }
+          }
+          sx += sw; col2++;
+        }
+      }
+
+      // Ridge cap — bright dense bundles at top
+      const ridgeSW = 7;
+      for (let i = 0; i < 6; i++) {
+        const rx  = px + i * ridgeSW - (s3 % 3);
+        const x0r = Math.max(rx, px);
+        const x1r = Math.min(rx + ridgeSW - 1, px + 31);
+        if (x1r <= x0r) continue;
+        const hue = ((i + s4) % 5) - 2;
+        ctx.fillStyle = `rgb(${R0+20+hue},${G0+12},${B0+8})`;
+        ctx.fillRect(x0r, py, x1r - x0r, 5);
+        ctx.fillStyle = 'rgba(255,255,220,0.36)'; ctx.fillRect(x0r, py, x1r-x0r, 1);
+        ctx.fillStyle = 'rgba(255,255,220,0.16)'; ctx.fillRect(x0r, py+1, x1r-x0r, 1);
+        if (rx >= px) { ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.fillRect(rx, py, 1, 5); }
+        ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(x0r, py+5, x1r-x0r, 1);
+      }
+
+      // Weathering — occasional damp discolouration patch
+      if (s1 % 5 === 0) {
+        ctx.fillStyle = 'rgba(100,70,20,0.22)';
+        ctx.fillRect(px+(s2*5%16)+4, py+(s3*4%18)+5, 5+(s4%4), 3);
+      }
+
+      return;
+    }
+
+    // ── FENCE — wooden picket fence ───────────────────────────────────
+    if (tile === TILES.FENCE) {
+      // Horizontal rails
+      ctx.fillStyle = '#6b4520';
+      ctx.fillRect(px, py+10, 32, 3);   // top rail
+      ctx.fillRect(px, py+21, 32, 3);   // bottom rail
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(px, py+10, 32, 1);
+      ctx.fillRect(px, py+21, 32, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(px, py+12, 32, 1);
+      ctx.fillRect(px, py+23, 32, 1);
+
+      // Vertical pickets (4 per tile, evenly spaced, pointed tops)
+      [1, 9, 17, 25].forEach(pxo => {
+        ctx.fillStyle = '#7a5028';
+        ctx.fillRect(px+pxo, py+6, 5, 22);
+        ctx.fillStyle = '#8a5e30';
+        ctx.fillRect(px+pxo+1, py+3, 3, 4);
+        ctx.fillRect(px+pxo+2, py+1, 1, 3);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.fillRect(px+pxo, py+6, 1, 22);
+        ctx.fillRect(px+pxo+1, py+3, 1, 4);
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        ctx.fillRect(px+pxo+4, py+6, 1, 22);
+      });
+
+      return;
+    }
+
+    // ── WELL — stone village well ─────────────────────────────────────
+    if (tile === TILES.WELL) {
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+27, 11, 5, 0, 0, Math.PI*2); ctx.fill();
+
+      // Stone surround top face
+      ctx.fillStyle = '#8a7a6a';
+      ctx.beginPath(); ctx.ellipse(px+16, py+19, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#101820'; // dark water hole
+      ctx.beginPath(); ctx.ellipse(px+16, py+19, 7, 3, 0, 0, Math.PI*2); ctx.fill();
+
+      // Well shaft side (below top face)
+      ctx.fillStyle = '#686058';
+      ctx.beginPath(); ctx.ellipse(px+16, py+24, 10, 5, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(30,90,140,0.55)'; // water sheen inside
+      ctx.beginPath(); ctx.ellipse(px+16, py+24, 5, 2, 0, 0, Math.PI*2); ctx.fill();
+
+      // Stone course line on shaft
+      ctx.strokeStyle = 'rgba(0,0,0,0.28)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.ellipse(px+16, py+22, 10, 4, 0, 0.1, Math.PI-0.1); ctx.stroke();
+
+      // Wooden upright posts
+      ctx.fillStyle = '#4a3010';
+      ctx.fillRect(px+5,  py+10, 4, 14);
+      ctx.fillRect(px+23, py+10, 4, 14);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(px+5,  py+10, 1, 14);
+      ctx.fillRect(px+23, py+10, 1, 14);
+
+      // Crossbeam
+      ctx.fillStyle = '#5a3c18';
+      ctx.fillRect(px+3, py+8, 26, 4);
+      ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fillRect(px+3, py+8, 26, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(px+3, py+11, 26, 1);
+
+      // Rope and bucket
+      ctx.fillStyle = '#c8a858'; ctx.fillRect(px+15, py+12, 2, 9);
+      ctx.fillStyle = '#6b4a20'; ctx.fillRect(px+13, py+20, 6, 5);
+      ctx.fillStyle = '#8b6028'; ctx.fillRect(px+13, py+20, 6, 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)'; ctx.fillRect(px+13, py+24, 6, 1);
+
+      // Post bases
+      ctx.fillStyle = '#3a2a18';
+      ctx.fillRect(px+4, py+22, 6, 3);
+      ctx.fillRect(px+22, py+22, 6, 3);
+
+      return;
+    }
+
+    // ── BARREL — wooden storage barrel ───────────────────────────────
+    if (tile === TILES.BARREL) {
+      const bX = 8, bY = 6, bW = 16, bH = 22;
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.beginPath(); ctx.ellipse(px+bX+bW/2, py+bY+bH+2, bW/2, 3, 0, 0, Math.PI*2); ctx.fill();
+
+      // Stave body
+      ctx.fillStyle = '#6b3a18'; ctx.fillRect(px+bX, py+bY, bW, bH);
+      // Stave lines
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      for (let i = 3; i < bW; i += 4) ctx.fillRect(px+bX+i, py+bY, 1, bH);
+      // Side shadows
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(px+bX, py+bY, 2, bH);
+      ctx.fillRect(px+bX+bW-2, py+bY, 2, bH);
+
+      // Metal hoops
+      [bY+1, Math.floor(bY+bH/2)-1, bY+bH-3].forEach(hy => {
+        ctx.fillStyle = '#3a3a3a'; ctx.fillRect(px+bX-1, py+hy, bW+2, 3);
+        ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(px+bX-1, py+hy, bW+2, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.30)'; ctx.fillRect(px+bX-1, py+hy+2, bW+2, 1);
+      });
+
+      // Top face
+      ctx.fillStyle = '#8a5028';
+      ctx.beginPath(); ctx.ellipse(px+bX+bW/2, py+bY, bW/2, 3, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.16)';
+      ctx.beginPath(); ctx.ellipse(px+bX+bW/2, py+bY-1, bW/2-2, 2, 0, 0, Math.PI*2); ctx.fill();
+
+      return;
+    }
+
+    // ── SIGN — wooden directional signpost ────────────────────────────
+    if (tile === TILES.SIGN) {
+      // Post
+      ctx.fillStyle = '#5a3810';
+      ctx.fillRect(px+14, py+16, 4, 16);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px+14, py+16, 1, 16);
+      ctx.fillStyle = 'rgba(0,0,0,0.20)'; ctx.fillRect(px+17, py+16, 1, 16);
+      ctx.fillStyle = '#3a2408'; ctx.fillRect(px+13, py+28, 6, 4);
+
+      // Sign board (two plank layers)
+      ctx.fillStyle = '#7a5020'; ctx.fillRect(px+5, py+4, 22, 13);
+      ctx.fillStyle = '#6a4418'; ctx.fillRect(px+5, py+4,  22, 2);
+      ctx.fillStyle = '#8a5c28'; ctx.fillRect(px+5, py+8,  22, 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px+5, py+4, 22, 1);
+      // Board frame
+      ctx.fillStyle = '#3a2010';
+      ctx.fillRect(px+5, py+4, 22, 1); ctx.fillRect(px+5, py+16, 22, 1);
+      ctx.fillRect(px+5, py+4, 1, 13); ctx.fillRect(px+26, py+4, 1, 13);
+      // Nail heads
+      ctx.fillStyle = '#505050';
+      [[6,5],[25,5],[6,15],[25,15]].forEach(([nx,ny]) => {
+        ctx.fillRect(px+nx, py+ny, 2, 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(px+nx, py+ny, 1, 1);
+        ctx.fillStyle = '#505050';
+      });
+      // Custom label text or default arrow on sign face
+      const label = world?.signLabels?.get(`${c},${r}`);
+      if (label) {
+        ctx.save();
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(30,15,0,0.75)';
+        ctx.fillText(label, px + 16, py + 11);
+        ctx.fillStyle = 'rgba(220,170,55,0.95)';
+        ctx.fillText(label, px + 16, py + 10);
+        ctx.restore();
+      } else {
+        ctx.fillStyle = 'rgba(200,160,60,0.85)';
+        ctx.fillRect(px+8,  py+9, 9, 2);
+        ctx.fillRect(px+15, py+7, 2, 6);
+        ctx.fillRect(px+16, py+8, 2, 4);
+        ctx.fillRect(px+17, py+9, 2, 2);
+      }
+
       return;
     }
 

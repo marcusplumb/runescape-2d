@@ -14,6 +14,7 @@ import { MobManager, Mob } from './mobs.js';
 import { Combat } from './combat.js';
 import { ShopKeeper, SHOP_STOCK, SELL_PRICES, SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
   HouseShopKeeper, HOUSE_SHOP_STOCK, HOUSE_SHOP_PW, HOUSE_SHOP_PH, HOUSE_SHOP_HEADER_H, HOUSE_SHOP_ROW_H,
+  SmithyKeeper, SMITHY_STOCK,
 } from './shop.js';
 import {
   MakoverNPC,
@@ -110,6 +111,7 @@ export class Game {
     this.mobManager      = new MobManager(this.world);
     this.remoteHitSplats = []; // hit splats from other players' combat
     this.shopKeeper      = new ShopKeeper();
+    this.smithyKeeper    = new SmithyKeeper();
     this.makoverNpc      = new MakoverNPC();
     this.fishermanNpc    = new FishermanNPC();
     this.fishermanOpen   = false;
@@ -204,6 +206,8 @@ export class Game {
     this.xpFlashes     = [];
     this.shopOpen      = false;
     this.shopTab       = 'buy';
+    this.smithyShopOpen = false;
+    this.smithyShopTab  = 'buy';
     this.houseShopOpen = false;
     this.houseShopKeeper = new HouseShopKeeper();
     this.placingFurniture = null; // { item, slotIndex } when in furniture placement mode
@@ -434,6 +438,8 @@ export class Game {
         this.smithOpen = false;
       } else if (this.houseShopOpen) {
         this.houseShopOpen = false;
+      } else if (this.smithyShopOpen) {
+        this.smithyShopOpen = false;
       } else if (this.shopOpen) {
         this.shopOpen = false;
       } else if (this.makoverOpen) {
@@ -498,6 +504,8 @@ export class Game {
         this._handleSmithClick(click.screenX, click.screenY);
       } else if (this.houseShopOpen) {
         this._handleHouseShopClick(click.screenX, click.screenY);
+      } else if (this.smithyShopOpen) {
+        this._handleSmithyShopClick(click.screenX, click.screenY);
       } else if (this.shopOpen) {
         this._handleShopClick(click.screenX, click.screenY);
       } else if (this.makoverOpen) {
@@ -556,6 +564,16 @@ export class Game {
             this.pendingInteract = { type: 'shop', col: skCol, row: skRow };
             this.clickDest = { col: skCol, row: skRow };
           }
+        } else if (!this.inInterior && this.smithyKeeper.containsWorld(worldPos.x, worldPos.y)) {
+          // Walk to smithy keeper then open smithy shop
+          const smCol = Math.floor((this.smithyKeeper.x + this.smithyKeeper.w / 2) / TILE_SIZE);
+          const smRow = Math.floor((this.smithyKeeper.y + this.smithyKeeper.h / 2) / TILE_SIZE);
+          const adj   = nearestWalkableAdjacent(this.world, smCol, smRow, this.player.col, this.player.row);
+          if (adj) {
+            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.pendingInteract = { type: 'smithy', col: smCol, row: smRow };
+            this.clickDest = { col: smCol, row: smRow };
+          }
         } else if (!this.inInterior && this.makoverNpc.containsWorld(worldPos.x, worldPos.y)) {
           // Walk to Makeover NPC
           const moCol = Math.floor(this.makoverNpc.cx / TILE_SIZE);
@@ -591,14 +609,14 @@ export class Game {
               this.combat.setTarget(clickedMob);
               if (this.network) this.network.sendStartCombat(clickedMob.id);
             }
-          } else if (TILE_TOOLTIPS[this.world.getTile(clickCol, clickRow)] !== undefined
-                     && this.world.getTile(clickCol, clickRow) !== TILES.ROCK_DEPLETED) {
-            const solid = this.world.isSolid(clickCol, clickRow);
+          } else if (TILE_TOOLTIPS[this.activeMap.getTile(clickCol, clickRow)] !== undefined
+                     && this.activeMap.getTile(clickCol, clickRow) !== TILES.ROCK_DEPLETED) {
+            const solid = this.activeMap.isSolid(clickCol, clickRow);
             const target = solid
-              ? nearestWalkableAdjacent(this.world, clickCol, clickRow, this.player.col, this.player.row)
+              ? nearestWalkableAdjacent(this.activeMap, clickCol, clickRow, this.player.col, this.player.row)
               : { col: clickCol, row: clickRow };
             if (target) {
-              this.player.setPath(findPath(this.world, this.player.col, this.player.row, target.col, target.row));
+              this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, target.col, target.row));
               this.pendingInteract = { type: 'action', col: clickCol, row: clickRow, worldX: worldPos.x, worldY: worldPos.y };
               this.clickDest = { col: clickCol, row: clickRow };
             }
@@ -706,12 +724,6 @@ export class Game {
       const tile = this.activeMap.getTile(this.player.col, this.player.row);
       if (!this.inInterior && !this.inRaid && tile === TILES.PORTAL) {
         this._beginTransition(() => this._enterInterior('player_house'));
-      } else if (!this.inInterior && !this.inRaid && tile === TILES.DOOR) {
-        const key = `${this.player.col},${this.player.row}`;
-        const intId = this.world.doorMap.get(key);
-        if (intId && this.interiors.has(intId)) {
-          this._beginTransition(() => this._enterInterior(intId));
-        }
       } else if (this.inInterior && tile === TILES.STAIRS) {
         this._beginTransition(() => this._exitToWorld());
       }
@@ -735,6 +747,9 @@ export class Game {
       } else if (pi.type === 'shop') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) this.shopOpen = true;
+      } else if (pi.type === 'smithy') {
+        const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
+        if (dist <= 2) this.smithyShopOpen = true;
       } else if (pi.type === 'makeover') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) this.makoverOpen = true;
@@ -943,6 +958,7 @@ export class Game {
     // World-space
     this.camera.begin(ctx);
       this.renderer.drawWorld(this.activeMap, this.camera.x, this.camera.y);
+      this.renderer.drawOpenDoors(this.activeMap, this.player.col, this.player.row);
 
       if (this.clickDest) {
         this.renderer.drawClickTarget(
@@ -1011,7 +1027,7 @@ export class Game {
         for (const rv of this.remotePlayers.values()) eb.push(rv);
         const _mobSrc = this.inRaid && this.activeRaid ? this.activeRaid.mobContainer.mobs : this.mobManager.mobs;
         for (const m of _mobSrc) eb.push(m);
-        if (!this.inRaid) eb.push(this.shopKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
+        if (!this.inRaid) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
         for (const t of treeSortables) eb.push(t);
         eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
@@ -1024,6 +1040,9 @@ export class Game {
         // Hit splats (world-space, drawn after all entities)
         this._drawHitSplats(ctx, this.combat.hitSplats);
         this._drawHitSplats(ctx, this.remoteHitSplats);
+
+        // Roof overlays drawn last so they cover entities and hit splats inside buildings
+        this.renderer.drawRoofOverlays(this.activeMap, this.camera.x, this.camera.y, this.player.col, this.player.row);
       } else {
         // Interior: draw player + any interior-specific NPCs
         if (this.activeMap.id === 'player_house') {
@@ -1083,6 +1102,9 @@ export class Game {
     if (this.shopOpen) {
       this.renderer.drawShopPanel(this.shopTab, SHOP_STOCK, this.inventory);
     }
+    if (this.smithyShopOpen) {
+      this.renderer.drawShopPanel(this.smithyShopTab, SMITHY_STOCK, this.inventory);
+    }
     if (this.houseShopOpen) {
       this.renderer.drawHouseShopPanel(HOUSE_SHOP_STOCK, this.inventory);
     }
@@ -1118,6 +1140,8 @@ export class Game {
       const worldPos = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
       if (this.shopKeeper.containsWorld(worldPos.x, worldPos.y)) {
         tooltip = 'Shopkeeper — click to trade';
+      } else if (this.smithyKeeper.containsWorld(worldPos.x, worldPos.y)) {
+        tooltip = 'Smith — click to buy weapons & armour';
       } else if (this.makoverNpc.containsWorld(worldPos.x, worldPos.y)) {
         tooltip = 'Makeover Mage — click to customise your character';
       } else if (this.fishermanNpc.containsWorld(worldPos.x, worldPos.y)) {
@@ -1139,7 +1163,7 @@ export class Game {
           } else {
             const hoverCol = Math.floor(worldPos.x / TILE_SIZE);
             const hoverRow = Math.floor(worldPos.y / TILE_SIZE);
-            tooltip = TILE_TOOLTIPS[this.world.getTile(hoverCol, hoverRow)] || null;
+            tooltip = TILE_TOOLTIPS[this.activeMap.getTile(hoverCol, hoverRow)] || null;
           }
         }
       }
@@ -1208,6 +1232,7 @@ export class Game {
     if (this.forgeOpen)      return true;
     if (this.smithOpen)      return true;
     if (this.shopOpen)       return true;
+    if (this.smithyShopOpen) return true;
     if (this.houseShopOpen)  return true;
     if (this.makoverOpen)    return true;
     if (this.fishermanOpen)  return true;
@@ -1455,6 +1480,33 @@ export class Game {
     if (sx < btnX) return;
     if (this.shopTab === 'buy') {
       if (row < SHOP_STOCK.length) this._buyItem(SHOP_STOCK[row]);
+    } else {
+      const sellable = this._getSellableSlots();
+      if (row < sellable.length) this._sellItem(sellable[row]);
+    }
+  }
+
+  _handleSmithyShopClick(sx, sy) {
+    const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
+    const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
+    if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
+      this.smithyShopOpen = false;
+      return;
+    }
+    const tabY = py + SHOP_HEADER_H;
+    const tabW = Math.floor(SHOP_PW / 2) - 8;
+    if (sy >= tabY && sy <= tabY + SHOP_TAB_H) {
+      if (sx >= px + 4 && sx <= px + 4 + tabW) this.smithyShopTab = 'buy';
+      else if (sx >= px + SHOP_PW / 2 + 4)     this.smithyShopTab = 'sell';
+      return;
+    }
+    const contentY = tabY + SHOP_TAB_H;
+    if (sy < contentY) return;
+    const row = Math.floor((sy - contentY) / SHOP_ROW_H);
+    const btnX = px + SHOP_PW - 64;
+    if (sx < btnX) return;
+    if (this.smithyShopTab === 'buy') {
+      if (row < SMITHY_STOCK.length) this._buyItem(SMITHY_STOCK[row]);
     } else {
       const sellable = this._getSellableSlots();
       if (row < sellable.length) this._sellItem(sellable[row]);

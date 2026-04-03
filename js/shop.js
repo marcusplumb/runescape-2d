@@ -1,6 +1,19 @@
 import { ITEMS } from './items.js';
 import { TILE_SIZE, WORLD_COLS, WORLD_ROWS } from './constants.js';
 
+/* ── Smithy shop (weapons + armour) ────────────────── */
+export const SMITHY_STOCK = [
+  { item: ITEMS.BRONZE_SWORD, buyPrice:   60 },
+  { item: ITEMS.IRON_SWORD,   buyPrice:  160 },
+  { item: ITEMS.STEEL_SWORD,  buyPrice:  400 },
+  { item: ITEMS.BRONZE_HELM,  buyPrice:   70 },
+  { item: ITEMS.IRON_HELM,    buyPrice:  180 },
+  { item: ITEMS.STEEL_HELM,   buyPrice:  440 },
+  { item: ITEMS.BRONZE_PLATE, buyPrice:  170 },
+  { item: ITEMS.IRON_PLATE,   buyPrice:  440 },
+  { item: ITEMS.STEEL_PLATE,  buyPrice: 1080 },
+];
+
 /* ── Panel geometry (shared with game.js for hit-testing) ── */
 export const SHOP_PW       = 430;
 export const SHOP_HEADER_H = 52;
@@ -106,12 +119,17 @@ export const HOUSE_SHOP_STOCK = [
 /* ── ShopKeeper NPC ─────────────────────────────────────── */
 export class ShopKeeper {
   constructor() {
-    // Placed at center of the building interior
+    // Placed inside the middle (N) village house — spawnC-5, bldTop-14
     this.w = 24;
     this.h = 32;
-    this.x = Math.floor(WORLD_COLS / 2) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
-    this.y = Math.floor(WORLD_ROWS / 2) * TILE_SIZE;
-    this.name = 'Shop';
+    const spawnC  = Math.floor(WORLD_COLS / 2);       // 512
+    const bldTop  = Math.floor(WORLD_ROWS / 2) - 3;   // 381
+    const HW = 7;
+    const shopLeft = spawnC - 5;                       // 507
+    const shopTop  = bldTop - 14;                      // 367
+    // Centre of interior back row — behind the table counter
+    this.x = (shopLeft + 1 + Math.floor((HW - 2) / 2)) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (shopTop + 1) * TILE_SIZE;
   }
 
   /** True if a world-coordinate point lands inside this NPC's rect */
@@ -182,14 +200,6 @@ export class ShopKeeper {
     ctx.fillRect(x + 6,  y + 5, 2, 2);
     ctx.fillRect(x + 16, y + 5, 2, 2);
 
-    // Name tag (gold)
-    ctx.fillStyle = '#f1c40f';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.strokeText(this.name, x + w / 2, y - 10);
-    ctx.fillText(this.name, x + w / 2, y - 10);
   }
 }
 
@@ -244,6 +254,118 @@ export class HouseShopKeeper {
     ctx.fillRect(x + 14, y + 8, 2, 1);
     ctx.fillRect(x + 10, y + 9, 4, 1);
 
+    ctx.fillStyle = '#f1c40f';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2;
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.strokeText(this.name, x + w / 2, y - 10);
+    ctx.fillText(this.name, x + w / 2, y - 10);
+  }
+}
+
+/* ── SmithyKeeper NPC — stands at the forge entrance ── */
+export class SmithyKeeper {
+  constructor() {
+    this.w = 24;
+    this.h = 32;
+    // Forge is at spawnC-18, spawnR-6 (FC=494, FR=383).
+    // NPC stands 1 tile south of the open forge entrance (col FC+4=498, row FR+4=387).
+    const spawnC = Math.floor(WORLD_COLS / 2);
+    const spawnR = Math.floor(WORLD_ROWS / 2) + 5;
+    const FC = spawnC - 18;
+    const FR = spawnR - 6;
+    this.x = (FC + 4) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (FR + 4) * TILE_SIZE;
+    this.name = 'Smith';
+  }
+
+  containsWorld(wx, wy) {
+    return wx >= this.x && wx <= this.x + this.w &&
+           wy >= this.y && wy <= this.y + this.h;
+  }
+
+  draw(ctx) {
+    const x = Math.round(this.x);
+    const y = Math.round(this.y);
+    const { w, h } = this;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.ellipse(x + w / 2, y + h, w / 2, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Boots
+    ctx.fillStyle = '#1a1408';
+    ctx.fillRect(x + 4, y + 28, 6, 4);
+    ctx.fillRect(x + w - 10, y + 28, 6, 4);
+
+    // Trousers
+    ctx.fillStyle = '#2c2010';
+    ctx.fillRect(x + 3, y + 22, 7, 8);
+    ctx.fillRect(x + w - 10, y + 22, 7, 8);
+
+    // Dark shirt
+    ctx.fillStyle = '#3a2818';
+    ctx.fillRect(x + 2, y + 11, w - 4, 13);
+
+    // Leather apron
+    ctx.fillStyle = '#7a4e22';
+    ctx.fillRect(x + 5, y + 13, w - 10, 13);
+    ctx.fillStyle = '#5a3a14';
+    ctx.fillRect(x + 5, y + 13, 1, 13);
+    ctx.fillRect(x + w - 6, y + 13, 1, 13);
+
+    // Apron shoulder ties
+    ctx.fillStyle = '#5a3a18';
+    ctx.fillRect(x + 1, y + 14, 5, 2);
+    ctx.fillRect(x + w - 6, y + 14, 5, 2);
+
+    // Arms (muscular)
+    ctx.fillStyle = '#a06840';
+    ctx.fillRect(x - 2, y + 12, 5, 11);
+    ctx.fillRect(x + w - 3, y + 12, 5, 11);
+    ctx.fillStyle = '#3a2818';
+    ctx.fillRect(x - 2, y + 17, 5, 1);
+    ctx.fillRect(x + w - 3, y + 17, 5, 1);
+
+    // Hammer (right hand)
+    ctx.fillStyle = '#6a6a6a';
+    ctx.fillRect(x + w + 1, y + 12, 5, 4);
+    ctx.fillStyle = '#5a3a18';
+    ctx.fillRect(x + w + 2, y + 16, 2, 9);
+
+    // Head
+    ctx.fillStyle = '#a06840';
+    ctx.fillRect(x + 4, y + 1, w - 8, 11);
+
+    // Heavy brows
+    ctx.fillStyle = '#3a2010';
+    ctx.fillRect(x + 4, y + 4, 6, 2);
+    ctx.fillRect(x + 14, y + 4, 6, 2);
+
+    // Eyes (squinted)
+    ctx.fillStyle = '#222';
+    ctx.fillRect(x + 6, y + 7, 3, 2);
+    ctx.fillRect(x + 15, y + 7, 3, 2);
+
+    // Thick dark beard
+    ctx.fillStyle = '#2c1a08';
+    ctx.fillRect(x + 4, y + 8, w - 8, 5);
+    ctx.fillStyle = '#3a2410';
+    ctx.fillRect(x + 5, y + 9, 3, 3);
+
+    // Soot smudge
+    ctx.fillStyle = 'rgba(0,0,0,0.32)';
+    ctx.fillRect(x + 9, y + 5, 2, 2);
+    ctx.fillRect(x + 15, y + 8, 3, 2);
+
+    // Headband
+    ctx.fillStyle = '#2a1a08';
+    ctx.fillRect(x + 4, y + 1, w - 8, 3);
+
+    // Name tag
     ctx.fillStyle = '#f1c40f';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
