@@ -39,6 +39,7 @@ import { getBiome } from './biomes.js';
 import {
   TILE_SIZE, PLAYER_SPEED, TILES, TREE_TILES,
   INV_COLS, INV_ROWS, INV_CELL, INV_PAD, SKILL_IDS, SKILL_NAMES, SKILL_UNLOCKS,
+  TILE_COLORS,
 } from './constants.js';
 
 // Duration to cross one tile — remote players interpolate at the same speed as local
@@ -261,6 +262,13 @@ export class Game {
     this.inDungeon         = false;
     this.activeDungeon     = null;
     this.dungeons          = buildAllDungeons(); // Map<id, DungeonInstance>
+    this.showWorldMap      = false;
+    this._worldMapCache    = null; // offscreen canvas, built lazily on first open
+    this._mapZoom          = 1;   // zoom multiplier (1 = fit-to-screen)
+    this._mapPanX          = 0;   // pan offset in screen pixels
+    this._mapPanY          = 0;
+    this._mapDragging      = false;
+    this._mapDragStart     = null; // { x, y, panX, panY }
     this.equipPanelOpen  = false;   // worn-items panel
     this.contextMenu     = null;    // { x, y, invSlot, options:[{label,cb}] }
 
@@ -278,14 +286,24 @@ export class Game {
       const rect = canvas.getBoundingClientRect();
       this.mouseScreen.x = e.clientX - rect.left;
       this.mouseScreen.y = e.clientY - rect.top;
+      if (this._mapDragging && this._mapDragStart) {
+        this._mapPanX = this._mapDragStart.panX + (this.mouseScreen.x - this._mapDragStart.x);
+        this._mapPanY = this._mapDragStart.panY + (this.mouseScreen.y - this._mapDragStart.y);
+      }
     });
 
     canvas.addEventListener('mousedown', e => {
       if (e.button !== 0) return;
-      if (this.sidePanelTab !== 'inventory') return;
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
+      if (this.showWorldMap) {
+        this._mapDragging   = true;
+        this._mapDragStart  = { x: sx, y: sy, panX: this._mapPanX, panY: this._mapPanY };
+        canvas.style.cursor = 'grabbing';
+        return;
+      }
+      if (this.sidePanelTab !== 'inventory') return;
       const idx = this._getInventorySlotAt(sx, sy);
       if (idx !== -1 && this.inventory.slots[idx] !== null) {
         this.dragSlot = idx;
@@ -293,6 +311,12 @@ export class Game {
     });
 
     window.addEventListener('mouseup', e => {
+      if (this._mapDragging) {
+        this._mapDragging  = false;
+        this._mapDragStart = null;
+        if (this.showWorldMap) canvas.style.cursor = 'grab';
+        return;
+      }
       if (this.dragSlot === -1) return;
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
@@ -304,6 +328,39 @@ export class Game {
       }
       this.dragSlot = -1;
     });
+
+    // World map zoom — scroll wheel zooms around the mouse cursor
+    canvas.addEventListener('wheel', e => {
+      if (!this.showWorldMap) return;
+      e.preventDefault();
+      const rect    = canvas.getBoundingClientRect();
+      const mouseX  = e.clientX - rect.left;
+      const mouseY  = e.clientY - rect.top;
+      const W = this.world.cols, H = this.world.rows;
+      const cw = canvas.width,   ch = canvas.height;
+
+      const baseScale = Math.min(cw * 0.88 / W, ch * 0.88 / H);
+      const oldScale  = baseScale * this._mapZoom;
+
+      // Zoom toward / away from cursor
+      const factor    = e.deltaY > 0 ? 0.85 : 1 / 0.85;
+      this._mapZoom   = Math.max(0.8, Math.min(10, this._mapZoom * factor));
+      const newScale  = baseScale * this._mapZoom;
+
+      // Current map top-left corner
+      const oldMW = W * oldScale, oldMH = H * oldScale;
+      const oldMX = (cw - oldMW) / 2 + this._mapPanX;
+      const oldMY = (ch - oldMH) / 2 + this._mapPanY;
+
+      // Tile coordinates under the mouse
+      const tileX = (mouseX - oldMX) / oldScale;
+      const tileY = (mouseY - oldMY) / oldScale;
+
+      // New map top-left that keeps that tile under the mouse
+      const newMW = W * newScale, newMH = H * newScale;
+      this._mapPanX = (mouseX - tileX * newScale) - (cw - newMW) / 2;
+      this._mapPanY = (mouseY - tileY * newScale) - (ch - newMH) / 2;
+    }, { passive: false });
 
     canvas.addEventListener('contextmenu', e => {
       e.preventDefault();
@@ -479,6 +536,14 @@ export class Game {
     if (this.input.wasJustPressed('Backquote')) {
       this.showAdminTp = !this.showAdminTp;
     }
+    if (this.input.wasJustPressed('KeyM')) {
+      this.showWorldMap = !this.showWorldMap;
+      if (this.showWorldMap) {
+        this._mapZoom = 1; this._mapPanX = 0; this._mapPanY = 0;
+      } else {
+        this.canvas.style.cursor = 'default';
+      }
+    }
     if (this.input.wasJustPressed('KeyG')) {
       this.adminEquipOpen = !this.adminEquipOpen;
     }
@@ -497,7 +562,10 @@ export class Game {
     }
     // Escape closes panels / cancels action / drops combat
     if (this.input.wasJustPressed('Escape')) {
-      if (this.contextMenu) {
+      if (this.showWorldMap) {
+        this.showWorldMap = false;
+        this.canvas.style.cursor = 'default';
+      } else if (this.contextMenu) {
         this.contextMenu = null;
       } else if (this.adminEquipOpen) {
         this.adminEquipOpen = false;
@@ -551,7 +619,7 @@ export class Game {
     }
 
     const dir = this.input.getDirection();
-    const click = this.input.consumeClick();
+    const click = this.showWorldMap ? (this.input.consumeClick(), null) : this.input.consumeClick();
 
     // Keyboard movement cancels queued interaction and click marker
     if (dir.x !== 0 || dir.y !== 0) {
@@ -1260,6 +1328,12 @@ export class Game {
     if (this.inRaid && this.activeRaid && this.activeRaid.complete) this._drawRaidSummary(ctx);
     if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
       this._drawRaidFloorHUD(ctx);
+    }
+
+    // World map overlay (drawn last — covers everything)
+    if (this.showWorldMap) {
+      this._drawWorldMap(ctx);
+      return; // skip tooltip when map is open
     }
 
     // Tooltip
@@ -3379,6 +3453,163 @@ export class Game {
       this.player.actionLocked = false;
       this.notifications.add(`Entering ${inst.map.name}...`, '#b060e0');
     });
+  }
+
+  // ── World Map ────────────────────────────────────────────────────────────
+
+  _buildWorldMapCache() {
+    const W = this.world.cols, H = this.world.rows;
+    const oc = document.createElement('canvas');
+    oc.width = W; oc.height = H;
+    const octx = oc.getContext('2d');
+    const img = octx.createImageData(W, H);
+    const data = img.data;
+
+    // Pre-parse TILE_COLORS hex strings → [r, g, b] lookup
+    const colorLookup = new Map();
+    for (const [tileIdStr, hex] of Object.entries(TILE_COLORS)) {
+      const h = hex.replace('#', '');
+      colorLookup.set(+tileIdStr, [
+        parseInt(h.slice(0, 2), 16),
+        parseInt(h.slice(2, 4), 16),
+        parseInt(h.slice(4, 6), 16),
+      ]);
+    }
+    const fallback = [0, 0, 0];
+
+    for (let row = 0; row < H; row++) {
+      const tileRow = this.world.tiles[row];
+      for (let col = 0; col < W; col++) {
+        const [r, g, b] = colorLookup.get(tileRow[col]) ?? fallback;
+        const i = (row * W + col) * 4;
+        data[i] = r; data[i + 1] = g; data[i + 2] = b; data[i + 3] = 255;
+      }
+    }
+
+    octx.putImageData(img, 0, 0);
+    this._worldMapCache = oc;
+  }
+
+  _drawWorldMap(ctx) {
+    if (!this._worldMapCache) this._buildWorldMapCache();
+
+    const cw = this.canvas.width, ch = this.canvas.height;
+    const W = this.world.cols, H = this.world.rows;
+
+    // Darkened full-screen backdrop
+    ctx.fillStyle = 'rgba(0,0,0,0.80)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    // Scale: base = fit-to-88%-screen, multiplied by zoom
+    const baseScale = Math.min(cw * 0.88 / W, ch * 0.88 / H);
+    const scale = baseScale * this._mapZoom;
+    const mw = Math.floor(W * scale), mh = Math.floor(H * scale);
+    const mx = Math.floor((cw - mw) / 2 + this._mapPanX);
+    const my = Math.floor((ch - mh) / 2 + this._mapPanY);
+
+    // Update cursor (grab/grabbing)
+    this.canvas.style.cursor = this._mapDragging ? 'grabbing' : 'grab';
+
+    // Tile image (nearest-neighbour so pixel boundaries stay crisp)
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(this._worldMapCache, mx, my, mw, mh);
+
+    // Gold border
+    ctx.strokeStyle = '#c8a040'; ctx.lineWidth = 2;
+    ctx.strokeRect(mx - 1, my - 1, mw + 2, mh + 2);
+
+    // ── Structure markers ──────────────────────────────────────────────────
+    const STRUCTURE_STYLE = {
+      village:    { color: '#5dade2', label: 'Village'    },
+      kingdom:    { color: '#f1c40f', label: 'Kingdom'    },
+      watchtower: { color: '#aab7b8', label: 'Watchtower' },
+      outpost:    { color: '#ec7063', label: 'Outpost'    },
+      ruins:      { color: '#7d6608', label: 'Ruins'      },
+    };
+    ctx.font = 'bold 9px monospace';
+    ctx.textBaseline = 'bottom';
+    for (const node of STRUCTURE_NODES) {
+      const info = STRUCTURE_STYLE[node.type];
+      if (!info) continue;
+      const dx = mx + node.c * scale, dy = my + node.r * scale;
+      const dotR = Math.max(3, scale * 1.8);
+      ctx.fillStyle = info.color;
+      ctx.beginPath(); ctx.arc(dx, dy, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.textAlign = 'center'; ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000'; ctx.strokeText(node.id.replace(/_/g, ' '), dx, dy - dotR - 1);
+      ctx.fillStyle = info.color; ctx.fillText(node.id.replace(/_/g, ' '), dx, dy - dotR - 1);
+    }
+
+    // ── Dungeon entrance markers ───────────────────────────────────────────
+    const DUNGEON_STYLE = {
+      'dungeon_goblin_cave':   { color: '#a855f7', label: 'Goblin Cave'   },
+      'dungeon_spider_den':    { color: '#f97316', label: 'Spider Den'    },
+      'dungeon_ancient_mines': { color: '#ef4444', label: 'Ancient Mines' },
+    };
+    for (const [key, id] of this.world.dungeonMap) {
+      const [col, row] = key.split(',').map(Number);
+      const info = DUNGEON_STYLE[id]; if (!info) continue;
+      const dx = mx + col * scale, dy = my + row * scale;
+      const dotR = Math.max(4, scale * 2.5);
+      ctx.fillStyle = info.color;
+      ctx.beginPath(); ctx.arc(dx, dy, dotR, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center'; ctx.lineWidth = 2;
+      ctx.strokeStyle = '#000'; ctx.strokeText(info.label, dx, dy - dotR - 1);
+      ctx.fillStyle = '#fff';   ctx.fillText(info.label, dx, dy - dotR - 1);
+    }
+
+    // ── Spawn marker ──────────────────────────────────────────────────────
+    const spawnC = Math.floor(W / 2), spawnR = Math.floor(H / 2) + 5;
+    const sx = mx + spawnC * scale, sy = my + spawnR * scale;
+    const spawnDotR = Math.max(4, scale * 2.5);
+    ctx.fillStyle = '#f1c40f';
+    ctx.beginPath(); ctx.arc(sx, sy, spawnDotR, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000'; ctx.strokeText('Spawn', sx, sy - spawnDotR - 1);
+    ctx.fillStyle = '#f1c40f'; ctx.fillText('Spawn', sx, sy - spawnDotR - 1);
+
+    // ── Player position (blinking ring + dot) ─────────────────────────────
+    const px = mx + this.player.col * scale, py = my + this.player.row * scale;
+    const blink = 0.55 + 0.45 * Math.sin(Date.now() / 350);
+    const playerDotR = Math.max(3, scale * 2);
+    ctx.fillStyle = `rgba(255,255,255,${blink})`;
+    ctx.beginPath(); ctx.arc(px, py, playerDotR, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = `rgba(255,255,255,${blink})`; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(px, py, playerDotR + 3, 0, Math.PI * 2); ctx.stroke();
+
+    // ── Title ─────────────────────────────────────────────────────────────
+    ctx.font = 'bold 18px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+    ctx.strokeStyle = '#000'; ctx.lineWidth = 3; ctx.strokeText('World Map', cw / 2, my - 6);
+    ctx.fillStyle = '#c8a040'; ctx.fillText('World Map', cw / 2, my - 6);
+
+    // ── Legend ────────────────────────────────────────────────────────────
+    const legend = [
+      { color: '#fff',    text: '● You'          },
+      { color: '#f1c40f', text: '● Spawn'         },
+      { color: '#5dade2', text: '● Village'       },
+      { color: '#f1c40f', text: '◆ Kingdom'       },
+      { color: '#aab7b8', text: '● Watchtower'    },
+      { color: '#a855f7', text: '▼ Goblin Cave'   },
+      { color: '#f97316', text: '▼ Spider Den'    },
+      { color: '#ef4444', text: '▼ Ancient Mines' },
+    ];
+    ctx.font = '9px monospace'; ctx.textBaseline = 'top'; ctx.lineWidth = 1.5;
+    let lx = mx + 4;
+    const ly = my + mh + 4;
+    for (const e of legend) {
+      ctx.strokeStyle = '#000'; ctx.textAlign = 'left';
+      ctx.strokeText(e.text, lx, ly);
+      ctx.fillStyle = e.color; ctx.fillText(e.text, lx, ly);
+      lx += ctx.measureText(e.text).width + 8;
+    }
+
+    // ── Close hint ────────────────────────────────────────────────────────
+    ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '10px monospace';
+    ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+    ctx.fillText('Scroll to zoom  •  Drag to pan  •  [M] / [Esc] to close', mx + mw - 2, my + mh + 4);
   }
 
   _exitDungeon() {

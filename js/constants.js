@@ -95,6 +95,7 @@ export const TILES = {
   FARM_PATCH_SEEDED:  63,  // seed just planted
   FARM_PATCH_GROWING: 64,  // crop sprouting
   FARM_PATCH_READY:   65,  // ready to harvest
+  DUNGEON_ENTRANCE:   66,
 };
 
 // Which tiles block movement
@@ -222,6 +223,7 @@ export const TILE_COLORS = {
   [TILES.FARM_PATCH_SEEDED]:  '#7a5a30',
   [TILES.FARM_PATCH_GROWING]: '#5a6a2a',
   [TILES.FARM_PATCH_READY]:   '#3a7a22',
+  [TILES.DUNGEON_ENTRANCE]: '#1a1218',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -251,6 +253,7 @@ export const TILE_HAS_DETAIL = new Set([
   // Farming patches
   TILES.FARM_PATCH, TILES.FARM_PATCH_SEEDED,
   TILES.FARM_PATCH_GROWING, TILES.FARM_PATCH_READY,
+  TILES.DUNGEON_ENTRANCE,
 ]);
 
 // ── Inventory ────────────────────────────────────────────
