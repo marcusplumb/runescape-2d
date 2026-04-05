@@ -325,6 +325,28 @@ export class Actions {
         this.inventory.add(treeInfo.item);
         const res = this._awardXp(SKILL_IDS.WOODCUTTING, treeInfo.xp);
         this.notif.add(`You get some ${treeInfo.item.name.toLowerCase()}. (+${res.awarded} WC XP)`, '#27ae60');
+        // Small chance to find a seed while chopping
+        if (!this.inventory.isFull()) {
+          const tile = a.originalTile ?? TILES.TREE;
+          const roll = Math.random();
+          let seedFound = null;
+          if (tile === TILES.MAPLE_TREE || tile === TILES.YEW_TREE ||
+              tile === TILES.MAGIC_TREE || tile === TILES.ELDER_TREE) {
+            if (roll < 0.06)       seedFound = ITEMS.MAGIC_SEED;
+            else if (roll < 0.12)  seedFound = ITEMS.HERB_SEED;
+          } else if (tile === TILES.OAK_TREE || tile === TILES.WILLOW_TREE) {
+            if (roll < 0.06)       seedFound = ITEMS.FLAX_SEED;
+            else if (roll < 0.12)  seedFound = ITEMS.BERRY_SEED;
+            else if (roll < 0.16)  seedFound = ITEMS.HERB_SEED;
+          } else {
+            if (roll < 0.06)       seedFound = ITEMS.POTATO_SEED;
+            else if (roll < 0.10)  seedFound = ITEMS.BERRY_SEED;
+          }
+          if (seedFound) {
+            this.inventory.add(seedFound);
+            this.notif.add(`You find a ${seedFound.name} while chopping!`, '#2ecc71');
+          }
+        }
         if (res.result.leveled) this.notif.add(`🎉 Woodcutting level ${res.result.newLevel}!`, '#f1c40f');
         const logsLeft = (a.logsLeft ?? 1) - 1;
         if (logsLeft > 0 && !this.inventory.isFull()) {

@@ -26,6 +26,13 @@ import {
 } from './makeover.js';
 import { findPath, nearestWalkableAdjacent } from './pathfinder.js';
 import { buildAllInteriors, buildPlayerHouse } from './interiors.js';
+import {
+  HousingState, ROOM_DEFS, FURNITURE_DEFS,
+  getUnlockedRoomDefs, getUnlockedFurnitureDefs,
+  cellInnerOrigin,
+  GRID_COLS, GRID_ROWS,
+  BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
+} from './housing.js';
 import { STRUCTURE_NODES } from './structures.js';
 import { ARMOR_OPTIONS, EQUIPMENT_SLOTS, SLOT_LABELS } from './equipment.js';
 import { getBiome } from './biomes.js';
@@ -49,6 +56,7 @@ import {
 import { DungeonMasterNPC } from './dungeonMaster.js';
 import { RaidInstance } from './raidInstance.js';
 import { RAID_DEFS, RAID_DIFFICULTIES } from './raids.js';
+import { FarmingState, SEED_DEFS, PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
 
 const TILE_TOOLTIPS = {
   [TILES.TREE]:              'Tree — click to chop (need Axe)',
@@ -74,8 +82,12 @@ const TILE_TOOLTIPS = {
   [TILES.ROCK_OBSIDIAN]:     'Obsidian Vent — click to mine (need Tungsten Pickaxe)',
   [TILES.ROCK_MOONSTONE]:    'Moonstone Vein — click to mine (need Tungsten Pickaxe)',
   [TILES.ROCK_DEPLETED]:     'Depleted Rock — wait for it to refill',
-  [TILES.FURNACE]:           'Furnace — smelt ores into bars',
-  [TILES.ANVIL]:             'Anvil — smith bars into equipment',
+  [TILES.FURNACE]:               'Furnace — smelt ores into bars',
+  [TILES.ANVIL]:                 'Anvil — smith bars into equipment',
+  [TILES.FARM_PATCH]:            'Empty soil patch — click to plant a seed',
+  [TILES.FARM_PATCH_SEEDED]:     'Crop planted — growing...',
+  [TILES.FARM_PATCH_GROWING]:    'Crop growing — almost ready...',
+  [TILES.FARM_PATCH_READY]:      'Crop ready! — click to harvest',
 };
 
 // Reverse lookup: item id string → item definition object
@@ -127,11 +139,16 @@ export class Game {
     this.pendingInteract = null; // { type, col, row, worldX?, worldY? }
     this.clickDest       = null; // { col, row } — shown as click marker, null for WASD
 
+    // Housing + farming systems
+    this.housingState  = new HousingState();
+    this.farmingState  = new FarmingState();
+    this._farmTimer    = 0; // seconds between patch-stage checks
+
     // Interior / map transition system
     this.inInterior       = false;
     this.activeMap        = this.world;
     this.interiors        = buildAllInteriors(this.world.doorMap);
-    this.interiors.set('player_house', buildPlayerHouse());
+    this.interiors.set('player_house', buildPlayerHouse(this.housingState, this.farmingState));
     this.returnPos        = null;   // { col, row } to return to in world
     this.fadeAlpha        = 0;
     this.fadingOut        = false;
@@ -212,6 +229,16 @@ export class Game {
     this.houseShopKeeper = new HouseShopKeeper();
     this.placingFurniture = null; // { item, slotIndex } when in furniture placement mode
     this.placingRotation  = 0;   // 0-3 (×90°) — cycled with R
+
+    // Housing build mode
+    this.buildModeOpen     = false;
+    this.buildModeStep     = 'grid'; // 'grid' | 'pick_room' | 'pick_furniture'
+    this.buildModeSelGX    = null;
+    this.buildModeSelGY    = null;
+    this.buildModeRoomScroll = 0;
+    this.buildModeFurnScroll = 0;
+    // { gx, gy, defId, rotation } — active furniture-placement from build mode
+    this.buildModeFurnPlacing = null;
     this.makoverOpen   = false;
     this.forgeOpen     = false;  // smelting panel (Furnace)
     this.smithOpen     = false;  // smithing panel (Anvil)
@@ -416,6 +443,16 @@ export class Game {
     if (this.input.wasJustPressed('KeyR') && this.placingFurniture) {
       this.placingRotation = (this.placingRotation + 1) & 3;
     }
+    if (this.input.wasJustPressed('KeyR') && this.buildModeFurnPlacing) {
+      this.buildModeFurnPlacing = { ...this.buildModeFurnPlacing, rotation: (this.buildModeFurnPlacing.rotation + 1) & 3 };
+    }
+    // Build mode toggle (B key — only in player house)
+    if (this.input.wasJustPressed('KeyB') && this.inInterior && this.activeMap.id === 'player_house' && !this.buildModeFurnPlacing) {
+      this.buildModeOpen = !this.buildModeOpen;
+      this.buildModeStep = 'grid';
+      this.buildModeSelGX = null;
+      this.buildModeSelGY = null;
+    }
     // Escape closes panels / cancels action / drops combat
     if (this.input.wasJustPressed('Escape')) {
       if (this.contextMenu) {
@@ -424,6 +461,12 @@ export class Game {
         this.adminEquipOpen = false;
       } else if (this.showAdminTp) {
         this.showAdminTp = false;
+      } else if (this.buildModeFurnPlacing) {
+        this.buildModeFurnPlacing = null;
+        this.buildModeOpen = true;
+        this.notifications.add('Placement cancelled.', '#aaa');
+      } else if (this.buildModeOpen) {
+        this.buildModeOpen = false;
       } else if (this.placingFurniture) {
         this.placingFurniture = null;
         this.notifications.add('Placement cancelled.', '#aaa');
@@ -484,7 +527,14 @@ export class Game {
           return;
         }
       }
-      if (this.contextMenu) {
+      if (this.buildModeOpen) {
+        this._handleBuildModeClick(click.screenX, click.screenY);
+        return;
+      } else if (this.buildModeFurnPlacing) {
+        const worldPos = this.camera.screenToWorld(click.screenX, click.screenY);
+        this._placeBuildModeFurniture(Math.floor(worldPos.x / TILE_SIZE), Math.floor(worldPos.y / TILE_SIZE));
+        return;
+      } else if (this.contextMenu) {
         this._handleContextMenuClick(click.screenX, click.screenY);
       } else if (this.activeRaid && this.activeRaid.complete) {
         this._handleRaidSummaryClick(click.screenX, click.screenY);
@@ -625,9 +675,18 @@ export class Game {
             this.clickDest = { col: clickCol, row: clickRow };
           }
         } else {
-          // ── Interior: plain walk only ────────────────────
-          this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
-          this.clickDest = { col: clickCol, row: clickRow };
+          // ── Interior: plain walk, or farm patch interaction ─
+          const iTile = this.activeMap.getTile(clickCol, clickRow);
+          if (this.activeMap.id === 'player_house' &&
+              (iTile === TILES.FARM_PATCH || iTile === TILES.FARM_PATCH_SEEDED ||
+               iTile === TILES.FARM_PATCH_GROWING || iTile === TILES.FARM_PATCH_READY)) {
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
+            this.pendingInteract = { type: 'farm_patch', col: clickCol, row: clickRow };
+            this.clickDest = { col: clickCol, row: clickRow };
+          } else {
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
+            this.clickDest = { col: clickCol, row: clickRow };
+          }
         }
       }
     }
@@ -816,7 +875,16 @@ export class Game {
             this.player.dir = mdy > 0 ? DIR.DOWN : DIR.UP;
           }
         }
+      } else if (pi.type === 'farm_patch') {
+        this._handleFarmPatchInteract(pi.col, pi.row);
       }
+    }
+
+    // Farming patch stage check (every 5 s while inside player house)
+    this._farmTimer += dt;
+    if (this._farmTimer >= 5) {
+      this._farmTimer = 0;
+      this._updateFarmingPatches();
     }
 
     // Update systems
@@ -1060,6 +1128,14 @@ export class Game {
             this.elapsed, this.placingFurniture.item, this.placingRotation
           );
         }
+        if (this.buildModeFurnPlacing) {
+          const mw = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
+          const fd = FURNITURE_DEFS[this.buildModeFurnPlacing.defId];
+          this.renderer.drawBuildModeFurnCursor(
+            Math.floor(mw.x / TILE_SIZE), Math.floor(mw.y / TILE_SIZE),
+            this.elapsed, fd, this.buildModeFurnPlacing.rotation
+          );
+        }
       }
     this.camera.end(ctx);
 
@@ -1170,6 +1246,19 @@ export class Game {
     }
 
     this.renderer.drawTileTooltip(tooltip, this.mouseScreen.x, this.mouseScreen.y);
+
+    // Housing build mode panel
+    if (this.buildModeOpen && this.inInterior && this.activeMap.id === 'player_house') {
+      const archLevel = this.skills.getLevel(SKILL_IDS.ARCHITECT);
+      this.renderer.drawHousingBuildMode(
+        this.housingState, this.buildModeStep,
+        this.buildModeSelGX, this.buildModeSelGY,
+        this.buildModeRoomScroll, this.buildModeFurnScroll,
+        this.mouseScreen.x, this.mouseScreen.y,
+        archLevel, this.inventory,
+        this.canvas.width, this.canvas.height
+      );
+    }
 
     // Skill info popup
     if (this.skillInfoSkill !== null) {
@@ -1457,6 +1546,265 @@ export class Game {
     this.inventory.remove(slotIndex, 1);
     this.placingFurniture = null;
     this.notifications.add(`Placed ${item.name}.`, '#f1c40f');
+  }
+
+  // ── Farming ──────────────────────────────────────────────────────────────
+
+  _handleFarmPatchInteract(col, row) {
+    for (const [key, cell] of this.housingState.cells) {
+      if (cell.typeId !== 'farming_plot') continue;
+      const [gx, gy] = key.split(',').map(Number);
+      const io = cellInnerOrigin(gx, gy);
+      for (let i = 0; i < PATCH_LOCAL_POSITIONS.length; i++) {
+        const { localCol, localRow } = PATCH_LOCAL_POSITIONS[i];
+        if (io.col + localCol === col && io.row + localRow === row) {
+          this._doFarmAction(gx, gy, i);
+          return;
+        }
+      }
+    }
+  }
+
+  _doFarmAction(gx, gy, patchIndex) {
+    const patch = this.farmingState.getPatch(gx, gy, patchIndex);
+    const stage = this.farmingState.getPatchStage(patch);
+    const farmLevel = this.skills.getLevel(SKILL_IDS.FARMING);
+
+    if (stage === 0) {
+      const seedId = this._findFarmableSeed(farmLevel);
+      if (!seedId) {
+        this.notifications.add('You have no seeds to plant here.', '#e74c3c');
+        return;
+      }
+      this.inventory.remove(seedId, 1);
+      this.farmingState.plantSeed(gx, gy, patchIndex, seedId);
+      this._updateFarmPatchTile(gx, gy, patchIndex);
+      const prevLvl = this.skills.getLevel(SKILL_IDS.FARMING);
+      this.skills.addXp(SKILL_IDS.FARMING, 5);
+      const newLvl = this.skills.getLevel(SKILL_IDS.FARMING);
+      this.notifications.add(`You plant a ${SEED_DEFS[seedId].name}. (+5 Farming XP)`, '#27ae60');
+      if (newLvl > prevLvl) this.notifications.add(`Farming level ${newLvl}!`, '#f1c40f');
+      this._saveToServer();
+    } else if (stage === 1 || stage === 2) {
+      const def = SEED_DEFS[patch.seedId];
+      const remaining = Math.max(1, Math.ceil((def.growTime - (Date.now() - patch.plantedAt)) / 60000));
+      this.notifications.add(`Still growing... (~${remaining} min${remaining !== 1 ? 's' : ''} left)`, '#e67e22');
+    } else {
+      // stage 3 — harvest
+      if (this.inventory.isFull()) {
+        this.notifications.add('Your inventory is full!', '#e74c3c');
+        return;
+      }
+      const def = SEED_DEFS[patch.seedId];
+      const qty = def.harvestMin + Math.floor(Math.random() * (def.harvestMax - def.harvestMin + 1));
+      const harvestItem = ITEM_BY_ID.get(def.harvestId);
+      if (!harvestItem) return;
+      this.farmingState.harvestPatch(gx, gy, patchIndex);
+      for (let i = 0; i < qty; i++) {
+        if (!this.inventory.isFull()) this.inventory.add(harvestItem);
+      }
+      this._updateFarmPatchTile(gx, gy, patchIndex);
+      const prevLvl = this.skills.getLevel(SKILL_IDS.FARMING);
+      this.skills.addXp(SKILL_IDS.FARMING, def.xp);
+      const newLvl = this.skills.getLevel(SKILL_IDS.FARMING);
+      this.notifications.add(`You harvest ${qty}x ${harvestItem.name}! (+${def.xp} Farming XP)`, '#27ae60');
+      if (newLvl > prevLvl) this.notifications.add(`Farming level ${newLvl}!`, '#f1c40f');
+      this._saveToServer();
+    }
+  }
+
+  _findFarmableSeed(farmLevel) {
+    // Prefer the highest-level seed the player can use
+    const usable = Object.values(SEED_DEFS)
+      .filter(d => d.levelReq <= farmLevel && this.inventory.has(d.id))
+      .sort((a, b) => b.levelReq - a.levelReq);
+    return usable[0]?.id ?? null;
+  }
+
+  _updateFarmPatchTile(gx, gy, patchIndex) {
+    if (!this.inInterior || this.activeMap.id !== 'player_house') return;
+    const io = cellInnerOrigin(gx, gy);
+    const { localCol, localRow } = PATCH_LOCAL_POSITIONS[patchIndex];
+    const patch = this.farmingState.getPatch(gx, gy, patchIndex);
+    const stage = this.farmingState.getPatchStage(patch);
+    this.activeMap.setTile(io.col + localCol, io.row + localRow, GROW_STAGES[stage].tile);
+  }
+
+  _updateFarmingPatches() {
+    if (!this.inInterior || this.activeMap.id !== 'player_house') return;
+    let readyNotified = false;
+    for (const [key, patches] of this.farmingState.patches) {
+      if (!patches) continue;
+      const [gx, gy] = key.split(',').map(Number);
+      if (!this.housingState.hasCell(gx, gy)) continue;
+      const cell = this.housingState.getCell(gx, gy);
+      if (cell.typeId !== 'farming_plot') continue;
+      const io = cellInnerOrigin(gx, gy);
+      for (let i = 0; i < patches.length; i++) {
+        const patch = patches[i];
+        if (!patch) continue;
+        const { localCol, localRow } = PATCH_LOCAL_POSITIONS[i];
+        const col = io.col + localCol;
+        const row = io.row + localRow;
+        const stage = this.farmingState.getPatchStage(patch);
+        const expectedTile = GROW_STAGES[stage].tile;
+        if (this.activeMap.getTile(col, row) !== expectedTile) {
+          this.activeMap.setTile(col, row, expectedTile);
+          if (stage === 3 && !readyNotified) {
+            readyNotified = true;
+            this.notifications.add('A crop in your farming plot is ready to harvest!', '#27ae60');
+          }
+        }
+      }
+    }
+  }
+
+  // ── Admin helper ────────────────────────────────────────────────────────
+
+  get isAdmin() { return this.player.name === '12345'; }
+
+  // ── Housing Build Mode ──────────────────────────────────────────────────
+
+  _rebuildPlayerHouse() {
+    const house = buildPlayerHouse(this.housingState, this.farmingState);
+    this.interiors.set('player_house', house);
+    if (this.inInterior && this.activeMap.id === 'player_house') {
+      this.activeMap     = house;
+      this.player.world  = house;
+      this.actions.world = house;
+      // If player ended up in a solid tile (e.g. room was removed), move to entry
+      if (house.isSolid(this.player.col, this.player.row)) {
+        this.player.col = house.entryCol;
+        this.player.row = house.entryRow;
+        this.player.x   = this.player.col * TILE_SIZE + 4;
+        this.player.y   = this.player.row * TILE_SIZE;
+      }
+    }
+  }
+
+  _handleBuildModeClick(sx, sy) {
+    const cw = this.canvas.width, ch = this.canvas.height;
+    const px = Math.floor((cw - BM_PW) / 2);
+    const py = Math.floor((ch - BM_PH) / 2);
+
+    // Close if click is outside the panel
+    if (sx < px || sx > px + BM_PW || sy < py || sy > py + BM_PH) {
+      this.buildModeOpen = false;
+      return;
+    }
+
+    // Close button (top-right X)
+    if (sx >= px + BM_PW - 34 && sx <= px + BM_PW - 6 && sy >= py + 6 && sy <= py + 34) {
+      this.buildModeOpen = false;
+      return;
+    }
+
+    const archLevel = this.skills.getLevel(SKILL_IDS.ARCHITECT);
+
+    // Grid click — left panel
+    const gridLeft = px + BM_GRID_OFF;
+    const gridTop  = py + BM_GRID_TOP;
+    if (sx >= gridLeft && sy >= gridTop &&
+        sx < gridLeft + GRID_COLS * BM_GRID_CELL &&
+        sy < gridTop  + GRID_ROWS * BM_GRID_CELL) {
+      const gx = Math.floor((sx - gridLeft) / BM_GRID_CELL);
+      const gy = Math.floor((sy - gridTop)  / BM_GRID_CELL);
+      if (this.housingState.hasCell(gx, gy)) {
+        this.buildModeSelGX = gx;
+        this.buildModeSelGY = gy;
+        this.buildModeStep  = 'pick_furniture';
+        this.buildModeFurnScroll = 0;
+      } else if (this.housingState.getAvailableSlots().has(`${gx},${gy}`)) {
+        this.buildModeSelGX = gx;
+        this.buildModeSelGY = gy;
+        this.buildModeStep  = 'pick_room';
+        this.buildModeRoomScroll = 0;
+      }
+      return;
+    }
+
+    // Right panel clicks
+    const rox = px + BM_SPLIT_X + 10;
+    const ROW_H = 52, ROW_PAD = 8;
+    const listTop = py + BM_HEADER_H + 48;
+
+    if (this.buildModeStep === 'pick_room') {
+      const defs = getUnlockedRoomDefs(99).filter(d => d.id !== 'starter');
+      const visible = defs.slice(this.buildModeRoomScroll, this.buildModeRoomScroll + 5);
+      for (let i = 0; i < visible.length; i++) {
+        const rowY = listTop + i * ROW_H;
+        if (sy < rowY || sy > rowY + ROW_H - ROW_PAD) continue;
+        const def = visible[i];
+        const check = this.housingState.canAddCell(
+          this.buildModeSelGX, this.buildModeSelGY, def.id, this.inventory, this.skills, this.isAdmin);
+        if (!check.ok) {
+          this.notifications.add(check.reason, '#e74c3c');
+          return;
+        }
+        this.housingState.addCell(this.buildModeSelGX, this.buildModeSelGY, def.id, this.inventory, this.isAdmin);
+        this.skills.addXp(SKILL_IDS.ARCHITECT, 50 + def.levelReq * 5);
+        this.notifications.add(`Built ${def.name}! (+Architect XP)`, '#f1c40f');
+        this._rebuildPlayerHouse();
+        this.buildModeStep = 'grid';
+        this.buildModeSelGX = null;
+        this.buildModeSelGY = null;
+        this._saveToServer();
+        return;
+      }
+      // Scroll arrows
+      const arrowY = listTop + 5 * ROW_H + 4;
+      if (sy >= arrowY && sy <= arrowY + 24) {
+        const mid = rox + (BM_PW - BM_SPLIT_X - 20) / 2;
+        if (sx < mid && this.buildModeRoomScroll > 0) this.buildModeRoomScroll--;
+        else if (sx >= mid && this.buildModeRoomScroll + 5 < defs.length) this.buildModeRoomScroll++;
+      }
+    } else if (this.buildModeStep === 'pick_furniture') {
+      const cell = this.housingState.getCell(this.buildModeSelGX, this.buildModeSelGY);
+      if (!cell) return;
+      const roomDef = ROOM_DEFS[cell.typeId];
+      const defs = getUnlockedFurnitureDefs(this.isAdmin ? 99 : archLevel).filter(fd =>
+        fd.category === roomDef.category || fd.category === 'both');
+      const visible = defs.slice(this.buildModeFurnScroll, this.buildModeFurnScroll + 5);
+      for (let i = 0; i < visible.length; i++) {
+        const rowY = listTop + i * ROW_H;
+        if (sy < rowY || sy > rowY + ROW_H - ROW_PAD) continue;
+        const def = visible[i];
+        // Start furniture placement
+        this.buildModeFurnPlacing = { gx: this.buildModeSelGX, gy: this.buildModeSelGY, defId: def.id, rotation: 0 };
+        this.buildModeOpen = false;
+        this.notifications.add(`Click inside the room to place ${def.name}. [R] = rotate, [Esc] = cancel`, '#f1c40f');
+        return;
+      }
+      // Scroll arrows
+      const arrowY = listTop + 5 * ROW_H + 4;
+      if (sy >= arrowY && sy <= arrowY + 24) {
+        const mid = rox + (BM_PW - BM_SPLIT_X - 20) / 2;
+        if (sx < mid && this.buildModeFurnScroll > 0) this.buildModeFurnScroll--;
+        else if (sx >= mid && this.buildModeFurnScroll + 5 < defs.length) this.buildModeFurnScroll++;
+      }
+    }
+  }
+
+  _placeBuildModeFurniture(col, row) {
+    const { gx, gy, defId, rotation } = this.buildModeFurnPlacing;
+    const io = cellInnerOrigin(gx, gy);
+    const localCol = col - io.col;
+    const localRow = row - io.row;
+
+    const check = this.housingState.canPlaceFurniture(
+      gx, gy, defId, localCol, localRow, rotation, this.inventory, this.skills, this.isAdmin);
+    if (!check.ok) {
+      this.notifications.add(check.reason, '#e74c3c');
+      return;
+    }
+    this.housingState.placeFurniture(gx, gy, defId, localCol, localRow, rotation, this.inventory, this.isAdmin);
+    const fd = FURNITURE_DEFS[defId];
+    this.skills.addXp(SKILL_IDS.ARCHITECT, 10 + fd.levelReq * 2);
+    this.notifications.add(`Placed ${fd.name}! (+Architect XP)`, '#f1c40f');
+    this.buildModeFurnPlacing = null;
+    this.buildModeOpen = true;
+    this._rebuildPlayerHouse();
+    this._saveToServer();
   }
 
   _handleShopClick(sx, sy) {
@@ -2325,10 +2673,15 @@ export class Game {
     const inv = this.inventory.slots.map(s =>
       s ? { id: s.item.id, qty: s.qty } : null
     );
-    const house = this.interiors.get('player_house');
+    // If the player is in an interior or raid, save their world return position
+    // instead of interior tile coords (which would place them at the wrong spot on restore).
+    const worldSpawn = { col: 512, row: 390 };
+    const savePos = (this.inInterior || this.inRaid)
+      ? (this.returnPos ?? worldSpawn)
+      : { col: this.player.col, row: this.player.row };
     const save = {
-      col:       this.player.col,
-      row:       this.player.row,
+      col:       savePos.col,
+      row:       savePos.row,
       hp:        this.player.hp,
       maxHp:     this.player.maxHp,
       name:      this.player.name,
@@ -2337,10 +2690,8 @@ export class Game {
       inventory: inv,
       skills:    [...this.skills.xp],
     };
-    if (house) {
-      save.houseTiles     = btoa(String.fromCharCode(...house._tiles));
-      save.houseRotations = btoa(String.fromCharCode(...house._rotations));
-    }
+    save.housing = this.housingState.toJSON();
+    save.farming = this.farmingState.toJSON();
     return save;
   }
 
@@ -2374,15 +2725,15 @@ export class Game {
       });
     }
 
-    // Player house tiles
-    const house = this.interiors.get('player_house');
-    if (house && save.houseTiles) {
-      try {
-        const tiles = Uint8Array.from(atob(save.houseTiles),     c => c.charCodeAt(0));
-        const rots  = Uint8Array.from(atob(save.houseRotations), c => c.charCodeAt(0));
-        house._tiles.set(tiles.subarray(0, house._tiles.length));
-        house._rotations.set(rots.subarray(0, house._rotations.length));
-      } catch { /* ignore corrupt data */ }
+    // Housing state — rebuild the interior map from saved layout
+    if (save.housing) {
+      this.housingState.fromJSON(save.housing);
+    }
+    if (save.farming) {
+      this.farmingState.fromJSON(save.farming);
+    }
+    if (save.housing || save.farming) {
+      this.interiors.set('player_house', buildPlayerHouse(this.housingState, this.farmingState));
     }
   }
 
@@ -2826,6 +3177,7 @@ export class Game {
 
       // Restore world state
       this.inRaid            = false;
+      this.inInterior        = false;
       this.activeMap         = this.world;
       this.player.world      = this.world;
       this.actions.world     = this.world;
@@ -2843,6 +3195,7 @@ export class Game {
       this.player.targetCol  = null;
       this.player.targetRow  = null;
 
+      this.camera.setBounds(); // reset to full world bounds
       this.camera.snapTo(this.player.cx, this.player.cy);
       this.transitionCooldown = 1.0;
     });

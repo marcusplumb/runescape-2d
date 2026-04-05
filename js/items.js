@@ -1590,6 +1590,137 @@ ITEMS.BERSERKER_CAPE = {
   },
 };
 
+/* ── Farming seeds ───────────────────────────────────── */
+
+ITEMS.POTATO_SEED = {
+  id: 'potato_seed', name: 'Potato Seed', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#a08050';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.16, s*.14, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#c8a060';
+    ctx.beginPath(); ctx.ellipse(x+s*.47, y+s*.48, s*.08, s*.07, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.BERRY_SEED = {
+  id: 'berry_seed', name: 'Berry Seed', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#7a2a6a';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.15, s*.13, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#b04090';
+    ctx.beginPath(); ctx.ellipse(x+s*.46, y+s*.47, s*.07, s*.06, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.HERB_SEED = {
+  id: 'herb_seed', name: 'Herb Seed', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#2a6a2a';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.54, s*.14, s*.12, 0.2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#4a9a40';
+    ctx.beginPath(); ctx.ellipse(x+s*.47, y+s*.49, s*.07, s*.05, -0.4, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.FLAX_SEED = {
+  id: 'flax_seed', name: 'Flax Seed', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a7a9a';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.12, s*.16, 0.1, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#7aaacc';
+    ctx.beginPath(); ctx.ellipse(x+s*.47, y+s*.47, s*.06, s*.07, 0.1, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.MAGIC_SEED = {
+  id: 'magic_seed', name: 'Magic Seed', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#3a1a6a';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.16, s*.14, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(140,80,255,0.8)';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.5, s*.10, s*.09, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(200,160,255,0.6)';
+    ctx.beginPath(); ctx.ellipse(x+s*.47, y+s*.46, s*.05, s*.04, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+/* ── Farming harvest ─────────────────────────────────── */
+
+ITEMS.POTATO = {
+  id: 'potato', name: 'Potato', stackable: true, heal: 4,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#c8a050';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.55, s*.26, s*.22, 0.1, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#e0bc70';
+    ctx.beginPath(); ctx.ellipse(x+s*.45, y+s*.48, s*.13, s*.10, -0.2, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#2a6a1a'; ctx.fillRect(x+s*.48, y+s*.25, s*.04, s*.14);
+  },
+};
+ITEMS.BERRIES = {
+  id: 'berries', name: 'Berries', stackable: true, heal: 3,
+  draw(ctx, x, y, s) {
+    const pts = [[.38,.58],[.56,.52],[.44,.38],[.62,.44],[.50,.65]];
+    ctx.fillStyle = '#2a0a1a';
+    for (const [cx, cy] of pts) { ctx.beginPath(); ctx.arc(x+s*cx, y+s*cy, s*.09, 0, Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = '#c02060';
+    for (const [cx, cy] of pts) { ctx.beginPath(); ctx.arc(x+s*cx, y+s*cy, s*.08, 0, Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = 'rgba(255,120,160,0.5)';
+    for (const [cx, cy] of pts) { ctx.beginPath(); ctx.arc(x+s*(cx-.02), y+s*(cy-.02), s*.03, 0, Math.PI*2); ctx.fill(); }
+  },
+};
+ITEMS.HERB = {
+  id: 'herb', name: 'Grimy Herb', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#1a4a18';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.75);
+    ctx.bezierCurveTo(x+s*.2, y+s*.5, x+s*.35, y+s*.25, x+s*.5, y+s*.2);
+    ctx.bezierCurveTo(x+s*.65, y+s*.25, x+s*.8, y+s*.5, x+s*.5, y+s*.75);
+    ctx.fill();
+    ctx.fillStyle = '#2d7a28';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.7);
+    ctx.bezierCurveTo(x+s*.25, y+s*.48, x+s*.38, y+s*.28, x+s*.5, y+s*.25);
+    ctx.bezierCurveTo(x+s*.62, y+s*.28, x+s*.75, y+s*.48, x+s*.5, y+s*.7);
+    ctx.fill();
+    ctx.strokeStyle = '#1a4a18'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.25); ctx.lineTo(x+s*.5, y+s*.75); ctx.stroke();
+  },
+};
+ITEMS.FLAX = {
+  id: 'flax', name: 'Flax', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.strokeStyle = '#7ab0d0'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.8); ctx.lineTo(x+s*.5, y+s*.15); ctx.stroke();
+    ctx.fillStyle = '#5090b8';
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.18, s*.08, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#4a80a8'; ctx.lineWidth = 1;
+    for (const [ang, len] of [[-0.4,0.14],[0.4,0.14],[0,0.12]]) {
+      ctx.beginPath();
+      ctx.moveTo(x+s*.5, y+s*.45);
+      ctx.lineTo(x+s*.5 + Math.sin(ang)*s*len, y+s*.45 - Math.cos(ang)*s*len);
+      ctx.stroke();
+    }
+  },
+};
+ITEMS.MAGIC_HERB = {
+  id: 'magic_herb', name: 'Magic Herb', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#2a0a4a';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.75);
+    ctx.bezierCurveTo(x+s*.2, y+s*.5, x+s*.35, y+s*.22, x+s*.5, y+s*.18);
+    ctx.bezierCurveTo(x+s*.65, y+s*.22, x+s*.8, y+s*.5, x+s*.5, y+s*.75);
+    ctx.fill();
+    ctx.fillStyle = '#6a20b0';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.70);
+    ctx.bezierCurveTo(x+s*.26, y+s*.48, x+s*.38, y+s*.25, x+s*.5, y+s*.22);
+    ctx.bezierCurveTo(x+s*.62, y+s*.25, x+s*.74, y+s*.48, x+s*.5, y+s*.70);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(180,100,255,0.5)';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.45, s*.06, s*.18, 0, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#2a0a4a'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.22); ctx.lineTo(x+s*.5, y+s*.70); ctx.stroke();
+  },
+};
+
 /* ── Furniture helpers ───────────────────────────────── */
 
 function normalizeFurnitureFacing(facing) {

@@ -87,6 +87,14 @@ export const TILES = {
   WELL:          57,  // stone village well (solid)
   BARREL:        58,  // wooden barrel prop (solid)
   SIGN:          59,  // wooden signpost (walkable)
+  // Housing expansion furniture
+  FURN_BED:      60,  // solid — bed frame
+  FURN_BENCH:    61,  // solid — crafting bench
+  // Farming patches (walkable, interactive — inside farming_plot cells)
+  FARM_PATCH:         62,  // empty soil ready for planting
+  FARM_PATCH_SEEDED:  63,  // seed just planted
+  FARM_PATCH_GROWING: 64,  // crop sprouting
+  FARM_PATCH_READY:   65,  // ready to harvest
 };
 
 // Which tiles block movement
@@ -132,6 +140,9 @@ export const SOLID_TILES = new Set([
   TILES.FENCE,
   TILES.WELL,
   TILES.BARREL,
+  // Housing furniture
+  TILES.FURN_BED,
+  TILES.FURN_BENCH,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -204,6 +215,13 @@ export const TILE_COLORS = {
   [TILES.WELL]:         '#7a6a5a',
   [TILES.BARREL]:       '#6b3a1a',
   [TILES.SIGN]:         '#8b6914',
+  [TILES.FURN_BED]:     '#7a3a22',
+  [TILES.FURN_BENCH]:   '#5a4018',
+  // Farming patches
+  [TILES.FARM_PATCH]:         '#6b4e2a',
+  [TILES.FARM_PATCH_SEEDED]:  '#7a5a30',
+  [TILES.FARM_PATCH_GROWING]: '#5a6a2a',
+  [TILES.FARM_PATCH_READY]:   '#3a7a22',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -223,12 +241,16 @@ export const TILE_HAS_DETAIL = new Set([
   TILES.PORTAL, TILES.PLANK,
   TILES.FURN_CHAIR, TILES.FURN_RUG, TILES.FURN_TABLE,
   TILES.FURN_CHEST, TILES.FURN_BOOKSHELF, TILES.FURN_PLANT,
+  TILES.FURN_BED, TILES.FURN_BENCH,
   TILES.FURNACE, TILES.ANVIL,
   TILES.ROCK_TIN, TILES.ROCK_SILVER, TILES.ROCK_TUNGSTEN,
   TILES.ROCK_OBSIDIAN, TILES.ROCK_MOONSTONE,
   // Village props
   TILES.PATH, TILES.PLASTER_WALL, TILES.THATCH_ROOF,
   TILES.FENCE, TILES.WELL, TILES.BARREL, TILES.SIGN,
+  // Farming patches
+  TILES.FARM_PATCH, TILES.FARM_PATCH_SEEDED,
+  TILES.FARM_PATCH_GROWING, TILES.FARM_PATCH_READY,
 ]);
 
 // ── Inventory ────────────────────────────────────────────
@@ -252,8 +274,9 @@ export const SKILL_IDS = {
   ARCHITECT:   9,
   FORGERY:     10,
   RAIDING:     11,
+  FARMING:     12,
 };
-export const SKILL_NAMES  = ['Woodcutting', 'Firemaking', 'Fishing', 'Cooking', 'Attack', 'Strength', 'Defence', 'Hitpoints', 'Mining', 'Architect', 'Forgery', 'Raiding'];
+export const SKILL_NAMES  = ['Woodcutting', 'Firemaking', 'Fishing', 'Cooking', 'Attack', 'Strength', 'Defence', 'Hitpoints', 'Mining', 'Architect', 'Forgery', 'Raiding', 'Farming'];
 
 // ── Skill unlock tables ───────────────────────────────────
 // Indexed by SKILL_IDS. Each entry: { level, text, icon? }
@@ -413,8 +436,17 @@ export const SKILL_UNLOCKS = [
     { level: 70, text: 'Master difficulty unlocked',                      icon: null },
     { level: 99, text: 'Grand Raider — maximum raid mastery',             icon: null },
   ],
+  // 12 — Farming
+  [
+    { level:  1, text: 'Plant Potato Seeds → Potatoes (20 XP/harvest)',   icon: 'potato_seed' },
+    { level:  5, text: 'Plant Berry Seeds → Berries (30 XP/harvest)',     icon: 'berry_seed' },
+    { level: 10, text: 'Plant Herb Seeds → Grimy Herbs (50 XP/harvest)',  icon: 'herb_seed' },
+    { level: 15, text: 'Plant Flax Seeds → Flax (40 XP/harvest)',         icon: 'flax_seed' },
+    { level: 25, text: 'Plant Magic Seeds → Magic Herbs (100 XP/harvest)',icon: 'magic_seed' },
+    { level: 99, text: 'Master Farmer — all crops available',             icon: null },
+  ],
 ];
-export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392b', '#8e44ad', '#2980b9', '#ec407a', '#95a5a6', '#d4a017', '#b7410e', '#a855f7'];
+export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392b', '#8e44ad', '#2980b9', '#ec407a', '#95a5a6', '#d4a017', '#b7410e', '#a855f7', '#56a832'];
 
 // XP table — Runescape-inspired curve
 export const XP_TABLE = (() => {

@@ -20,19 +20,31 @@ export const MOB_DEFS = {
   chicken: {
     name: 'Chicken', hp: 3, speed: 52, w: 14, h: 16,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 1.5, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    xpHp: 1.5, drops: [
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.POTATO_SEED, chance: 0.08, qty: 1 },
+      { item: ITEMS.BERRY_SEED,  chance: 0.05, qty: 1 },
+    ],
     biomes: [BIOMES.PLAINS, BIOMES.FOREST],
   },
   cow: {
     name: 'Cow', hp: 10, speed: 34, w: 26, h: 22,
     aggressive: false, attackLevel: 1, strengthLevel: 2, defenceLevel: 1,
-    xpHp: 2, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    xpHp: 2, drops: [
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.POTATO_SEED, chance: 0.08, qty: 1 },
+      { item: ITEMS.BERRY_SEED,  chance: 0.05, qty: 1 },
+    ],
     biomes: [BIOMES.PLAINS],
   },
   sheep: {
     name: 'Sheep', hp: 8, speed: 44, w: 20, h: 18,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 1.5, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    xpHp: 1.5, drops: [
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.POTATO_SEED, chance: 0.07, qty: 1 },
+      { item: ITEMS.FLAX_SEED,   chance: 0.05, qty: 1 },
+    ],
     biomes: [BIOMES.PLAINS, BIOMES.TUNDRA],
   },
 
@@ -43,6 +55,7 @@ export const MOB_DEFS = {
     xpHp: 5, drops: [
       { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN,  chance: 0.5, qty: 3 },
+      { item: ITEMS.HERB_SEED,  chance: 0.06, qty: 1 },
     ],
     biomes: [BIOMES.DANGER],
   },
@@ -53,6 +66,8 @@ export const MOB_DEFS = {
       { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN,  chance: 0.7, qty: 8 },
       { item: ITEMS.ORE_IRON,   chance: 0.3, qty: 1 },
+      { item: ITEMS.HERB_SEED,  chance: 0.07, qty: 1 },
+      { item: ITEMS.FLAX_SEED,  chance: 0.05, qty: 1 },
     ],
     biomes: [BIOMES.DANGER],
   },
@@ -63,6 +78,8 @@ export const MOB_DEFS = {
       { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN,  chance: 0.9, qty: 20 },
       { item: ITEMS.ORE_COAL,   chance: 0.4, qty: 1 },
+      { item: ITEMS.HERB_SEED,  chance: 0.08, qty: 1 },
+      { item: ITEMS.MAGIC_SEED, chance: 0.04, qty: 1 },
     ],
     biomes: [BIOMES.DANGER],
   },
@@ -73,6 +90,7 @@ export const MOB_DEFS = {
       { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN,   chance: 1.0, qty: 50 },
       { item: ITEMS.ORE_MITHRIL, chance: 0.3, qty: 1 },
+      { item: ITEMS.MAGIC_SEED,  chance: 0.08, qty: 1 },
     ],
     biomes: [BIOMES.DANGER, BIOMES.VOLCANIC],
   },
@@ -88,13 +106,20 @@ export const MOB_DEFS = {
   deer: {
     name: 'Deer', hp: 14, speed: 95, w: 20, h: 24,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 2, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    xpHp: 2, drops: [
+      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
+      { item: ITEMS.BERRY_SEED, chance: 0.06, qty: 1 },
+      { item: ITEMS.FLAX_SEED,  chance: 0.04, qty: 1 },
+    ],
     biomes: [BIOMES.FOREST, BIOMES.PLAINS],
   },
   fox: {
     name: 'Fox', hp: 8, speed: 100, w: 18, h: 14,
     aggressive: false, attackLevel: 1, strengthLevel: 4, defenceLevel: 2,
-    xpHp: 2, drops: [{ item: ITEMS.BONES, chance: 1.0, qty: 1 }],
+    xpHp: 2, drops: [
+      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
+      { item: ITEMS.BERRY_SEED, chance: 0.05, qty: 1 },
+    ],
     biomes: [BIOMES.FOREST, BIOMES.PLAINS],
     prey: ['rabbit', 'chicken'],
   },
@@ -104,6 +129,7 @@ export const MOB_DEFS = {
     xpHp: 7, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.3, qty: 5 },
+      { item: ITEMS.HERB_SEED, chance: 0.05, qty: 1 },
     ],
     biomes: [BIOMES.FOREST],
     prey: ['deer', 'rabbit', 'sheep', 'chicken'],
@@ -114,6 +140,7 @@ export const MOB_DEFS = {
     xpHp: 12, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.5, qty: 10 },
+      { item: ITEMS.HERB_SEED, chance: 0.07, qty: 1 },
     ],
     biomes: [BIOMES.FOREST, BIOMES.TUNDRA],
     prey: ['deer', 'rabbit', 'sheep', 'chicken'],
@@ -124,6 +151,7 @@ export const MOB_DEFS = {
     xpHp: 14, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.5, qty: 12 },
+      { item: ITEMS.FLAX_SEED, chance: 0.06, qty: 1 },
     ],
     biomes: [BIOMES.TUNDRA],
     prey: ['rabbit', 'sheep', 'deer'],
@@ -134,6 +162,7 @@ export const MOB_DEFS = {
     xpHp: 13, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.6, qty: 15 },
+      { item: ITEMS.HERB_SEED, chance: 0.05, qty: 1 },
     ],
     biomes: [BIOMES.SWAMP],
     prey: ['frog', 'rabbit'],
@@ -142,8 +171,9 @@ export const MOB_DEFS = {
     name: 'Scorpion', hp: 20, speed: 68, w: 16, h: 12,
     aggressive: true, attackLevel: 17, strengthLevel: 15, defenceLevel: 10,
     xpHp: 8, drops: [
-      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
-      { item: ITEMS.GOLD_COIN, chance: 0.4, qty: 8 },
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,   chance: 0.4, qty: 8 },
+      { item: ITEMS.POTATO_SEED, chance: 0.06, qty: 1 },
     ],
     biomes: [BIOMES.DESERT],
     prey: ['rabbit'],
@@ -153,7 +183,10 @@ export const MOB_DEFS = {
   rabbit: {
     name: 'Rabbit', hp: 3, speed: 110, w: 12, h: 12,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 1, drops: [{ item: ITEMS.BONES, chance: 0.6, qty: 1 }],
+    xpHp: 1, drops: [
+      { item: ITEMS.BONES,       chance: 0.6, qty: 1 },
+      { item: ITEMS.BERRY_SEED,  chance: 0.06, qty: 1 },
+    ],
     biomes: [BIOMES.FOREST, BIOMES.PLAINS, BIOMES.TUNDRA],
   },
   boar: {
@@ -162,13 +195,17 @@ export const MOB_DEFS = {
     xpHp: 8, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.4, qty: 6 },
+      { item: ITEMS.HERB_SEED, chance: 0.05, qty: 1 },
     ],
     biomes: [BIOMES.FOREST],
   },
   snake: {
     name: 'Snake', hp: 12, speed: 60, w: 22, h: 8,
     aggressive: true, attackLevel: 12, strengthLevel: 10, defenceLevel: 6,
-    xpHp: 5, drops: [{ item: ITEMS.BONES, chance: 0.8, qty: 1 }],
+    xpHp: 5, drops: [
+      { item: ITEMS.BONES,       chance: 0.8, qty: 1 },
+      { item: ITEMS.POTATO_SEED, chance: 0.05, qty: 1 },
+    ],
     biomes: [BIOMES.SWAMP, BIOMES.DESERT],
     prey: ['frog', 'rabbit'],
   },
@@ -178,6 +215,7 @@ export const MOB_DEFS = {
     xpHp: 6, drops: [
       { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN, chance: 0.3, qty: 4 },
+      { item: ITEMS.HERB_SEED, chance: 0.05, qty: 1 },
     ],
     biomes: [BIOMES.DESERT, BIOMES.PLAINS],
     prey: ['rabbit', 'chicken', 'deer'],

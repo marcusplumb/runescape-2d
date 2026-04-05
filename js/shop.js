@@ -208,9 +208,10 @@ export class HouseShopKeeper {
   constructor() {
     this.w = 24;
     this.h = 32;
-    // Top-right of the 9×9 plank floor inside the house (box at col 40, row 40 — plank 41-49)
-    this.x = 47 * TILE_SIZE + (TILE_SIZE - this.w) / 2;
-    this.y = 42 * TILE_SIZE;
+    // Top-right corner of the starter room inner floor
+    // Starter cell inner origin: col 33, row 33  (grid cell (2,2), CELL_SIZE=13)
+    this.x = 42 * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = 33 * TILE_SIZE;
     this.name = 'Decorator';
   }
 

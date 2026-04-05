@@ -24,6 +24,12 @@ import {
 } from './forge.js';
 import { EQUIP_ID_TO_ITEM } from './items.js';
 import { GEAR_BY_ID } from './gear.js';
+import {
+  ROOM_DEFS, FURNITURE_DEFS, getUnlockedRoomDefs,
+  rotatedFootprint,
+  GRID_COLS, GRID_ROWS,
+  BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
+} from './housing.js';
 
 // Tiles that animate each frame (use this.time) — excluded from the chunk cache
 const ANIMATED_TILES = new Set([
@@ -1818,10 +1824,62 @@ export class Renderer {
       return;
     }
 
+    // ── Farming patch tiles ───────────────────────────────────────────────
+    if (tile === TILES.FARM_PATCH || tile === TILES.FARM_PATCH_SEEDED ||
+        tile === TILES.FARM_PATCH_GROWING || tile === TILES.FARM_PATCH_READY) {
+      const T = TILE_SIZE;
+      // Base soil
+      ctx.fillStyle = tile === TILES.FARM_PATCH_READY ? '#4a6a1a' : '#6b4e2a';
+      ctx.fillRect(px, py, T, T);
+      // Furrow lines (horizontal ridges)
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      for (let i = 0; i < 4; i++) ctx.fillRect(px, py + 3 + i * 7, T, 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      for (let i = 0; i < 4; i++) ctx.fillRect(px, py + 5 + i * 7, T, 1);
+
+      if (tile === TILES.FARM_PATCH_SEEDED) {
+        // Small seed bumps
+        ctx.fillStyle = '#c8a050';
+        const bumps = [[8,8],[22,14],[14,22],[26,24],[6,26]];
+        for (const [bx, by] of bumps) {
+          ctx.beginPath(); ctx.arc(px + bx, py + by, 2, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (tile === TILES.FARM_PATCH_GROWING) {
+        // Small green sprouts
+        ctx.strokeStyle = '#4a9a30'; ctx.lineWidth = 1.5;
+        const sprouts = [[8,24],[16,18],[24,22],[12,14],[22,8]];
+        for (const [sx2, sy] of sprouts) {
+          ctx.beginPath();
+          ctx.moveTo(px + sx2, py + sy + 6);
+          ctx.quadraticCurveTo(px + sx2 - 3, py + sy + 2, px + sx2, py + sy);
+          ctx.stroke();
+          ctx.fillStyle = '#5ab040';
+          ctx.beginPath(); ctx.ellipse(px + sx2, py + sy, 3, 2, -0.5, 0, Math.PI * 2); ctx.fill();
+        }
+      } else if (tile === TILES.FARM_PATCH_READY) {
+        // Lush plants with bright leaves
+        ctx.fillStyle = '#2a5a10';
+        ctx.fillRect(px, py, T, T);
+        for (let i = 0; i < 3; i++) ctx.fillRect(px, py + 4 + i * 9, T, 1);
+        const plants = [[6,24],[16,16],[26,22],[10,10],[24,8]];
+        for (const [bx, by] of plants) {
+          ctx.strokeStyle = '#3a7a20'; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.moveTo(px+bx, py+by+7); ctx.lineTo(px+bx, py+by); ctx.stroke();
+          ctx.fillStyle = '#6acd40';
+          ctx.beginPath(); ctx.ellipse(px+bx-3, py+by+1, 4, 2, -0.7, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.ellipse(px+bx+3, py+by+2, 4, 2,  0.7, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#90e050';
+          ctx.beginPath(); ctx.ellipse(px+bx, py+by, 3, 2, 0, 0, Math.PI*2); ctx.fill();
+        }
+      }
+      return;
+    }
+
     // ── Furniture tiles (draw plank floor first, then directional sprite) ─
     const FURN_TILES = new Set([
       TILES.FURN_CHAIR, TILES.FURN_RUG, TILES.FURN_TABLE,
       TILES.FURN_CHEST, TILES.FURN_BOOKSHELF, TILES.FURN_PLANT,
+      TILES.FURN_BED, TILES.FURN_BENCH,
     ]);
     if (FURN_TILES.has(tile)) {
       this._drawTileDetail(ctx, TILES.PLANK, px, py, c, r, world);
@@ -2141,6 +2199,56 @@ export class Renderer {
       ctx.beginPath(); ctx.ellipse(16,5,5,3,0,0,Math.PI*2); ctx.fill();
       ctx.fillStyle='rgba(255,255,255,0.18)';
       ctx.beginPath(); ctx.ellipse(10,10,3,2,-0.4,0,Math.PI*2); ctx.fill();
+      return;
+    }
+
+    // ── BED ─────────────────────────────────────────────────
+    if (tile === T.FURN_BED) {
+      // Frame (dark oak)
+      ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,28,26,4);
+      ctx.fillStyle='#4a2808'; ctx.fillRect(2,4,28,27);
+      ctx.fillStyle='#6b3a18'; ctx.fillRect(3,5,26,25);
+      // Mattress
+      ctx.fillStyle='#e8dcc8'; ctx.fillRect(4,7,24,20);
+      ctx.fillStyle='#d4c8b0'; ctx.fillRect(5,8,22,18);
+      // Pillow
+      ctx.fillStyle='#f0eae0'; ctx.fillRect(7,8,18,7);
+      ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillRect(8,9,8,3);
+      // Blanket fold
+      ctx.fillStyle='#9b3a3a'; ctx.fillRect(4,19,24,8);
+      ctx.fillStyle='#b04444'; ctx.fillRect(5,20,22,6);
+      ctx.fillStyle='#7a2828'; ctx.fillRect(4,19,24,2);
+      // Headboard
+      ctx.fillStyle='#3a1a08'; ctx.fillRect(2,4,28,4);
+      ctx.fillStyle='#5a2a10'; ctx.fillRect(3,5,26,2);
+      // Footboard
+      ctx.fillStyle='#4a2808'; ctx.fillRect(2,29,28,3);
+      return;
+    }
+
+    // ── BENCH ────────────────────────────────────────────────
+    if (tile === T.FURN_BENCH) {
+      // Shadow
+      ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,27,26,5);
+      // Legs
+      ctx.fillStyle='#3a2008';
+      ctx.fillRect(3,20,4,10); ctx.fillRect(25,20,4,10);
+      // Side apron
+      ctx.fillStyle='#5a3818'; ctx.fillRect(3,18,4,4); ctx.fillRect(25,18,4,4);
+      // Front apron face
+      ctx.fillStyle='#7a5028'; ctx.fillRect(3,18,26,4);
+      ctx.fillStyle='#5a3818'; ctx.fillRect(3,18,26,1);
+      // Worktop (top face — lightest)
+      ctx.fillStyle='#c09060'; ctx.fillRect(2,10,28,9);
+      ctx.fillStyle='#d4a878'; ctx.fillRect(3,11,26,7);
+      // Wood grain lines
+      ctx.fillStyle='rgba(0,0,0,0.12)';
+      for (let xi = 5; xi < 28; xi += 6) ctx.fillRect(xi, 11, 1, 7);
+      // Front edge shadow
+      ctx.fillStyle='#8a6040'; ctx.fillRect(2,17,28,2);
+      // Vise/clamp detail on right
+      ctx.fillStyle='#4a4848'; ctx.fillRect(23,12,5,5);
+      ctx.fillStyle='#6a6a6a'; ctx.fillRect(24,13,3,3);
       return;
     }
   }
@@ -4500,6 +4608,271 @@ export class Renderer {
     ctx.fillText(dirLabels[rotation], px + 26, py + 12);
 
     ctx.restore();
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     BUILD-MODE FURNITURE CURSOR (camera-space)
+     ═══════════════════════════════════════════════════════ */
+  drawBuildModeFurnCursor(col, row, elapsed, furnitureDef, rotation) {
+    if (!furnitureDef) return;
+    const ctx = this.ctx;
+    const { w, h } = rotatedFootprint(furnitureDef, rotation);
+    const pulse = 0.5 + 0.5 * Math.sin(elapsed * 6);
+    ctx.save();
+    ctx.strokeStyle = `rgba(255,220,80,${0.6 + 0.4 * pulse})`;
+    ctx.lineWidth = 2;
+    ctx.fillStyle = `rgba(255,220,80,${0.12 * pulse})`;
+    ctx.fillRect(col * 32, row * 32, w * 32, h * 32);
+    ctx.strokeRect(col * 32 + 1, row * 32 + 1, w * 32 - 2, h * 32 - 2);
+    const dirLabels = ['↑','→','↓','←'];
+    ctx.fillStyle = `rgba(255,220,80,${0.8 + 0.2 * pulse})`;
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(dirLabels[rotation], col * 32 + 26, row * 32 + 12);
+    ctx.restore();
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     HOUSING BUILD MODE PANEL (screen-space)
+     ═══════════════════════════════════════════════════════ */
+  drawHousingBuildMode(housingState, step, selGX, selGY,
+                       roomScroll, furnScroll,
+                       mouseX, mouseY, archLevel,
+                       inventory,
+                       canvasW, canvasH) {
+    const ctx = this.ctx;
+    const px = Math.floor((canvasW - BM_PW) / 2);
+    const py = Math.floor((canvasH - BM_PH) / 2);
+
+    // ── backdrop ──────────────────────────────────────────
+    ctx.fillStyle = '#1c1208';
+    ctx.fillRect(px, py, BM_PW, BM_PH);
+    ctx.strokeStyle = '#7a5a2a';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px + 1, py + 1, BM_PW - 2, BM_PH - 2);
+    ctx.strokeStyle = '#3a2a0a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 3, py + 3, BM_PW - 6, BM_PH - 6);
+
+    // ── header ────────────────────────────────────────────
+    ctx.fillStyle = '#1a0e02';
+    ctx.fillRect(px, py, BM_PW, BM_HEADER_H);
+    ctx.strokeStyle = '#7a5a2a';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py + BM_HEADER_H, BM_PW, 0);
+
+    ctx.fillStyle = '#e8c870';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('Build Mode  [B] or [Esc] to close', px + BM_PW / 2, py + BM_HEADER_H / 2);
+
+    // Close button
+    const cx = px + BM_PW - 20, cy = py + 20;
+    const hover = mouseX >= cx - 14 && mouseX <= cx + 14 && mouseY >= cy - 14 && mouseY <= cy + 14;
+    ctx.fillStyle = hover ? '#7a1010' : '#3a0808';
+    ctx.fillRect(cx - 14, cy - 14, 28, 28);
+    ctx.strokeStyle = hover ? '#e05050' : '#6a2020';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - 14, cy - 14, 28, 28);
+    ctx.fillStyle = '#e07070';
+    ctx.font = 'bold 14px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✕', cx, cy);
+
+    // ── Grid section ──────────────────────────────────────
+    const gridLeft = px + BM_GRID_OFF;
+    const gridTop  = py + BM_GRID_TOP;
+    const availSlots = housingState.getAvailableSlots();
+
+    ctx.font = 'bold 11px monospace';
+    ctx.fillStyle = '#a08050';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('Layout  (click a cell or available slot)', gridLeft, gridTop - 6);
+
+    for (let gy = 0; gy < GRID_ROWS; gy++) {
+      for (let gx = 0; gx < GRID_COLS; gx++) {
+        const cx2 = gridLeft + gx * BM_GRID_CELL;
+        const cy2 = gridTop  + gy * BM_GRID_CELL;
+        const key = `${gx},${gy}`;
+        const cell = housingState.getCell(gx, gy);
+        const isAvail = availSlots.has(key);
+        const isSel   = selGX === gx && selGY === gy;
+
+        // Cell background
+        if (cell) {
+          const def = ROOM_DEFS[cell.typeId];
+          ctx.fillStyle = def ? def.color : '#444';
+          ctx.fillRect(cx2 + 1, cy2 + 1, BM_GRID_CELL - 2, BM_GRID_CELL - 2);
+          // Tiny label
+          ctx.fillStyle = 'rgba(255,255,255,0.7)';
+          ctx.font = '7px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          const lbl = (def?.name ?? '?').substring(0, 6);
+          ctx.fillText(lbl, cx2 + BM_GRID_CELL / 2, cy2 + BM_GRID_CELL / 2);
+        } else if (isAvail) {
+          ctx.fillStyle = 'rgba(255,255,160,0.08)';
+          ctx.fillRect(cx2 + 1, cy2 + 1, BM_GRID_CELL - 2, BM_GRID_CELL - 2);
+          ctx.fillStyle = 'rgba(255,255,100,0.5)';
+          ctx.font = '16px monospace';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('+', cx2 + BM_GRID_CELL / 2, cy2 + BM_GRID_CELL / 2);
+        } else {
+          ctx.fillStyle = 'rgba(20,10,0,0.6)';
+          ctx.fillRect(cx2 + 1, cy2 + 1, BM_GRID_CELL - 2, BM_GRID_CELL - 2);
+        }
+
+        // Border
+        ctx.strokeStyle = isSel ? '#f1c40f'
+          : cell     ? 'rgba(180,140,60,0.6)'
+          : isAvail  ? 'rgba(200,200,80,0.4)'
+          : 'rgba(60,40,10,0.4)';
+        ctx.lineWidth = isSel ? 2 : 1;
+        ctx.strokeRect(cx2 + 0.5, cy2 + 0.5, BM_GRID_CELL - 1, BM_GRID_CELL - 1);
+      }
+    }
+
+    // ── Right panel ───────────────────────────────────────
+    const rox = px + BM_SPLIT_X + 10;
+    const rpW = BM_PW - BM_SPLIT_X - 20;
+    const listTop = py + BM_HEADER_H + 48;
+    const ROW_H = 52;
+
+    ctx.fillStyle = '#a08050';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+
+    if (step === 'grid' || selGX === null) {
+      ctx.fillStyle = '#6a5030';
+      ctx.font = '11px monospace';
+      const lines = [
+        'Click an owned cell (coloured)',
+        'to place furniture inside.',
+        '',
+        'Click a slot marked  +  to',
+        'build a new room or plot.',
+        '',
+        `Architect level: ${archLevel}`,
+      ];
+      lines.forEach((ln, i) => {
+        ctx.fillText(ln, rox, py + BM_HEADER_H + 16 + i * 16);
+      });
+    } else if (step === 'pick_room') {
+      ctx.fillStyle = '#e8c870';
+      ctx.fillText(`Build at (${selGX}, ${selGY})`, rox, py + BM_HEADER_H + 16);
+      ctx.fillStyle = '#a08050';
+      ctx.fillText('Choose a room type:', rox, py + BM_HEADER_H + 32);
+
+      const allDefs = getUnlockedRoomDefs(99).filter(d => d.id !== 'starter');
+      const visible = allDefs.slice(roomScroll, roomScroll + 5);
+      visible.forEach((def, i) => {
+        const ry = listTop + i * ROW_H;
+        const canBuild = archLevel >= def.levelReq &&
+          inventory.count('gold_coin') >= def.goldCost &&
+          def.materials.every(m => inventory.count(m.itemId) >= m.qty);
+        const rowHov = mouseX >= rox && mouseX <= rox + rpW && mouseY >= ry && mouseY <= ry + ROW_H - 4;
+
+        ctx.fillStyle = rowHov ? 'rgba(255,220,80,0.12)' : 'rgba(60,40,10,0.4)';
+        ctx.fillRect(rox, ry, rpW, ROW_H - 4);
+        ctx.strokeStyle = canBuild ? '#a08040' : '#4a3010';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rox, ry, rpW, ROW_H - 4);
+
+        // Colour swatch
+        ctx.fillStyle = def.color;
+        ctx.fillRect(rox + 4, ry + 4, 16, 16);
+
+        ctx.fillStyle = canBuild ? '#e8c870' : '#6a5030';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(def.name, rox + 24, ry + 14);
+
+        ctx.fillStyle = canBuild ? '#a0a870' : '#6a5030';
+        ctx.font = '9px monospace';
+        const cat = def.category === 'indoor' ? 'Indoor' : 'Outdoor';
+        ctx.fillText(`Arch ${def.levelReq}  ${def.goldCost}g  ${cat}`, rox + 24, ry + 26);
+
+        const matStr = def.materials.map(m => `${m.qty}×${m.itemId.replace(/_/g,' ')}`).join('  ') || 'No materials';
+        ctx.fillText(matStr, rox + 4, ry + 40);
+      });
+
+      // Scroll arrows
+      if (allDefs.length > 5) {
+        const arrowY = listTop + 5 * ROW_H + 4;
+        ctx.fillStyle = '#a08050';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'center';
+        if (roomScroll > 0) ctx.fillText('▲ prev', rox + rpW / 2 - 30, arrowY + 14);
+        if (roomScroll + 5 < allDefs.length) ctx.fillText('▼ next', rox + rpW / 2 + 30, arrowY + 14);
+      }
+    } else if (step === 'pick_furniture') {
+      const cell = housingState.getCell(selGX, selGY);
+      if (!cell) return;
+      const roomDef = ROOM_DEFS[cell.typeId];
+      ctx.fillStyle = '#e8c870';
+      ctx.fillText(`Furnish: ${roomDef?.name ?? '?'}`, rox, py + BM_HEADER_H + 16);
+      ctx.fillStyle = '#a08050';
+      ctx.fillText('Choose furniture to place:', rox, py + BM_HEADER_H + 32);
+
+      const allFurn = Object.values(FURNITURE_DEFS).filter(fd =>
+        fd.category === roomDef.category || fd.category === 'both');
+      const visible = allFurn.slice(furnScroll, furnScroll + 5);
+      visible.forEach((fd, i) => {
+        const ry = listTop + i * ROW_H;
+        const canPlace = archLevel >= fd.levelReq &&
+          fd.materials.every(m => inventory.count(m.itemId) >= m.qty);
+        const rowHov = mouseX >= rox && mouseX <= rox + rpW && mouseY >= ry && mouseY <= ry + ROW_H - 4;
+
+        ctx.fillStyle = rowHov ? 'rgba(255,220,80,0.12)' : 'rgba(60,40,10,0.4)';
+        ctx.fillRect(rox, ry, rpW, ROW_H - 4);
+        ctx.strokeStyle = canPlace ? '#a08040' : '#4a3010';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rox, ry, rpW, ROW_H - 4);
+
+        ctx.fillStyle = canPlace ? '#e8c870' : '#6a5030';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        const fpLabel = `${fd.footprint.w}×${fd.footprint.h}`;
+        ctx.fillText(`${fd.name}  [${fpLabel}]`, rox + 4, ry + 14);
+
+        ctx.fillStyle = canPlace ? '#a0a870' : '#6a5030';
+        ctx.font = '9px monospace';
+        ctx.fillText(`Arch ${fd.levelReq}  ${fd.solid ? 'solid' : 'walkable'}`, rox + 4, ry + 26);
+
+        const matStr = fd.materials.map(m => `${m.qty}×${m.itemId.replace(/_/g,' ')}`).join('  ') || 'Free';
+        ctx.fillText(matStr, rox + 4, ry + 40);
+      });
+
+      // Placed furniture summary
+      const placed = housingState.getFurniture(selGX, selGY);
+      if (placed.length > 0) {
+        const sumY = py + BM_PH - 44;
+        ctx.fillStyle = '#6a5030';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(`${placed.length} item(s) placed in this room.`, rox, sumY);
+      }
+
+      if (allFurn.length > 5) {
+        const arrowY = listTop + 5 * ROW_H + 4;
+        ctx.fillStyle = '#a08050';
+        ctx.font = '11px monospace';
+        ctx.textAlign = 'center';
+        if (furnScroll > 0) ctx.fillText('▲ prev', rox + rpW / 2 - 30, arrowY + 14);
+        if (furnScroll + 5 < allFurn.length) ctx.fillText('▼ next', rox + rpW / 2 + 30, arrowY + 14);
+      }
+    }
+
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
   }
 
   _drawShopRow(ctx, px, rowY, pw, rowH, item, price, qty, playerGold, btnLabel) {

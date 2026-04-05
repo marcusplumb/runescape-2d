@@ -7,6 +7,13 @@
  * Exiting:  player walks onto TILES.STAIRS in interior → fade → world
  */
 import { TILES, SOLID_TILES } from './constants.js';
+import {
+  ROOM_DEFS, FURNITURE_DEFS, rotatedFootprint,
+  CELL_SIZE, CELL_INNER, GRID_ROWS,
+  START_GX, START_GY,
+  cellOrigin, cellInnerOrigin,
+} from './housing.js';
+import { PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
 
 /* ── Interior map class ─────────────────────────────── */
 
@@ -378,28 +385,117 @@ function _buildKingdomInnInterior() {
 /* ── Player house interior ──────────────────────────── */
 
 /**
- * 90×90 plot: grass everywhere, centred 11×11 wooden box (1-tile walls,
- * 9×9 plank floor), exit STAIRS in the south wall.
+ * Build (or rebuild) the 90×90 player house interior from a HousingState.
+ *
+ * Layout rules:
+ *   • Every cell in the 6×6 grid that is owned gets its tiles placed.
+ *   • Indoor cells get WALL borders + their floorTile inside.
+ *   • Outdoor cells fill their 13×13 area with floorTile (no walls).
+ *   • Adjacent cells get a 1-tile doorway opened through the shared wall.
+ *   • Furniture stored in housing state is placed as tile IDs.
+ *   • STAIRS exit is placed at the south-wall centre of the southernmost
+ *     owned cell in the START_GX column.
+ *
+ * @param {import('./housing.js').HousingState} housingState
  */
-function _buildPlayerHouseInterior() {
+function _buildPlayerHouseFromState(housingState, farmingState = null) {
   const W = 90, H = 90;
   const t = new Uint8Array(W * H).fill(TILES.GRASS);
 
-  // Box position: centred in plot
-  const BOX_C = 40, BOX_R = 40, BOX_W = 11, BOX_H = 11;
+  // ── Phase 1: place each owned cell ────────────────────
+  for (const [key, cell] of housingState.cells) {
+    const [gx, gy] = key.split(',').map(Number);
+    const def = ROOM_DEFS[cell.typeId];
+    if (!def) continue;
+    const o = cellOrigin(gx, gy);
+    if (def.category === 'indoor') {
+      _fill(t, W, o.col, o.row, CELL_SIZE, CELL_SIZE, TILES.WALL);
+      _fill(t, W, o.col + 1, o.row + 1, CELL_INNER, CELL_INNER, def.floorTile);
+    } else {
+      _fill(t, W, o.col, o.row, CELL_SIZE, CELL_SIZE, def.floorTile);
+    }
+  }
 
-  // Outer walls
-  _fill(t, W, BOX_C, BOX_R, BOX_W, BOX_H, TILES.WALL);
+  // ── Phase 2: open doorways between adjacent owned cells ─
+  for (const [key, cell] of housingState.cells) {
+    const [gx, gy] = key.split(',').map(Number);
+    const def = ROOM_DEFS[cell.typeId];
+    if (!def) continue;
+    const o = cellOrigin(gx, gy);
 
-  // Inner plank floor (9×9)
-  _fill(t, W, BOX_C + 1, BOX_R + 1, 9, 9, TILES.PLANK);
+    // South neighbour
+    if (housingState.hasCell(gx, gy + 1)) {
+      const oS = cellOrigin(gx, gy + 1);
+      const dc = o.col + Math.floor(CELL_SIZE / 2);
+      const nbrDef = ROOM_DEFS[housingState.getCell(gx, gy + 1).typeId];
+      if (def.category === 'indoor')
+        _set(t, W, dc, o.row + CELL_SIZE - 1, def.floorTile);
+      if (nbrDef && nbrDef.category === 'indoor')
+        _set(t, W, dc, oS.row, nbrDef.floorTile);
+    }
+    // East neighbour
+    if (housingState.hasCell(gx + 1, gy)) {
+      const oE = cellOrigin(gx + 1, gy);
+      const dr = o.row + Math.floor(CELL_SIZE / 2);
+      const nbrDef = ROOM_DEFS[housingState.getCell(gx + 1, gy).typeId];
+      if (def.category === 'indoor')
+        _set(t, W, o.col + CELL_SIZE - 1, dr, def.floorTile);
+      if (nbrDef && nbrDef.category === 'indoor')
+        _set(t, W, oE.col, dr, nbrDef.floorTile);
+    }
+  }
 
-  // Exit STAIRS centred on south wall (replaces one wall tile)
-  _set(t, W, BOX_C + 5, BOX_R + BOX_H - 1, TILES.STAIRS);
+  // ── Phase 3: place furniture tiles ────────────────────
+  for (const [key, furList] of housingState.furniture) {
+    const [gx, gy] = key.split(',').map(Number);
+    const io = cellInnerOrigin(gx, gy);
+    for (const f of furList) {
+      const fd = FURNITURE_DEFS[f.defId];
+      if (!fd) continue;
+      const { w, h } = rotatedFootprint(fd, f.rotation);
+      for (let dr = 0; dr < h; dr++) {
+        for (let dc = 0; dc < w; dc++) {
+          const tc = io.col + f.localCol + dc;
+          const tr = io.row + f.localRow + dr;
+          if (tc >= 0 && tc < W && tr >= 0 && tr < H)
+            _set(t, W, tc, tr, fd.tileId);
+        }
+      }
+    }
+  }
 
-  // Entry row (tile just inside the north wall, centred)
-  const entryC = BOX_C + 5;
-  const entryR = BOX_R + 1;
+  // ── Phase 3.5: farming patch tiles ────────────────────
+  // For each farming_plot cell, overlay fixed patch positions with the
+  // correct stage tile (derived from farmingState if provided).
+  for (const [key, cell] of housingState.cells) {
+    if (cell.typeId !== 'farming_plot') continue;
+    const [gx, gy] = key.split(',').map(Number);
+    const io = cellInnerOrigin(gx, gy);
+    const patches = farmingState ? (farmingState.patches.get(key) ?? []) : [];
+    for (let i = 0; i < PATCH_LOCAL_POSITIONS.length; i++) {
+      const { localCol, localRow } = PATCH_LOCAL_POSITIONS[i];
+      const patch = patches[i] ?? null;
+      const stage = farmingState ? farmingState.getPatchStage(patch) : 0;
+      _set(t, W, io.col + localCol, io.row + localRow, GROW_STAGES[stage].tile);
+    }
+  }
+
+  // ── Phase 4: STAIRS exit ───────────────────────────────
+  // Southernmost owned cell in START_GX column
+  let stairsGY = START_GY;
+  for (let gy = START_GY + 1; gy < GRID_ROWS; gy++) {
+    if (housingState.hasCell(START_GX, gy)) stairsGY = gy;
+    else break;
+  }
+  const stO = cellOrigin(START_GX, stairsGY);
+  const stairsCol = stO.col + Math.floor(CELL_SIZE / 2);
+  const stairsRow = stO.row + CELL_SIZE - 1;
+  _set(t, W, stairsCol, stairsRow, TILES.STAIRS);
+
+  // Entry point: north inner area of starter cell
+  const eO = cellInnerOrigin(START_GX, START_GY);
+  const entryC = eO.col + Math.floor(CELL_INNER / 2);
+  const entryR = eO.row;
 
   return new InteriorMap('player_house', 'My Home', W, H, t, entryC, entryR);
 }
@@ -407,12 +503,13 @@ function _buildPlayerHouseInterior() {
 /* ── Public factory ─────────────────────────────────── */
 
 /**
- * Build all interior instances from the doorMap returned by placeAllStructures.
- * Returns Map<interiorId, InteriorMap>.
+ * Build a fresh player house interior from a HousingState.
+ * Call again to rebuild after the state changes (room added, furniture placed).
+ *
+ * @param {import('./housing.js').HousingState} housingState
  */
-/** Returns a fresh PlayerHouseInterior instance. */
-export function buildPlayerHouse() {
-  return _buildPlayerHouseInterior();
+export function buildPlayerHouse(housingState, farmingState = null) {
+  return _buildPlayerHouseFromState(housingState, farmingState);
 }
 
 export function buildAllInteriors(doorMap) {
