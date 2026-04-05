@@ -220,6 +220,88 @@ export const MOB_DEFS = {
     biomes: [BIOMES.DESERT, BIOMES.PLAINS],
     prey: ['rabbit', 'chicken', 'deer'],
   },
+
+  // ── Dungeon mobs ──────────────────────────────────────
+  cave_rat: {
+    name: 'Cave Rat', hp: 10, speed: 70, w: 16, h: 12,
+    aggressive: true, attackLevel: 5, strengthLevel: 6, defenceLevel: 2,
+    xpHp: 4, drops: [
+      { item: ITEMS.BONES,        chance: 0.9, qty: 1 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.2, qty: 2 },
+      { item: ITEMS.ANCIENT_BONE, chance: 0.05, qty: 1 },
+    ],
+    biomes: [],
+  },
+  cave_bat: {
+    name: 'Cave Bat', hp: 8, speed: 85, w: 18, h: 10,
+    aggressive: true, attackLevel: 4, strengthLevel: 5, defenceLevel: 1,
+    xpHp: 3, drops: [
+      { item: ITEMS.BONES,        chance: 0.7, qty: 1 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.15, qty: 1 },
+    ],
+    biomes: [],
+  },
+  giant_spider: {
+    name: 'Giant Spider', hp: 50, speed: 75, w: 26, h: 20,
+    aggressive: true, attackLevel: 18, strengthLevel: 22, defenceLevel: 10,
+    xpHp: 7, drops: [
+      { item: ITEMS.SILK_THREAD,  chance: 0.8, qty: 1 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.4, qty: 8 },
+      { item: ITEMS.ANCIENT_BONE, chance: 0.1, qty: 1 },
+    ],
+    biomes: [],
+  },
+  skeleton: {
+    name: 'Skeleton', hp: 55, speed: 55, w: 18, h: 28,
+    aggressive: true, attackLevel: 20, strengthLevel: 25, defenceLevel: 14,
+    xpHp: 7, drops: [
+      { item: ITEMS.ANCIENT_BONE, chance: 1.0, qty: 2 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.5, qty: 12 },
+      { item: ITEMS.HERB_SEED,    chance: 0.08, qty: 1 },
+    ],
+    biomes: [],
+  },
+  cave_troll: {
+    name: 'Cave Troll', hp: 80, speed: 38, w: 28, h: 32,
+    aggressive: true, attackLevel: 28, strengthLevel: 35, defenceLevel: 18,
+    xpHp: 9, drops: [
+      { item: ITEMS.ANCIENT_BONE, chance: 0.6, qty: 1 },
+      { item: ITEMS.STONE_CORE,   chance: 0.3, qty: 1 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.6, qty: 20 },
+    ],
+    biomes: [],
+  },
+  stone_golem: {
+    name: 'Stone Golem', hp: 130, speed: 28, w: 30, h: 34,
+    aggressive: true, attackLevel: 35, strengthLevel: 45, defenceLevel: 30,
+    xpHp: 12, drops: [
+      { item: ITEMS.STONE_CORE,   chance: 0.9, qty: 2 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.7, qty: 30 },
+      { item: ITEMS.ANCIENT_BONE, chance: 0.4, qty: 1 },
+    ],
+    biomes: [],
+  },
+  undead_warrior: {
+    name: 'Undead Warrior', hp: 90, speed: 48, w: 22, h: 30,
+    aggressive: true, attackLevel: 32, strengthLevel: 40, defenceLevel: 22,
+    xpHp: 10, drops: [
+      { item: ITEMS.ANCIENT_BONE, chance: 1.0, qty: 3 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.6, qty: 25 },
+      { item: ITEMS.STONE_CORE,   chance: 0.2, qty: 1 },
+    ],
+    biomes: [],
+  },
+  dragon_whelp: {
+    name: 'Dragon Whelp', hp: 180, speed: 52, w: 32, h: 28,
+    aggressive: true, attackLevel: 55, strengthLevel: 65, defenceLevel: 35,
+    xpHp: 15, drops: [
+      { item: ITEMS.DRAGON_SCALE, chance: 1.0, qty: 2 },
+      { item: ITEMS.GOLD_COIN,    chance: 0.8, qty: 60 },
+      { item: ITEMS.STONE_CORE,   chance: 0.5, qty: 1 },
+      { item: ITEMS.ANCIENT_BONE, chance: 0.5, qty: 2 },
+    ],
+    biomes: [],
+  },
 };
 
 // ── Mob AI tuning constants ───────────────────────────────────────────────────
@@ -309,10 +391,15 @@ export class Mob {
     this.maxHp = def.hp;
     this.speed = def.speed;
     this.aggressive = def.aggressive;
-    this.attackLevel  = def.attackLevel;
+    this.attackLevel   = def.attackLevel;
     this.strengthLevel = def.strengthLevel;
     this.defenceLevel  = def.defenceLevel;
     this.xpHp  = def.xpHp;  // XP per HP of damage dealt
+    // OSRS-style combat level: floor(0.25 * (def + hp + floor(max(atk, str) * 1.3)))
+    this.combatLevel = Math.max(1, Math.floor(0.25 * (
+      def.defenceLevel + def.hp +
+      Math.floor(Math.max(def.attackLevel, def.strengthLevel) * 1.3)
+    )));
     this.drops = def.drops;
 
     // Spawn anchor — mob returns here when not chasing
@@ -702,17 +789,34 @@ export class Mob {
       _drawSnake(ctx, x, y, w, h, bob, facingLeft);
     } else if (type === 'coyote') {
       _drawCoyote(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'cave_rat') {
+      _drawCaveRat(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'cave_bat') {
+      _drawCaveBat(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'giant_spider') {
+      _drawGiantSpider(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'skeleton') {
+      _drawSkeleton(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'cave_troll') {
+      _drawCaveTroll(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'stone_golem') {
+      _drawStoneGolem(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'undead_warrior') {
+      _drawUndeadWarrior(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'dragon_whelp') {
+      _drawDragonWhelp(ctx, x, y, w, h, bob, legBob, facingLeft);
     }
 
-    // Name tag
+    // Name tag — "Name (Lvl. X)", matching player label style
     const nameColor = this.aggressive ? '#e74c3c' : '#fff';
+    const label = `${name} (Lvl. ${this.combatLevel})`;
     ctx.fillStyle = nameColor;
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 2;
     ctx.font = 'bold 9px monospace';
     ctx.textAlign = 'center';
-    ctx.strokeText(name, x + w / 2, y - 4);
-    ctx.fillText(name, x + w / 2, y - 4);
+    ctx.strokeText(label, x + w / 2, y - 4);
+    ctx.fillText(label, x + w / 2, y - 4);
 
     // HP bar — always visible for combat mobs, only when damaged for passive
     if (hp < maxHp || this.inCombat) {
@@ -1363,6 +1467,275 @@ function _drawCoyote(ctx, x, y, w, h, bob, legBob, facingLeft) {
   ctx.fillRect(headX + (facingLeft ? 6 : 2), y + 3 - bob, 2, 2);
   ctx.fillStyle = '#111';
   ctx.fillRect(headX + (facingLeft ? 7 : 2), y + 3 - bob, 1, 1);
+}
+
+function _drawCaveRat(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Body — hunched brown rat
+  ctx.fillStyle = '#6b4a28';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.55-bob, w*.42, h*.3, 0.1, 0, Math.PI*2); ctx.fill();
+  // Head
+  ctx.fillStyle = '#7a5530';
+  ctx.beginPath(); ctx.ellipse(x+(facingLeft?w*.25:w*.75), y+h*.38-bob, w*.22, h*.22, 0, 0, Math.PI*2); ctx.fill();
+  // Ears
+  ctx.fillStyle = '#c07060';
+  const ex = facingLeft ? x+w*.18 : x+w*.82;
+  ctx.beginPath(); ctx.ellipse(ex, y+h*.22-bob, w*.08, h*.12, 0, 0, Math.PI*2); ctx.fill();
+  // Eyes
+  ctx.fillStyle = '#e04020';
+  ctx.beginPath(); ctx.arc(x+(facingLeft?w*.3:w*.7), y+h*.34-bob, 2, 0, Math.PI*2); ctx.fill();
+  // Tail
+  ctx.strokeStyle = '#8a6038'; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.moveTo(x+(facingLeft?w*.8:w*.2), y+h*.6-bob);
+  ctx.bezierCurveTo(x+(facingLeft?w*.9:w*.1), y+h*.55-bob, x+(facingLeft?w*.95:w*.05), y+h*.7-bob, x+(facingLeft?w*.85:w*.15), y+h*.8-bob);
+  ctx.stroke();
+  // Legs
+  ctx.fillStyle = '#5a3a18';
+  ctx.fillRect(x+w*.3-legBob, y+h*.7-bob, w*.1, h*.3);
+  ctx.fillRect(x+w*.6+legBob, y+h*.7-bob, w*.1, h*.3);
+}
+
+function _drawCaveBat(ctx, x, y, w, h, bob, _facingLeft) {
+  // Wings (animated based on bob)
+  const wingSpread = 0.3 + bob * 0.4;
+  ctx.fillStyle = '#3a2050';
+  // Left wing
+  ctx.beginPath();
+  ctx.moveTo(x+w*.5, y+h*.5-bob);
+  ctx.bezierCurveTo(x+w*.1, y+h*(0.3-wingSpread)-bob, x, y+h*.7-bob, x+w*.3, y+h*.65-bob);
+  ctx.fill();
+  // Right wing
+  ctx.beginPath();
+  ctx.moveTo(x+w*.5, y+h*.5-bob);
+  ctx.bezierCurveTo(x+w*.9, y+h*(0.3-wingSpread)-bob, x+w, y+h*.7-bob, x+w*.7, y+h*.65-bob);
+  ctx.fill();
+  // Body
+  ctx.fillStyle = '#2a1838';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.55-bob, w*.18, h*.25, 0, 0, Math.PI*2); ctx.fill();
+  // Head
+  ctx.fillStyle = '#3a2048';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.3-bob, w*.16, h*.18, 0, 0, Math.PI*2); ctx.fill();
+  // Ears
+  ctx.fillStyle = '#5a3068';
+  ctx.beginPath(); ctx.moveTo(x+w*.38, y+h*.22-bob); ctx.lineTo(x+w*.3, y+h*.05-bob); ctx.lineTo(x+w*.45, y+h*.18-bob); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x+w*.62, y+h*.22-bob); ctx.lineTo(x+w*.7, y+h*.05-bob); ctx.lineTo(x+w*.55, y+h*.18-bob); ctx.fill();
+  // Eyes
+  ctx.fillStyle = '#ff4040';
+  ctx.beginPath(); ctx.arc(x+w*.43, y+h*.29-bob, 2, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.57, y+h*.29-bob, 2, 0, Math.PI*2); ctx.fill();
+}
+
+function _drawGiantSpider(ctx, x, y, w, h, bob, _facingLeft) {
+  const cx2 = x+w*.5, cy2 = y+h*.5-bob;
+  // Legs (4 pairs)
+  ctx.strokeStyle = '#2a1808'; ctx.lineWidth = 2;
+  for (let i = 0; i < 4; i++) {
+    const side = i < 2 ? -1 : 1;
+    const angle = (i%2 === 0 ? -0.5 : 0.3) * (side < 0 ? -1 : 1);
+    ctx.beginPath();
+    ctx.moveTo(cx2 + side*w*.2, cy2);
+    ctx.lineTo(cx2 + side*w*.55, cy2 + Math.sin(angle)*h*.4-bob*0.5);
+    ctx.lineTo(cx2 + side*w*.8, cy2 + Math.sin(angle+0.4)*h*.6);
+    ctx.stroke();
+    // mirror pair
+    const a2 = (i%2 === 0 ? 0.4 : -0.2) * (side < 0 ? -1 : 1);
+    ctx.beginPath();
+    ctx.moveTo(cx2 + side*w*.2, cy2+h*.1);
+    ctx.lineTo(cx2 + side*w*.5, cy2 + Math.sin(a2)*h*.35+h*.2);
+    ctx.lineTo(cx2 + side*w*.75, cy2 + h*.5);
+    ctx.stroke();
+  }
+  // Abdomen
+  ctx.fillStyle = '#1a1008';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2+h*.1, w*.28, h*.28, 0, 0, Math.PI*2); ctx.fill();
+  // Abdomen markings
+  ctx.fillStyle = '#d05010';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2+h*.1, w*.12, h*.14, 0, 0, Math.PI*2); ctx.fill();
+  // Cephalothorax (head+thorax)
+  ctx.fillStyle = '#2a1808';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2-h*.1, w*.22, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  // Eyes (6 small red dots)
+  ctx.fillStyle = '#e04010';
+  for (let i = -2; i <= 2; i += 2) {
+    ctx.beginPath(); ctx.arc(cx2+i*w*.06, cy2-h*.16, 2, 0, Math.PI*2); ctx.fill();
+  }
+  // Fangs
+  ctx.fillStyle = '#e8e0a0';
+  ctx.fillRect(cx2-w*.08, cy2-h*.03, w*.05, h*.08);
+  ctx.fillRect(cx2+w*.03, cy2-h*.03, w*.05, h*.08);
+}
+
+function _drawSkeleton(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  const bone = '#d4c89a', joint = '#c8b888', dark = '#4a3a18';
+  // Legs
+  ctx.fillStyle = bone;
+  ctx.fillRect(x+w*.3-legBob, y+h*.6-bob, w*.12, h*.4);
+  ctx.fillRect(x+w*.58+legBob, y+h*.6-bob, w*.12, h*.4);
+  ctx.fillStyle = joint;
+  ctx.beginPath(); ctx.arc(x+w*.36, y+h*.6-bob, w*.08, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.64, y+h*.6-bob, w*.08, 0, Math.PI*2); ctx.fill();
+  // Ribcage
+  ctx.fillStyle = bone;
+  ctx.fillRect(x+w*.28, y+h*.3-bob, w*.44, h*.32);
+  for (let i = 0; i < 4; i++) {
+    ctx.fillStyle = dark;
+    ctx.fillRect(x+w*.32, y+h*.32-bob+i*h*.07, w*.36, h*.025);
+  }
+  // Arms
+  ctx.fillStyle = bone;
+  ctx.fillRect(x+w*.1, y+h*.3-bob, w*.14, h*.35);
+  ctx.fillRect(x+w*.76, y+h*.3-bob, w*.14, h*.35);
+  // Skull
+  ctx.fillStyle = '#e0d4a8';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.18-bob, w*.22, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  // Eye sockets
+  ctx.fillStyle = dark;
+  ctx.beginPath(); ctx.ellipse(x+w*.4, y+h*.16-bob, w*.07, h*.07, 0, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x+w*.6, y+h*.16-bob, w*.07, h*.07, 0, 0, Math.PI*2); ctx.fill();
+  // Jaw
+  ctx.fillStyle = bone;
+  ctx.fillRect(x+w*.35, y+h*.26-bob, w*.3, h*.05);
+  ctx.fillStyle = dark;
+  for (let i = 0; i < 4; i++) ctx.fillRect(x+w*.37+i*w*.065, y+h*.26-bob, w*.04, h*.04);
+}
+
+function _drawCaveTroll(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Huge muscular troll
+  ctx.fillStyle = '#4a6038';
+  // Legs
+  ctx.fillRect(x+w*.2-legBob, y+h*.6-bob, w*.22, h*.4);
+  ctx.fillRect(x+w*.58+legBob, y+h*.6-bob, w*.22, h*.4);
+  // Body
+  ctx.fillRect(x+w*.1, y+h*.25-bob, w*.8, h*.4);
+  ctx.fillStyle = '#5a7048';
+  ctx.fillRect(x+w*.15, y+h*.28-bob, w*.7, h*.2);
+  // Arms (huge)
+  ctx.fillStyle = '#4a6038';
+  ctx.fillRect(x-w*.05, y+h*.2-bob, w*.22, h*.5);
+  ctx.fillRect(x+w*.83, y+h*.2-bob, w*.22, h*.5);
+  // Fists
+  ctx.fillStyle = '#3a5028';
+  ctx.beginPath(); ctx.arc(x+w*.06, y+h*.68-bob, w*.12, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.94, y+h*.68-bob, w*.12, 0, Math.PI*2); ctx.fill();
+  // Head
+  ctx.fillStyle = '#4a6038';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.12-bob, w*.32, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  // Face
+  ctx.fillStyle = '#e06030';
+  ctx.beginPath(); ctx.arc(x+w*.38, y+h*.1-bob, w*.07, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.62, y+h*.1-bob, w*.07, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#d04020';
+  ctx.fillRect(x+w*.35, y+h*.18-bob, w*.3, h*.04);
+  // Tusks
+  ctx.fillStyle = '#f0e0a0';
+  ctx.fillRect(x+w*.36, y+h*.2-bob, w*.06, h*.1);
+  ctx.fillRect(x+w*.58, y+h*.2-bob, w*.06, h*.1);
+}
+
+function _drawStoneGolem(ctx, x, y, w, h, bob, _facingLeft) {
+  const stone = '#6a7278', dark = '#404850';
+  // Legs (thick stone pillars)
+  ctx.fillStyle = stone;
+  ctx.fillRect(x+w*.2, y+h*.58-bob, w*.22, h*.42);
+  ctx.fillRect(x+w*.58, y+h*.58-bob, w*.22, h*.42);
+  // Body (boulder)
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.38-bob, w*.4, h*.32, 0, 0, Math.PI*2); ctx.fill();
+  // Cracks
+  ctx.strokeStyle = dark; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(x+w*.3, y+h*.25-bob); ctx.lineTo(x+w*.45, y+h*.45-bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+w*.65, y+h*.3-bob); ctx.lineTo(x+w*.55, y+h*.5-bob); ctx.stroke();
+  // Arms (large stone blocks)
+  ctx.fillStyle = stone;
+  ctx.fillRect(x-w*.02, y+h*.22-bob, w*.2, h*.45);
+  ctx.fillRect(x+w*.82, y+h*.22-bob, w*.2, h*.45);
+  // Head (rough boulder)
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.1-bob, w*.25, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  // Glowing eyes
+  ctx.fillStyle = '#60a030';
+  ctx.beginPath(); ctx.arc(x+w*.41, y+h*.08-bob, w*.06, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.59, y+h*.08-bob, w*.06, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#a0ff60';
+  ctx.beginPath(); ctx.arc(x+w*.41, y+h*.08-bob, w*.03, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*.59, y+h*.08-bob, w*.03, 0, Math.PI*2); ctx.fill();
+}
+
+function _drawUndeadWarrior(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Decayed armour — dark metal with bone showing
+  ctx.fillStyle = '#2a2a38';
+  // Legs in armour
+  ctx.fillRect(x+w*.25-legBob, y+h*.58-bob, w*.18, h*.42);
+  ctx.fillRect(x+w*.57+legBob, y+h*.58-bob, w*.18, h*.42);
+  // Armoured body
+  ctx.fillRect(x+w*.18, y+h*.28-bob, w*.64, h*.34);
+  ctx.fillStyle = '#3a3a50';
+  ctx.fillRect(x+w*.22, y+h*.3-bob, w*.56, h*.18);
+  // Arms
+  ctx.fillStyle = '#2a2a38';
+  ctx.fillRect(x+w*.05, y+h*.28-bob, w*.16, h*.38);
+  ctx.fillRect(x+w*.79, y+h*.28-bob, w*.16, h*.38);
+  // Skull head with helmet
+  ctx.fillStyle = '#3a3a50';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.17-bob, w*.24, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#d4c89a';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.18-bob, w*.18, h*.16, 0, 0, Math.PI*2); ctx.fill();
+  // Dark eye sockets glowing purple
+  ctx.fillStyle = '#6020a0';
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.56:.44), y+h*.16-bob, w*.05, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.44:.56), y+h*.16-bob, w*.05, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#c060ff';
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.56:.44), y+h*.16-bob, w*.025, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.44:.56), y+h*.16-bob, w*.025, 0, Math.PI*2); ctx.fill();
+  // Sword hint
+  const sx2 = facingLeft ? x-w*.06 : x+w*.82;
+  ctx.fillStyle = '#808090';
+  ctx.fillRect(sx2, y+h*.3-bob, w*.08, h*.5);
+}
+
+function _drawDragonWhelp(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Young dragon — emerald green, small wings
+  const body = '#1a5a1a', light = '#2a8a2a';
+  // Tail
+  ctx.strokeStyle = body; ctx.lineWidth = w*.14;
+  ctx.beginPath();
+  ctx.moveTo(x+w*(facingLeft?.65:.35), y+h*.65-bob);
+  ctx.bezierCurveTo(x+w*(facingLeft?.85:.15), y+h*.7-bob, x+w*(facingLeft?.95:.05), y+h*.5-bob, x+w*(facingLeft?.9:.1), y+h*.38-bob);
+  ctx.stroke();
+  // Hind legs
+  ctx.fillStyle = body;
+  ctx.fillRect(x+w*.28-legBob, y+h*.62-bob, w*.16, h*.38);
+  ctx.fillRect(x+w*.56+legBob, y+h*.62-bob, w*.16, h*.38);
+  // Body
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.45-bob, w*.36, h*.3, 0, 0, Math.PI*2); ctx.fill();
+  // Belly (lighter)
+  ctx.fillStyle = '#2a7030';
+  ctx.beginPath(); ctx.ellipse(x+w*.5, y+h*.5-bob, w*.22, h*.2, 0, 0, Math.PI*2); ctx.fill();
+  // Wings (small, folded)
+  ctx.fillStyle = '#0e2a0e';
+  ctx.beginPath();
+  ctx.moveTo(x+w*.45, y+h*.28-bob);
+  ctx.bezierCurveTo(x+w*.2, y+h*.1-bob, x+w*.05, y+h*.35-bob, x+w*.3, y+h*.4-bob);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x+w*.55, y+h*.28-bob);
+  ctx.bezierCurveTo(x+w*.8, y+h*.1-bob, x+w*.95, y+h*.35-bob, x+w*.7, y+h*.4-bob);
+  ctx.fill();
+  // Neck + Head
+  ctx.fillStyle = body;
+  ctx.fillRect(x+w*(facingLeft?.35:.42), y+h*.12-bob, w*.2, h*.22);
+  ctx.beginPath(); ctx.ellipse(x+w*(facingLeft?.3:.7), y+h*.1-bob, w*.22, h*.16, facingLeft?.3:-.3, 0, Math.PI*2); ctx.fill();
+  // Spines on head
+  ctx.fillStyle = light;
+  for (let i = 0; i < 3; i++) {
+    ctx.beginPath(); ctx.moveTo(x+w*(facingLeft?.18+i*.08:.82-i*.08), y+h*.06-bob); ctx.lineTo(x+w*(facingLeft?.22+i*.08:.78-i*.08), y-h*.04-bob); ctx.lineTo(x+w*(facingLeft?.26+i*.08:.74-i*.08), y+h*.06-bob); ctx.fill();
+  }
+  // Eyes (amber)
+  ctx.fillStyle = '#d0a010';
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.22:.78), y+h*.07-bob, w*.05, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = '#201008';
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.22:.78), y+h*.07-bob, w*.025, 0, Math.PI*2); ctx.fill();
+  // Nostrils with fire glow
+  ctx.fillStyle = '#ff6010';
+  ctx.beginPath(); ctx.arc(x+w*(facingLeft?.12:.88), y+h*.11-bob, w*.03, 0, Math.PI*2); ctx.fill();
 }
 
 /* ── MobManager ─────────────────────────────────────── */

@@ -29,7 +29,7 @@ import { buildAllInteriors, buildPlayerHouse } from './interiors.js';
 import {
   HousingState, ROOM_DEFS, FURNITURE_DEFS,
   getUnlockedRoomDefs, getUnlockedFurnitureDefs,
-  cellInnerOrigin,
+  cellInnerOrigin, CELL_INNER,
   GRID_COLS, GRID_ROWS,
   BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
 } from './housing.js';
@@ -57,6 +57,7 @@ import { DungeonMasterNPC } from './dungeonMaster.js';
 import { RaidInstance } from './raidInstance.js';
 import { RAID_DEFS, RAID_DIFFICULTIES } from './raids.js';
 import { FarmingState, SEED_DEFS, PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
+import { buildAllDungeons } from './dungeons.js';
 
 const TILE_TOOLTIPS = {
   [TILES.TREE]:              'Tree — click to chop (need Axe)',
@@ -88,6 +89,7 @@ const TILE_TOOLTIPS = {
   [TILES.FARM_PATCH_SEEDED]:     'Crop planted — growing...',
   [TILES.FARM_PATCH_GROWING]:    'Crop growing — almost ready...',
   [TILES.FARM_PATCH_READY]:      'Crop ready! — click to harvest',
+  [TILES.DUNGEON_ENTRANCE]: '⚠ Dungeon Entrance — DANGEROUS. Walk onto it to descend.',
 };
 
 // Reverse lookup: item id string → item definition object
@@ -256,6 +258,9 @@ export class Game {
     this.raidSelectedDiff  = 0;   // index into RAID_DIFFICULTIES
     this.activeRaid        = null; // RaidInstance | null
     this.inRaid            = false;
+    this.inDungeon         = false;
+    this.activeDungeon     = null;
+    this.dungeons          = buildAllDungeons(); // Map<id, DungeonInstance>
     this.equipPanelOpen  = false;   // worn-items panel
     this.contextMenu     = null;    // { x, y, invSlot, options:[{label,cb}] }
 
@@ -302,10 +307,21 @@ export class Game {
 
     canvas.addEventListener('contextmenu', e => {
       e.preventDefault();
-      if (this.sidePanelTab !== 'inventory') return;
       const rect = canvas.getBoundingClientRect();
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
+
+      // Furniture removal — right-click on a placed item inside the player house
+      if (this.inInterior && this.activeMap.id === 'player_house') {
+        const worldPos = this.camera.screenToWorld(sx, sy);
+        const col = Math.floor(worldPos.x / TILE_SIZE);
+        const row = Math.floor(worldPos.y / TILE_SIZE);
+        const menu = this._buildHouseFurnitureContextMenu(sx, sy, col, row);
+        if (menu) { this.contextMenu = menu; return; }
+      }
+
+      // Default: inventory item context menu
+      if (this.sidePanelTab !== 'inventory') return;
       const idx = this._getInventorySlotAt(sx, sy);
       if (idx !== -1 && this.inventory.slots[idx]) {
         this.contextMenu = this._buildContextMenu(sx, sy, idx);
@@ -337,6 +353,32 @@ export class Game {
     this.combat.onPlayerDeath = () => {
       if (this.inRaid && this.activeRaid && !this.activeRaid.failed) {
         this.activeRaid.onPlayerDeath();
+      }
+
+      // Exit dungeon/interior so _respawnPlayer() lands in the overworld
+      if (this.inDungeon) {
+        this.inDungeon         = false;
+        this.activeDungeon     = null;
+        this.activeMap         = this.world;
+        this.player.world      = this.world;
+        this.actions.world     = this.world;
+        this.combat.mobManager = this.mobManager;
+        this.fadingOut         = false;
+        this.fadeAlpha         = 0;
+        this._fadeCallback     = null;
+        this.camera.setBounds();
+        this.transitionCooldown = 1.0;
+        this.notifications.add('You died in the dungeon and were carried to safety.', '#e74c3c');
+      } else if (this.inInterior) {
+        this.inInterior        = false;
+        this.activeMap         = this.world;
+        this.player.world      = this.world;
+        if (this.actions) this.actions.world = this.world;
+        this.fadingOut         = false;
+        this.fadeAlpha         = 0;
+        this._fadeCallback     = null;
+        this.camera.setBounds();
+        this.transitionCooldown = 1.0;
       }
     };
     // Hook: fired by combat.js each time the player takes damage
@@ -644,15 +686,18 @@ export class Game {
             this.clickDest = { col: fnCol, row: fnRow };
           }
         } else if (!this.inInterior) {
-          // ── World / raid: mob clicks & interactable tiles ──
-          const mobSource  = this.inRaid ? this.activeRaid : this.mobManager;
+          // ── World / raid / dungeon: mob clicks & interactable tiles ──
+          const navMap    = this.activeMap; // always use active map for pathfinding
+          const mobSource = this.inRaid    ? this.activeRaid
+                          : this.inDungeon ? this.activeDungeon
+                          :                  this.mobManager;
           const clickedMob = mobSource.getMobAt(worldPos.x, worldPos.y);
           if (clickedMob) {
             const mobCol = Math.floor(clickedMob.cx / TILE_SIZE);
             const mobRow = Math.floor(clickedMob.cy / TILE_SIZE);
-            const adj = nearestWalkableAdjacent(this.world, mobCol, mobRow, this.player.col, this.player.row);
+            const adj = nearestWalkableAdjacent(navMap, mobCol, mobRow, this.player.col, this.player.row);
             if (adj) {
-              this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+              this.player.setPath(findPath(navMap, this.player.col, this.player.row, adj.col, adj.row));
               this.pendingInteract = { type: 'combat', mob: clickedMob };
               this.clickDest = { col: mobCol, row: mobRow };
             } else {
@@ -663,15 +708,15 @@ export class Game {
                      && this.activeMap.getTile(clickCol, clickRow) !== TILES.ROCK_DEPLETED) {
             const solid = this.activeMap.isSolid(clickCol, clickRow);
             const target = solid
-              ? nearestWalkableAdjacent(this.activeMap, clickCol, clickRow, this.player.col, this.player.row)
+              ? nearestWalkableAdjacent(navMap, clickCol, clickRow, this.player.col, this.player.row)
               : { col: clickCol, row: clickRow };
             if (target) {
-              this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, target.col, target.row));
+              this.player.setPath(findPath(navMap, this.player.col, this.player.row, target.col, target.row));
               this.pendingInteract = { type: 'action', col: clickCol, row: clickRow, worldX: worldPos.x, worldY: worldPos.y };
               this.clickDest = { col: clickCol, row: clickRow };
             }
           } else {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, clickCol, clickRow));
+            this.player.setPath(findPath(navMap, this.player.col, this.player.row, clickCol, clickRow));
             this.clickDest = { col: clickCol, row: clickRow };
           }
         } else {
@@ -781,8 +826,13 @@ export class Game {
     // Interior transition triggers
     if (this.transitionCooldown <= 0) {
       const tile = this.activeMap.getTile(this.player.col, this.player.row);
-      if (!this.inInterior && !this.inRaid && tile === TILES.PORTAL) {
+      if (!this.inInterior && !this.inRaid && !this.inDungeon && tile === TILES.PORTAL) {
         this._beginTransition(() => this._enterInterior('player_house'));
+      } else if (!this.inInterior && !this.inRaid && !this.inDungeon && tile === TILES.DUNGEON_ENTRANCE) {
+        const dungId = this.world.dungeonMap?.get(`${this.player.col},${this.player.row}`);
+        if (dungId) this._enterDungeon(dungId);
+      } else if (this.inDungeon && tile === TILES.STAIRS) {
+        this._exitDungeon();
       } else if (this.inInterior && tile === TILES.STAIRS) {
         this._beginTransition(() => this._exitToWorld());
       }
@@ -978,6 +1028,9 @@ export class Game {
     if (!this.network && !this.inRaid) {
       this.mobManager.update(dt, this.world, this.player);
     }
+    if (this.inDungeon && this.activeDungeon) {
+      this.activeDungeon.update(dt, this.player);
+    }
 
     // ── Raid tick ──────────────────────────────────────────────────────────
     if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
@@ -1093,9 +1146,13 @@ export class Game {
         eb.length = 0;
         eb.push(this.player);
         for (const rv of this.remotePlayers.values()) eb.push(rv);
-        const _mobSrc = this.inRaid && this.activeRaid ? this.activeRaid.mobContainer.mobs : this.mobManager.mobs;
+        const _mobSrc = this.inRaid && this.activeRaid
+          ? this.activeRaid.mobContainer.mobs
+          : this.inDungeon && this.activeDungeon
+            ? this.activeDungeon.mobContainer.mobs
+            : this.mobManager.mobs;
         for (const m of _mobSrc) eb.push(m);
-        if (!this.inRaid) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
+        if (!this.inRaid && !this.inDungeon) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
         for (const t of treeSortables) eb.push(t);
         eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
@@ -1140,7 +1197,7 @@ export class Game {
     this.camera.end(ctx);
 
     // Screen-space UI
-    if (!this.inInterior && !this.inRaid) {
+    if (!this.inInterior && !this.inRaid && !this.inDungeon) {
       this.renderer.drawCircleMinimap(this.world, this.player);
     }
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
@@ -1239,7 +1296,18 @@ export class Game {
           } else {
             const hoverCol = Math.floor(worldPos.x / TILE_SIZE);
             const hoverRow = Math.floor(worldPos.y / TILE_SIZE);
-            tooltip = TILE_TOOLTIPS[this.activeMap.getTile(hoverCol, hoverRow)] || null;
+            const hoverTile = this.activeMap.getTile(hoverCol, hoverRow);
+            if (hoverTile === TILES.DUNGEON_ENTRANCE && this.world.dungeonMap) {
+              const dungeonId = this.world.dungeonMap.get(`${hoverCol},${hoverRow}`);
+              const DUNGEON_LABELS = {
+                'dungeon_goblin_cave':   '⚠ Goblin Cave — DANGEROUS (levels 5–25). Walk onto it to descend.',
+                'dungeon_spider_den':    '⚠ Spider Den — DANGEROUS (levels 25–45). Walk onto it to descend.',
+                'dungeon_ancient_mines': '⚠ Ancient Mines — DANGEROUS (levels 50–80). Walk onto it to descend.',
+              };
+              tooltip = (dungeonId && DUNGEON_LABELS[dungeonId]) || TILE_TOOLTIPS[TILES.DUNGEON_ENTRANCE];
+            } else {
+              tooltip = TILE_TOOLTIPS[hoverTile] || null;
+            }
           }
         }
       }
@@ -1275,7 +1343,7 @@ export class Game {
     this.notifications.drawMessages(ctx, this.canvas.height);
     this.notifications.drawXpDrops(ctx);
 
-    if (this.inInterior || this.inRaid) {
+    if (this.inInterior || this.inRaid || this.inDungeon) {
       this.renderer.drawInteriorHeader(this.activeMap.name);
     }
     this.renderer.drawFade(this.fadeAlpha);
@@ -1657,6 +1725,36 @@ export class Game {
         }
       }
     }
+  }
+
+  // ── Housing furniture removal ────────────────────────────────────────────
+
+  _buildHouseFurnitureContextMenu(sx, sy, col, row) {
+    for (const key of this.housingState.cells.keys()) {
+      const [gx, gy] = key.split(',').map(Number);
+      const io = cellInnerOrigin(gx, gy);
+      const localCol = col - io.col;
+      const localRow = row - io.row;
+      if (localCol < 0 || localRow < 0 || localCol >= CELL_INNER || localRow >= CELL_INNER) continue;
+      const found = this.housingState.furnitureAt(gx, gy, localCol, localRow);
+      if (!found) continue;
+      const fd = FURNITURE_DEFS[found.entry.defId];
+      if (!fd) continue;
+      return {
+        x: sx, y: sy,
+        options: [{
+          label: `Remove ${fd.name}`,
+          cb: () => {
+            this.housingState.removeFurniture(gx, gy, found.index);
+            this._rebuildPlayerHouse();
+            this.notifications.add(`Removed ${fd.name}.`, '#aaa');
+            this._saveToServer();
+            this.contextMenu = null;
+          },
+        }],
+      };
+    }
+    return null;
   }
 
   // ── Admin helper ────────────────────────────────────────────────────────
@@ -2240,10 +2338,23 @@ export class Game {
 
   /* ── Admin teleport panel ────────────────────────────── */
 
+  _getTpDestinations() {
+    const spawnC = Math.floor(this.world.cols / 2);
+    const spawnR = Math.floor(this.world.rows / 2) + 5;
+    return [
+      { id: 'Spawn',         c: spawnC,       r: spawnR,       type: 'spawn'   },
+      ...STRUCTURE_NODES,
+      { id: 'Goblin Cave',   c: spawnC + 15,  r: spawnR - 55,  type: 'dungeon' },
+      { id: 'Spider Den',    c: spawnC + 110, r: spawnR - 85,  type: 'dungeon' },
+      { id: 'Ancient Mines', c: spawnC + 265, r: spawnR + 145, type: 'dungeon' },
+    ];
+  }
+
   _adminTpPanelRect() {
     const ROW_H = 28;
     const PW = 240;
-    const PH = 36 + STRUCTURE_NODES.length * ROW_H + 8;
+    const dests = this._getTpDestinations();
+    const PH = 36 + dests.length * ROW_H + 8;
     const px = Math.floor((this.canvas.width - PW) / 2);
     const py = Math.floor((this.canvas.height - PH) / 2);
     return { px, py, PW, PH, ROW_H };
@@ -2379,11 +2490,11 @@ export class Game {
     ctx.textAlign = 'left';
 
     const TYPE_COLOR = {
-      village: '#27ae60', kingdom: '#e74c3c', watchtower: '#e67e22',
-      outpost: '#9b59b6', ruins: '#95a5a6',
+      spawn: '#f1c40f', village: '#27ae60', kingdom: '#e74c3c', watchtower: '#e67e22',
+      outpost: '#9b59b6', ruins: '#95a5a6', dungeon: '#a855f7',
     };
 
-    STRUCTURE_NODES.forEach((node, i) => {
+    this._getTpDestinations().forEach((node, i) => {
       const ry = py + 32 + i * ROW_H;
       const hover = this.mouseScreen.y >= ry && this.mouseScreen.y < ry + ROW_H
                  && this.mouseScreen.x >= px  && this.mouseScreen.x < px + PW;
@@ -2406,10 +2517,41 @@ export class Game {
       return;
     }
     const listY = py + 32;
+    const dests = this._getTpDestinations();
     const idx = Math.floor((sy - listY) / ROW_H);
-    if (idx < 0 || idx >= STRUCTURE_NODES.length) return;
+    if (idx < 0 || idx >= dests.length) return;
 
-    const node = STRUCTURE_NODES[idx];
+    const node = dests[idx];
+
+    // Exit any sub-map so teleport always lands in the overworld
+    if (this.inDungeon) {
+      this.inDungeon     = false;
+      this.activeDungeon = null;
+      this.activeMap     = this.world;
+      this.player.world  = this.world;
+      this.actions.world = this.world;
+      this.combat.mobManager = this.mobManager;
+      this.combat.clearTarget();
+      this.camera.setBounds(this.world.cols * TILE_SIZE, this.world.rows * TILE_SIZE);
+    } else if (this.inRaid) {
+      this.inRaid      = false;
+      this.activeRaid  = null;
+      this.activeMap   = this.world;
+      this.player.world  = this.world;
+      this.actions.world = this.world;
+      this.combat.mobManager = this.mobManager;
+      this.combat.clearTarget();
+      this.camera.setBounds(this.world.cols * TILE_SIZE, this.world.rows * TILE_SIZE);
+    } else if (this.inInterior) {
+      this.inInterior  = false;
+      this.activeMap   = this.world;
+    }
+
+    // Cancel any in-progress fade transition
+    this.fadingOut        = false;
+    this.fadeAlpha        = 0;
+    this._fadeCallback    = null;
+
     this.player.col = node.c;
     this.player.row = node.r;
     this.player.x   = node.c * TILE_SIZE + 4;
@@ -2418,7 +2560,10 @@ export class Game {
     this.player.moving  = false;
     this.player.targetCol = null;
     this.player.targetRow = null;
+    this.player.actionLocked = false;
+    this.transitionCooldown = 1.0; // prevent immediate portal/dungeon entry
     this.camera.snapTo(this.player.cx, this.player.cy);
+    this.showAdminTp = false;
     this.notifications.add(`Teleported to ${node.id}.`, '#f1c40f');
   }
 
@@ -2676,7 +2821,7 @@ export class Game {
     // If the player is in an interior or raid, save their world return position
     // instead of interior tile coords (which would place them at the wrong spot on restore).
     const worldSpawn = { col: 512, row: 390 };
-    const savePos = (this.inInterior || this.inRaid)
+    const savePos = (this.inInterior || this.inRaid || this.inDungeon)
       ? (this.returnPos ?? worldSpawn)
       : { col: this.player.col, row: this.player.row };
     const save = {
@@ -3198,6 +3343,70 @@ export class Game {
       this.camera.setBounds(); // reset to full world bounds
       this.camera.snapTo(this.player.cx, this.player.cy);
       this.transitionCooldown = 1.0;
+    });
+  }
+
+  _enterDungeon(dungeonId) {
+    const inst = this.dungeons.get(dungeonId);
+    if (!inst) return;
+
+    inst.spawnMobs();
+    this.returnPos = { col: this.player.col, row: this.player.row };
+
+    this._beginTransition(() => {
+      this.inDungeon         = true;
+      this.activeDungeon     = inst;
+      this.activeMap         = inst.map;
+      this.player.world      = inst.map;
+      this.actions.world     = inst.map;
+      this.combat.mobManager = inst.mobContainer;
+
+      this.player.col        = inst.map.entryCol;
+      this.player.row        = inst.map.entryRow;
+      this.player.x          = inst.map.entryCol * TILE_SIZE + 4;
+      this.player.y          = inst.map.entryRow * TILE_SIZE;
+      this.player.targetCol  = null;
+      this.player.targetRow  = null;
+      this.player.moveT      = 0;
+      this.player.moving     = false;
+      this.player.path       = [];
+
+      this.camera.setBounds(inst.map.cols * TILE_SIZE, inst.map.rows * TILE_SIZE);
+      this.camera.snapTo(this.player.cx, this.player.cy);
+      this.transitionCooldown = 1.0;
+      this.combat.clearTarget();
+      this.actions.cancel();
+      this.player.actionLocked = false;
+      this.notifications.add(`Entering ${inst.map.name}...`, '#b060e0');
+    });
+  }
+
+  _exitDungeon() {
+    this._beginTransition(() => {
+      this.inDungeon         = false;
+      this.activeDungeon     = null;
+      this.activeMap         = this.world;
+      this.player.world      = this.world;
+      this.actions.world     = this.world;
+      this.combat.mobManager = this.mobManager;
+      this.combat.clearTarget();
+      this.actions.cancel();
+
+      const spawn = this.returnPos ?? { col: Math.floor(1024/2), row: Math.floor(768/2)+5 };
+      this.player.col       = spawn.col;
+      this.player.row       = spawn.row;
+      this.player.x         = spawn.col * TILE_SIZE + 4;
+      this.player.y         = spawn.row * TILE_SIZE;
+      this.player.targetCol = null;
+      this.player.targetRow = null;
+      this.player.path      = [];
+      this.player.moving    = false;
+
+      this.camera.setBounds();
+      this.camera.snapTo(this.player.cx, this.player.cy);
+      this.transitionCooldown = 1.0;
+      this.player.actionLocked = false;
+      this.notifications.add('You emerge from the dungeon.', '#a080c0');
     });
   }
 

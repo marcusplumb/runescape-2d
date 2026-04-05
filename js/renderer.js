@@ -39,8 +39,23 @@ const ANIMATED_TILES = new Set([
 ]);
 // Prop tiles that don't fill their cell — rendered on top of the underlying ground tile
 const PROP_TILES = new Set([
+  // Structures / furniture
   TILES.BARREL, TILES.SIGN, TILES.FENCE, TILES.WELL,
   TILES.FURNACE, TILES.ANVIL,
+  TILES.FURN_CHAIR, TILES.FURN_RUG, TILES.FURN_TABLE,
+  TILES.FURN_CHEST, TILES.FURN_BOOKSHELF, TILES.FURN_PLANT,
+  TILES.FURN_BED, TILES.FURN_BENCH,
+  // Vegetation (sprites drawn on top of biome ground)
+  TILES.TREE, TILES.OAK_TREE, TILES.WILLOW_TREE, TILES.MAPLE_TREE,
+  TILES.YEW_TREE, TILES.MAGIC_TREE, TILES.ELDER_TREE,
+  TILES.STUMP, TILES.CACTUS, TILES.FLOWERS,
+  // Ore rocks
+  TILES.ROCK_COPPER, TILES.ROCK_TIN, TILES.ROCK_IRON, TILES.ROCK_COAL,
+  TILES.ROCK_SILVER, TILES.ROCK_GOLD, TILES.ROCK_MITHRIL,
+  TILES.ROCK_TUNGSTEN, TILES.ROCK_OBSIDIAN, TILES.ROCK_MOONSTONE,
+  TILES.ROCK_DEPLETED,
+  // Dungeon ladder (drawn on top of the stone floor inside the shrine)
+  TILES.DUNGEON_ENTRANCE,
 ]);
 const CHUNK_TILES = 16;                        // tiles per chunk side
 const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
@@ -1136,6 +1151,55 @@ export class Renderer {
       return;
     }
 
+    // ── Dungeon entrance — top-down ladder into darkness ──
+    if (tile === TILES.DUNGEON_ENTRANCE) {
+      // Stone frame (drawn over whatever propGroundMap ground was rendered)
+      ctx.fillStyle = '#706050';
+      ctx.fillRect(px, py, 32, 32);
+      ctx.fillStyle = '#504030';
+      ctx.fillRect(px+2, py+2, 28, 28);
+
+      // Dark pit — the hole in the floor
+      ctx.fillStyle = '#080404';
+      ctx.fillRect(px+4, py+4, 24, 24);
+
+      // Warm glow rising from below (torch/lantern light at the bottom of the shaft)
+      const grd = ctx.createRadialGradient(px+16, py+28, 0, px+16, py+28, 16);
+      grd.addColorStop(0, 'rgba(200,110,20,0.55)');
+      grd.addColorStop(0.6, 'rgba(140,60,10,0.2)');
+      grd.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grd; ctx.fillRect(px+4, py+4, 24, 24);
+
+      // Ladder side rails (dark wood)
+      ctx.fillStyle = '#5a3010';
+      ctx.fillRect(px+9,  py+4, 2, 24);
+      ctx.fillRect(px+21, py+4, 2, 24);
+      // Rail highlight edge
+      ctx.fillStyle = '#7a4820';
+      ctx.fillRect(px+9,  py+4, 1, 24);
+      ctx.fillRect(px+21, py+4, 1, 24);
+
+      // Ladder rungs — 5 evenly spaced
+      for (let i = 0; i < 5; i++) {
+        const ry = py + 5 + i * 5;
+        ctx.fillStyle = '#6b3c18';
+        ctx.fillRect(px+9, ry, 14, 2);
+        ctx.fillStyle = '#8a5228';  // top highlight
+        ctx.fillRect(px+9, ry, 14, 1);
+      }
+
+      // Frame top-edge highlight (lighter stone)
+      ctx.fillStyle = '#8a7060';
+      ctx.fillRect(px, py, 32, 1);
+      ctx.fillRect(px, py, 1, 32);
+      // Frame bottom-edge shadow
+      ctx.fillStyle = '#302018';
+      ctx.fillRect(px, py+31, 32, 1);
+      ctx.fillRect(px+31, py, 1, 32);
+
+      return;
+    }
+
     // ── Stairs ───────────────────────────────────────────
 
     if (tile === TILES.STAIRS) {
@@ -1875,14 +1939,13 @@ export class Renderer {
       return;
     }
 
-    // ── Furniture tiles (draw plank floor first, then directional sprite) ─
-    const FURN_TILES = new Set([
+    // ── Furniture tiles (floor drawn by PROP_TILES path; just draw the sprite) ─
+    const FURN_SET = new Set([
       TILES.FURN_CHAIR, TILES.FURN_RUG, TILES.FURN_TABLE,
       TILES.FURN_CHEST, TILES.FURN_BOOKSHELF, TILES.FURN_PLANT,
       TILES.FURN_BED, TILES.FURN_BENCH,
     ]);
-    if (FURN_TILES.has(tile)) {
-      this._drawTileDetail(ctx, TILES.PLANK, px, py, c, r, world);
+    if (FURN_SET.has(tile)) {
       const rot = world.getRotation ? world.getRotation(c, r) : 0;
       ctx.save();
       ctx.translate(px, py);
@@ -2263,11 +2326,6 @@ export class Renderer {
       const s = 20;
       const gx = gi.x - s / 2;
       const gy = gi.y - s / 2;
-      // Glow circle
-      ctx.fillStyle = 'rgba(255,220,0,0.18)';
-      ctx.beginPath();
-      ctx.arc(gi.x, gi.y, 14, 0, Math.PI * 2);
-      ctx.fill();
       // Item icon
       gi.item.draw(ctx, gx, gy, s);
       // Count badge

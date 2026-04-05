@@ -6,7 +6,7 @@
  * Entering: player walks onto TILES.DOOR in the world → fade → interior
  * Exiting:  player walks onto TILES.STAIRS in interior → fade → world
  */
-import { TILES, SOLID_TILES } from './constants.js';
+import { TILES, SOLID_TILES, TILE_SIZE } from './constants.js';
 import {
   ROOM_DEFS, FURNITURE_DEFS, rotatedFootprint,
   CELL_SIZE, CELL_INNER, GRID_ROWS,
@@ -37,6 +37,7 @@ export class InteriorMap {
     this.entryCol    = entryCol;
     this.entryRow    = entryRow;
     this.changedTiles = [];
+    this.propGroundMap = new Map(); // underlying floor tile for prop/furniture tiles
   }
 
   getTile(c, r) {
@@ -46,6 +47,17 @@ export class InteriorMap {
 
   isSolid(c, r) {
     return SOLID_TILES.has(this.getTile(c, r));
+  }
+
+  isBlocked(x, y, w, h) {
+    const c0 = Math.floor(x / TILE_SIZE);
+    const r0 = Math.floor(y / TILE_SIZE);
+    const c1 = Math.floor((x + w - 1) / TILE_SIZE);
+    const r1 = Math.floor((y + h - 1) / TILE_SIZE);
+    for (let r = r0; r <= r1; r++)
+      for (let c = c0; c <= c1; c++)
+        if (this.isSolid(c, r)) return true;
+    return false;
   }
 
   setTile(c, r, tile, rotation = 0) {
@@ -445,6 +457,8 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
     }
   }
 
+  const propGroundMap = new Map(); // floor tile under each furniture/patch position
+
   // ── Phase 3: place furniture tiles ────────────────────
   for (const [key, furList] of housingState.furniture) {
     const [gx, gy] = key.split(',').map(Number);
@@ -457,16 +471,16 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
         for (let dc = 0; dc < w; dc++) {
           const tc = io.col + f.localCol + dc;
           const tr = io.row + f.localRow + dr;
-          if (tc >= 0 && tc < W && tr >= 0 && tr < H)
+          if (tc >= 0 && tc < W && tr >= 0 && tr < H) {
+            propGroundMap.set(`${tc},${tr}`, t[tr * W + tc]);
             _set(t, W, tc, tr, fd.tileId);
+          }
         }
       }
     }
   }
 
   // ── Phase 3.5: farming patch tiles ────────────────────
-  // For each farming_plot cell, overlay fixed patch positions with the
-  // correct stage tile (derived from farmingState if provided).
   for (const [key, cell] of housingState.cells) {
     if (cell.typeId !== 'farming_plot') continue;
     const [gx, gy] = key.split(',').map(Number);
@@ -474,14 +488,15 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
     const patches = farmingState ? (farmingState.patches.get(key) ?? []) : [];
     for (let i = 0; i < PATCH_LOCAL_POSITIONS.length; i++) {
       const { localCol, localRow } = PATCH_LOCAL_POSITIONS[i];
+      const pc = io.col + localCol, pr = io.row + localRow;
       const patch = patches[i] ?? null;
       const stage = farmingState ? farmingState.getPatchStage(patch) : 0;
-      _set(t, W, io.col + localCol, io.row + localRow, GROW_STAGES[stage].tile);
+      propGroundMap.set(`${pc},${pr}`, t[pr * W + pc]);
+      _set(t, W, pc, pr, GROW_STAGES[stage].tile);
     }
   }
 
   // ── Phase 4: STAIRS exit ───────────────────────────────
-  // Southernmost owned cell in START_GX column
   let stairsGY = START_GY;
   for (let gy = START_GY + 1; gy < GRID_ROWS; gy++) {
     if (housingState.hasCell(START_GX, gy)) stairsGY = gy;
@@ -497,7 +512,9 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
   const entryC = eO.col + Math.floor(CELL_INNER / 2);
   const entryR = eO.row;
 
-  return new InteriorMap('player_house', 'My Home', W, H, t, entryC, entryR);
+  const map = new InteriorMap('player_house', 'My Home', W, H, t, entryC, entryR);
+  map.propGroundMap = propGroundMap;
+  return map;
 }
 
 /* ── Public factory ─────────────────────────────────── */

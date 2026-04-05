@@ -1721,6 +1721,70 @@ ITEMS.MAGIC_HERB = {
   },
 };
 
+ITEMS.ANCIENT_BONE = {
+  id: 'ancient_bone', name: 'Ancient Bone', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#d4c8a0';
+    ctx.fillRect(x+s*.3, y+s*.4, s*.4, s*.12);
+    ctx.fillRect(x+s*.45, y+s*.25, s*.1, s*.5);
+    ctx.fillStyle = '#c8ba8a';
+    ctx.beginPath(); ctx.arc(x+s*.3, y+s*.4, s*.08, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+s*.7, y+s*.4, s*.08, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+s*.45, y+s*.25, s*.07, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+s*.55, y+s*.75, s*.07, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.SILK_THREAD = {
+  id: 'silk_thread', name: 'Silk Thread', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.strokeStyle = '#e8e0d8';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x+s*.2+i*s*.15, y+s*.2);
+      ctx.bezierCurveTo(x+s*.1+i*s*.15, y+s*.5, x+s*.35+i*s*.15, y+s*.5, x+s*.25+i*s*.15, y+s*.8);
+      ctx.stroke();
+    }
+    ctx.fillStyle = '#c8c0b8';
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.12, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.STONE_CORE = {
+  id: 'stone_core', name: 'Stone Core', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#606870';
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#808a94';
+    ctx.beginPath(); ctx.arc(x+s*.44, y+s*.44, s*.18, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#505860';
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.1, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(160,180,200,0.5)';
+    ctx.beginPath(); ctx.arc(x+s*.41, y+s*.38, s*.06, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.DRAGON_SCALE = {
+  id: 'dragon_scale', name: 'Dragon Scale', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#1a4a1a';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.15);
+    ctx.bezierCurveTo(x+s*.75, y+s*.3, x+s*.8, y+s*.7, x+s*.5, y+s*.85);
+    ctx.bezierCurveTo(x+s*.2, y+s*.7, x+s*.25, y+s*.3, x+s*.5, y+s*.15);
+    ctx.fill();
+    ctx.fillStyle = '#2a7a2a';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.22);
+    ctx.bezierCurveTo(x+s*.68, y+s*.35, x+s*.72, y+s*.65, x+s*.5, y+s*.78);
+    ctx.bezierCurveTo(x+s*.28, y+s*.65, x+s*.32, y+s*.35, x+s*.5, y+s*.22);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(80,200,80,0.3)';
+    ctx.beginPath(); ctx.ellipse(x+s*.45, y+s*.45, s*.07, s*.2, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+
 /* ── Furniture helpers ───────────────────────────────── */
 
 function normalizeFurnitureFacing(facing) {

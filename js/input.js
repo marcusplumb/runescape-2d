@@ -28,11 +28,6 @@ export class Input {
 
     canvas.addEventListener('contextmenu', e => {
       e.preventDefault();
-      const rect = canvas.getBoundingClientRect();
-      this.click = {
-        screenX: e.clientX - rect.left,
-        screenY: e.clientY - rect.top,
-      };
     });
   }
 

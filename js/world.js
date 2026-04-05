@@ -21,12 +21,12 @@ function makeRng(seed) {
 // Ore rocks per biome, ascending rarity order
 const BIOME_ORES = {
   [BIOMES.PLAINS]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.FOREST]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN,    TILES.ROCK_IRON],
-  [BIOMES.TUNDRA]:   [TILES.ROCK_TIN,    TILES.ROCK_IRON,   TILES.ROCK_COAL,   TILES.ROCK_SILVER],
-  [BIOMES.SWAMP]:    [TILES.ROCK_COPPER, TILES.ROCK_TIN,    TILES.ROCK_COAL],
-  [BIOMES.DESERT]:   [TILES.ROCK_COPPER, TILES.ROCK_SILVER, TILES.ROCK_GOLD],
-  [BIOMES.VOLCANIC]: [TILES.ROCK_COAL,   TILES.ROCK_GOLD,   TILES.ROCK_MITHRIL,  TILES.ROCK_OBSIDIAN],
-  [BIOMES.DANGER]:   [TILES.ROCK_IRON,   TILES.ROCK_COAL,   TILES.ROCK_TUNGSTEN, TILES.ROCK_MITHRIL, TILES.ROCK_MOONSTONE],
+  [BIOMES.FOREST]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_IRON],
+  [BIOMES.TUNDRA]:   [TILES.ROCK_TIN,    TILES.ROCK_IRON, TILES.ROCK_COAL],
+  [BIOMES.SWAMP]:    [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_COAL],
+  [BIOMES.DESERT]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_IRON],
+  [BIOMES.VOLCANIC]: [TILES.ROCK_COAL,   TILES.ROCK_IRON, TILES.ROCK_TIN],
+  [BIOMES.DANGER]:   [TILES.ROCK_IRON,   TILES.ROCK_COAL, TILES.ROCK_TIN],
 };
 
 export class World {
@@ -131,6 +131,14 @@ export class World {
       }
     }
 
+    // propGroundMap records the tile underneath each prop so the renderer can
+    // draw the biome ground first, then the prop sprite on top.
+    this.propGroundMap = new Map();
+    const _setProp = (r, c, tile) => {
+      this.propGroundMap.set(`${c},${r}`, map[r][c]);
+      map[r][c] = tile;
+    };
+
     // ── Phase 2: Clustered vegetation ────────────────────
     // Trees and desert plants only grow where clusterNoise is above a
     // threshold — this creates dense patches with open clearings between.
@@ -143,36 +151,36 @@ export class World {
         if (biome === BIOMES.FOREST) {
           // Dense forest — trees fill high-cluster areas, but leave some clearings
           if ((t === TILES.DARK_GRASS || t === TILES.GRASS) && cn > 0.52 && rng() < 0.75) {
-            map[r][c] = TILES.TREE;
+            _setProp(r, c, TILES.TREE);
           }
         } else if (biome === BIOMES.TUNDRA) {
           // Sparse snow trees in patches
           if (t === TILES.SNOW && cn > 0.72 && rng() < 0.35) {
-            map[r][c] = TILES.TREE;
+            _setProp(r, c, TILES.TREE);
           }
         } else if (biome === BIOMES.SWAMP) {
           // Dead stumps in swamp — loose clusters
           if ((t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS) && cn > 0.62 && rng() < 0.25) {
-            map[r][c] = TILES.STUMP;
+            _setProp(r, c, TILES.STUMP);
           }
         } else if (biome === BIOMES.DESERT) {
           // Cacti — sparse, only in small tight clusters
           if ((t === TILES.SAND || t === TILES.SAND_DARK) && cn > 0.78 && rng() < 0.18) {
-            map[r][c] = TILES.CACTUS;
+            _setProp(r, c, TILES.CACTUS);
           }
         } else if (biome === BIOMES.DANGER || biome === BIOMES.VOLCANIC) {
           // No trees, only dead stumps occasionally
           if (t === TILES.DEAD_GRASS && cn > 0.76 && rng() < 0.10) {
-            map[r][c] = TILES.STUMP;
+            _setProp(r, c, TILES.STUMP);
           }
         } else {
           // Plains — moderate tree clusters with open clearings
           if ((t === TILES.GRASS || t === TILES.DARK_GRASS) && cn > 0.65 && rng() < 0.55) {
-            map[r][c] = TILES.TREE;
+            _setProp(r, c, TILES.TREE);
           }
           // Flowers only in open grass, away from tree clusters
           if (t === TILES.GRASS && cn < 0.35 && rng() < 0.12) {
-            map[r][c] = TILES.FLOWERS;
+            _setProp(r, c, TILES.FLOWERS);
           }
         }
       }
@@ -254,10 +262,10 @@ export class World {
           // Pick ore: weight toward rarer ores at the high end of cluster density
           const roll = (rk - threshold) / (1 - threshold); // 0..1 within cluster
           const idx  = Math.min(ores.length - 1, Math.floor(Math.pow(roll, 1.6) * ores.length));
-          map[r][c] = ores[idx];
+          _setProp(r, c, ores[idx]);
         } else if (groundBase && rk > 0.93 && rng() < 0.04 && ores.length > 0) {
           // Very occasional isolated surface outcrop on open ground
-          map[r][c] = ores[0]; // only the most common ore type
+          _setProp(r, c, ores[0]);
         }
       }
     }
@@ -295,7 +303,7 @@ export class World {
 
     // ── Phase 6: Structures and roads ────────────────────
     this.doorMap = placeAllStructures(map, this.rows, this.cols, rng);
-    this.propGroundMap = new Map(); // underlying tile for transparent props
+    this.dungeonMap    = new Map();
     this.roofBounds    = [];        // { c, r, rW, rH, bC, bR, bW, bH } per roofed building
     this.signLabels    = new Map(); // "col,row" → text label rendered on that SIGN tile
 
@@ -323,6 +331,9 @@ export class World {
 
     // ── Phase 9: Fishing harbour ────────────────────────
     this._placeFishingHarbor(map);
+
+    // ── Phase 10: Dungeon entrances ──────────────────────
+    this._placeDungeons(map, spawnC, spawnR);
 
     return map;
   }
@@ -640,6 +651,44 @@ export class World {
         if (r >= 0 && r < this.rows && c >= 0 && c < this.cols && map[r][c] !== TILES.WATER)
           map[r][c] = TILES.GRASS;
       }
+    }
+  }
+
+  _placeDungeons(map, spawnC, spawnR) {
+    const entries = [
+      { id: 'dungeon_goblin_cave',   col: spawnC + 15,  row: spawnR - 55  },
+      { id: 'dungeon_spider_den',    col: spawnC + 110, row: spawnR - 85  },
+      { id: 'dungeon_ancient_mines', col: spawnC + 265, row: spawnR + 145 },
+    ];
+    for (const { id, col, row } of entries) {
+      const c = Math.max(4, Math.min(this.cols - 5, col));
+      const r = Math.max(3, Math.min(this.rows - 4, row));
+
+      // 7×5 stone shrine around the entrance ladder
+      // Layout (dc = -3..+3, dr = -2..+2):
+      //   top row:     W W W W W W W
+      //   rows -1..+1: W S S S S S W  (stone floor, side walls)
+      //   bottom row:  W W D D D W W  (D = dirt opening, player approaches from south)
+      for (let dr = -2; dr <= 2; dr++) {
+        for (let dc = -3; dc <= 3; dc++) {
+          const tc = c + dc, tr = r + dr;
+          if (tc < 0 || tr < 0 || tc >= this.cols || tr >= this.rows) continue;
+          const isPerimeter = dr === -2
+                            || dc === -3 || dc === 3
+                            || (dr === 2 && Math.abs(dc) >= 2);
+          const isOpeningBottom = dr === 2 && Math.abs(dc) <= 1;
+          if (isOpeningBottom) {
+            map[tr][tc] = TILES.DIRT;
+          } else {
+            map[tr][tc] = isPerimeter ? TILES.WALL : TILES.STONE;
+          }
+        }
+      }
+
+      // Ladder tile (DUNGEON_ENTRANCE) at shrine centre
+      map[r][c] = TILES.DUNGEON_ENTRANCE;
+      this.propGroundMap.set(`${c},${r}`, TILES.STONE);
+      this.dungeonMap.set(`${c},${r}`, id);
     }
   }
 
