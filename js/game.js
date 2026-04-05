@@ -15,6 +15,10 @@ import { Combat } from './combat.js';
 import { ShopKeeper, SHOP_STOCK, SELL_PRICES, SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
   HouseShopKeeper, HOUSE_SHOP_STOCK, HOUSE_SHOP_PW, HOUSE_SHOP_PH, HOUSE_SHOP_HEADER_H, HOUSE_SHOP_ROW_H,
   SmithyKeeper, SMITHY_STOCK,
+  ButcherKeeper, BUTCHER_STOCK, BUTCHER_SELL_PRICES,
+  WeaponKeeper,  WEAPON_SHOP_STOCK, WEAPON_SELL_PRICES,
+  VarietyKeeper, VARIETY_STOCK, VARIETY_SELL_PRICES,
+  CapeKeeper,    CAPE_STOCK, CAPE_SELL_PRICES,
 } from './shop.js';
 import {
   MakoverNPC,
@@ -69,8 +73,6 @@ const TILE_TOOLTIPS = {
   [TILES.MAGIC_TREE]:        'Magic Tree — click to chop (level 75)',
   [TILES.ELDER_TREE]:        'Elder Tree — click to chop (level 90)',
   [TILES.FISH_SPOT]:         'Fishing spot — click to fish (need Rod)',
-  [TILES.FISH_SPOT_SALMON]:  'Salmon spot — click to fish (need Rod)',
-  [TILES.FISH_SPOT_LOBSTER]: 'Lobster spot — click to fish (need Rod)',
   [TILES.FIRE]:              'Fire — click to cook',
   [TILES.STUMP]:             'Stump — click with Logs + Tinderbox to light',
   [TILES.ROCK_COPPER]:       'Copper Rock — click to mine',
@@ -128,9 +130,10 @@ export class Game {
     this.shopKeeper      = new ShopKeeper();
     this.smithyKeeper    = new SmithyKeeper();
     this.makoverNpc      = new MakoverNPC();
-    this.fishermanNpc    = new FishermanNPC();
-    this.fishermanOpen   = false;
-    this.fishermanTab    = 'guide';
+    this.fishermanNpc     = new FishermanNPC();
+    this.fishermanOpen    = false;
+    this.fishermanTab     = 'guide';
+    this.fishermanScrolls = { guide: 0, records: 0, buy: 0, sell: 0 };
     this.dungeonMaster   = new DungeonMasterNPC();
     this.fishingRecords  = makeFishingRecords();
     this.actions.fishingRecords = this.fishingRecords;
@@ -228,6 +231,15 @@ export class Game {
     this.shopTab       = 'buy';
     this.smithyShopOpen = false;
     this.smithyShopTab  = 'buy';
+    // Kingdom shop NPCs
+    this.butcherKeeper  = new ButcherKeeper();
+    this.weaponKeeper   = new WeaponKeeper();
+    this.varietyKeeper  = new VarietyKeeper();
+    this.capeKeeper     = new CapeKeeper();
+    this.butcherShopOpen  = false;  this.butcherShopTab  = 'buy';
+    this.weaponShopOpen   = false;  this.weaponShopTab   = 'buy';
+    this.varietyShopOpen  = false;  this.varietyShopTab  = 'buy';
+    this.capeShopOpen     = false;  this.capeShopTab     = 'buy';
     this.houseShopOpen = false;
     this.houseShopKeeper = new HouseShopKeeper();
     this.placingFurniture = null; // { item, slotIndex } when in furniture placement mode
@@ -403,6 +415,10 @@ export class Game {
       if (this.skillInfoSkill !== null) {
         e.preventDefault();
         this.skillInfoScroll = Math.max(0, this.skillInfoScroll + e.deltaY);
+      } else if (this.fishermanOpen) {
+        e.preventDefault();
+        const tab = this.fishermanTab;
+        this.fishermanScrolls[tab] = Math.max(0, (this.fishermanScrolls[tab] || 0) + e.deltaY);
       }
     }, { passive: false });
 
@@ -595,6 +611,14 @@ export class Game {
         this.smithyShopOpen = false;
       } else if (this.shopOpen) {
         this.shopOpen = false;
+      } else if (this.butcherShopOpen) {
+        this.butcherShopOpen = false;
+      } else if (this.weaponShopOpen) {
+        this.weaponShopOpen = false;
+      } else if (this.varietyShopOpen) {
+        this.varietyShopOpen = false;
+      } else if (this.capeShopOpen) {
+        this.capeShopOpen = false;
       } else if (this.makoverOpen) {
         this.makoverOpen = false;
       } else if (this.fishermanOpen) {
@@ -668,6 +692,14 @@ export class Game {
         this._handleSmithyShopClick(click.screenX, click.screenY);
       } else if (this.shopOpen) {
         this._handleShopClick(click.screenX, click.screenY);
+      } else if (this.butcherShopOpen) {
+        this._handleKingdomShopClick(click.screenX, click.screenY, 'butcher');
+      } else if (this.weaponShopOpen) {
+        this._handleKingdomShopClick(click.screenX, click.screenY, 'weapon');
+      } else if (this.varietyShopOpen) {
+        this._handleKingdomShopClick(click.screenX, click.screenY, 'variety');
+      } else if (this.capeShopOpen) {
+        this._handleKingdomShopClick(click.screenX, click.screenY, 'cape');
       } else if (this.makoverOpen) {
         this._handleMakeoverClick(click.screenX, click.screenY);
       } else if (this.fishermanOpen) {
@@ -753,6 +785,26 @@ export class Game {
             this.pendingInteract = { type: 'fisherman', col: fnCol, row: fnRow };
             this.clickDest = { col: fnCol, row: fnRow };
           }
+        } else if (!this.inInterior && this.butcherKeeper.containsWorld(worldPos.x, worldPos.y)) {
+          const col = Math.floor((this.butcherKeeper.x + this.butcherKeeper.w / 2) / TILE_SIZE);
+          const row = Math.floor((this.butcherKeeper.y + this.butcherKeeper.h / 2) / TILE_SIZE);
+          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'butcher', col, row }; this.clickDest = { col, row }; }
+        } else if (!this.inInterior && this.weaponKeeper.containsWorld(worldPos.x, worldPos.y)) {
+          const col = Math.floor((this.weaponKeeper.x + this.weaponKeeper.w / 2) / TILE_SIZE);
+          const row = Math.floor((this.weaponKeeper.y + this.weaponKeeper.h / 2) / TILE_SIZE);
+          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'weapon_shop', col, row }; this.clickDest = { col, row }; }
+        } else if (!this.inInterior && this.varietyKeeper.containsWorld(worldPos.x, worldPos.y)) {
+          const col = Math.floor((this.varietyKeeper.x + this.varietyKeeper.w / 2) / TILE_SIZE);
+          const row = Math.floor((this.varietyKeeper.y + this.varietyKeeper.h / 2) / TILE_SIZE);
+          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'variety_shop', col, row }; this.clickDest = { col, row }; }
+        } else if (!this.inInterior && this.capeKeeper.containsWorld(worldPos.x, worldPos.y)) {
+          const col = Math.floor((this.capeKeeper.x + this.capeKeeper.w / 2) / TILE_SIZE);
+          const row = Math.floor((this.capeKeeper.y + this.capeKeeper.h / 2) / TILE_SIZE);
+          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'cape_shop', col, row }; this.clickDest = { col, row }; }
         } else if (!this.inInterior) {
           // ── World / raid / dungeon: mob clicks & interactable tiles ──
           const navMap    = this.activeMap; // always use active map for pathfinding
@@ -937,6 +989,14 @@ export class Game {
         if (dist <= 2.5) {
           this.fishermanOpen = true;
         }
+      } else if (pi.type === 'butcher') {
+        if (Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row) <= 2) this.butcherShopOpen = true;
+      } else if (pi.type === 'weapon_shop') {
+        if (Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row) <= 2) this.weaponShopOpen = true;
+      } else if (pi.type === 'variety_shop') {
+        if (Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row) <= 2) this.varietyShopOpen = true;
+      } else if (pi.type === 'cape_shop') {
+        if (Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row) <= 2) this.capeShopOpen = true;
       } else if (pi.type === 'action') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) {
@@ -964,7 +1024,7 @@ export class Game {
             const t = this.activeMap.getTile(pi.col, pi.row);
             if (TREE_TILES.has(t))
               this.player.currentAction = 'chop';
-            else if (t === TILES.FISH_SPOT || t === TILES.FISH_SPOT_SALMON || t === TILES.FISH_SPOT_LOBSTER)
+            else if (t === TILES.FISH_SPOT)
               this.player.currentAction = 'fish';
             else if (t === TILES.ROCK_COPPER || t === TILES.ROCK_TIN || t === TILES.ROCK_IRON ||
                      t === TILES.ROCK_COAL   || t === TILES.ROCK_SILVER || t === TILES.ROCK_GOLD ||
@@ -1220,7 +1280,7 @@ export class Game {
             ? this.activeDungeon.mobContainer.mobs
             : this.mobManager.mobs;
         for (const m of _mobSrc) eb.push(m);
-        if (!this.inRaid && !this.inDungeon) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.fishermanNpc, this.dungeonMaster);
+        if (!this.inRaid && !this.inDungeon) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.dungeonMaster, this.butcherKeeper, this.fishermanNpc, this.weaponKeeper, this.varietyKeeper, this.capeKeeper);
         for (const t of treeSortables) eb.push(t);
         eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
@@ -1238,8 +1298,12 @@ export class Game {
         this.renderer.drawRoofOverlays(this.activeMap, this.camera.x, this.camera.y, this.player.col, this.player.row);
       } else {
         // Interior: draw player + any interior-specific NPCs
-        if (this.activeMap.id === 'player_house') {
-          const entities = [this.player, this.houseShopKeeper];
+        const _intId = this.activeMap.id;
+        let _intNpc = null;
+        if (_intId === 'player_house') _intNpc = this.houseShopKeeper;
+
+        if (_intNpc) {
+          const entities = [this.player, _intNpc];
           entities.sort((a, b) => (a.y + a.h) - (b.y + b.h));
           for (const e of entities) e.draw(ctx);
         } else {
@@ -1304,7 +1368,19 @@ export class Game {
       this.renderer.drawShopPanel(this.shopTab, SHOP_STOCK, this.inventory);
     }
     if (this.smithyShopOpen) {
-      this.renderer.drawShopPanel(this.smithyShopTab, SMITHY_STOCK, this.inventory);
+      this.renderer.drawShopPanel(this.smithyShopTab, SMITHY_STOCK, this.inventory, 'Weapon Salesman');
+    }
+    if (this.butcherShopOpen) {
+      this.renderer.drawShopPanel(this.butcherShopTab, BUTCHER_STOCK, this.inventory, 'Butcher Shop');
+    }
+    if (this.weaponShopOpen) {
+      this.renderer.drawShopPanel(this.weaponShopTab, WEAPON_SHOP_STOCK, this.inventory, 'Weaponsmith');
+    }
+    if (this.varietyShopOpen) {
+      this.renderer.drawShopPanel(this.varietyShopTab, VARIETY_STOCK, this.inventory, 'Variety Shop');
+    }
+    if (this.capeShopOpen) {
+      this.renderer.drawShopPanel(this.capeShopTab, CAPE_STOCK, this.inventory, 'Cape Merchant');
     }
     if (this.houseShopOpen) {
       this.renderer.drawHouseShopPanel(HOUSE_SHOP_STOCK, this.inventory);
@@ -1352,7 +1428,15 @@ export class Game {
       } else if (this.makoverNpc.containsWorld(worldPos.x, worldPos.y)) {
         tooltip = 'Makeover Mage — click to customise your character';
       } else if (this.fishermanNpc.containsWorld(worldPos.x, worldPos.y)) {
-        tooltip = 'Fisherman — click to trade & view records';
+        tooltip = 'Fishmonger — click to trade & view records';
+      } else if (this.butcherKeeper.containsWorld(worldPos.x, worldPos.y)) {
+        tooltip = 'Butcher — click to buy meats';
+      } else if (this.weaponKeeper.containsWorld(worldPos.x, worldPos.y)) {
+        tooltip = 'Weaponsmith — click to buy weapons & armour';
+      } else if (this.varietyKeeper.containsWorld(worldPos.x, worldPos.y)) {
+        tooltip = 'Variety Shop — click to trade';
+      } else if (this.capeKeeper.containsWorld(worldPos.x, worldPos.y)) {
+        tooltip = 'Cape Merchant — click to buy capes';
       } else {
         // Check mob hover
         const hoveredMob = this.mobManager.getMobAt(worldPos.x, worldPos.y);
@@ -2033,6 +2117,49 @@ export class Game {
     }
   }
 
+  _handleKingdomShopClick(sx, sy, shopType) {
+    const SHOP_CFG = {
+      butcher:  { openFlag: 'butcherShopOpen',  tabFlag: 'butcherShopTab',  stock: BUTCHER_STOCK,     prices: BUTCHER_SELL_PRICES  },
+      weapon:   { openFlag: 'weaponShopOpen',   tabFlag: 'weaponShopTab',   stock: WEAPON_SHOP_STOCK, prices: WEAPON_SELL_PRICES   },
+      variety:  { openFlag: 'varietyShopOpen',  tabFlag: 'varietyShopTab',  stock: VARIETY_STOCK,     prices: VARIETY_SELL_PRICES  },
+      cape:     { openFlag: 'capeShopOpen',     tabFlag: 'capeShopTab',     stock: CAPE_STOCK,        prices: CAPE_SELL_PRICES     },
+    };
+    const cfg = SHOP_CFG[shopType];
+    if (!cfg) return;
+    const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
+    const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
+    if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
+      this[cfg.openFlag] = false;
+      return;
+    }
+    const tabY = py + SHOP_HEADER_H;
+    const tabW = Math.floor(SHOP_PW / 2) - 8;
+    if (sy >= tabY && sy <= tabY + SHOP_TAB_H) {
+      if (sx >= px + 4 && sx <= px + 4 + tabW) this[cfg.tabFlag] = 'buy';
+      else if (sx >= px + SHOP_PW / 2 + 4)     this[cfg.tabFlag] = 'sell';
+      return;
+    }
+    const contentY = tabY + SHOP_TAB_H;
+    if (sy < contentY) return;
+    const row  = Math.floor((sy - contentY) / SHOP_ROW_H);
+    const btnX = px + SHOP_PW - 64;
+    if (sx < btnX) return;
+    if (this[cfg.tabFlag] === 'buy') {
+      if (row < cfg.stock.length) this._buyItem(cfg.stock[row]);
+    } else {
+      const sellable = this.inventory.slots.filter(s => s && cfg.prices[s.item.id] !== undefined);
+      if (row < sellable.length) {
+        const slot  = sellable[row];
+        const price = cfg.prices[slot.item.id];
+        const qty   = slot.item.stackable ? slot.qty : 1;
+        this.inventory.remove(slot.item.id, qty);
+        this.inventory.add(ITEMS.GOLD_COIN, price * qty);
+        const suffix = qty > 1 ? ` x${qty}` : '';
+        this.notifications.add(`Sold ${slot.item.name}${suffix} for ${price * qty}g`, '#f1c40f');
+      }
+    }
+  }
+
   _handleMakeoverClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - MO_PW) / 2);
     const py = Math.floor((this.canvas.height - MO_PH) / 2);
@@ -2098,7 +2225,8 @@ export class Game {
     }
     const contentY = tabY + FISH_TAB_H;
     if (sy < contentY) return;
-    const row    = Math.floor((sy - contentY) / FISH_ROW_H);
+    const scroll = this.fishermanScrolls[this.fishermanTab] || 0;
+    const row    = Math.floor((sy - contentY + scroll) / FISH_ROW_H);
     const btnX   = px + FISH_PW - 64;
     if (sx < btnX) return;
 
@@ -2202,30 +2330,53 @@ export class Game {
     ctx.lineTo(px + FISH_PW - 8, contentY);
     ctx.stroke();
 
-    const fishLevel = this.skills.getLevel(SKILL_IDS.FISHING);
+    const fishLevel  = this.skills.getLevel(SKILL_IDS.FISHING);
+    const VIEWPORT_H = FISH_PH - FISH_HEADER_H - FISH_TAB_H;
+    const SCROLL_W   = 8;
 
-    // ── Tab content ───────────────────────────────────────
+    // Compute total scrollable height for current tab
+    const sellable = this._getFishSellableSlots();
+    // records: title(12) + gap(28) + 4 stats(96) + gap(8) + divider(1) + col header(28) + species rows
+    const RECORDS_HEADER_H = 12 + 28 + 4 * 24 + 8 + 1 + 28;
+    let totalH;
+    if      (this.fishermanTab === 'guide')   totalH = FISH_SPECIES.length * FISH_ROW_H;
+    else if (this.fishermanTab === 'records') totalH = RECORDS_HEADER_H + FISH_SPECIES.length * 20;
+    else if (this.fishermanTab === 'buy')     totalH = FISH_SHOP_STOCK.length * FISH_ROW_H;
+    else                                      totalH = Math.max(FISH_ROW_H, sellable.length * FISH_ROW_H);
+
+    const maxScroll = Math.max(0, totalH - VIEWPORT_H);
+    const scroll    = Math.max(0, Math.min(this.fishermanScrolls[this.fishermanTab] || 0, maxScroll));
+    this.fishermanScrolls[this.fishermanTab] = scroll;
+
+    // Width of the content area (shrink by scrollbar if needed)
+    const contentW = FISH_PW - 8 - (maxScroll > 0 ? SCROLL_W + 4 : 0);
+
+    // Clip to content viewport
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px + 4, contentY, contentW, VIEWPORT_H);
+    ctx.clip();
+
+    // ── Tab content (scroll-offset applied to ry) ─────────
     if (this.fishermanTab === 'guide') {
       for (let i = 0; i < FISH_SPECIES.length; i++) {
         const sp  = FISH_SPECIES[i];
-        const ry  = contentY + i * FISH_ROW_H;
+        const ry  = contentY + i * FISH_ROW_H - scroll;
+        if (ry + FISH_ROW_H < contentY || ry > contentY + VIEWPORT_H) continue;
         const rec = this.fishingRecords.bySpecies[sp.id];
         const unlocked = fishLevel >= sp.minLevel;
 
-        // Row alt shading
         if (i % 2 === 0) {
           ctx.fillStyle = 'rgba(255,255,255,0.03)';
-          ctx.fillRect(px + 4, ry, FISH_PW - 8, FISH_ROW_H - 1);
+          ctx.fillRect(px + 4, ry, contentW, FISH_ROW_H - 1);
         }
 
-        // Fish colour swatch
         ctx.fillStyle = unlocked ? sp.color : '#333';
         ctx.fillRect(px + 10, ry + 8, 24, 24);
         ctx.strokeStyle = '#2a4a6a';
         ctx.lineWidth = 1;
         ctx.strokeRect(px + 10, ry + 8, 24, 24);
 
-        // Name + rarity
         ctx.fillStyle = unlocked ? '#ddd' : '#555';
         ctx.font = 'bold 12px monospace';
         ctx.textAlign = 'left';
@@ -2234,35 +2385,32 @@ export class Game {
         ctx.font = '10px monospace';
         ctx.fillText(sp.rarity, px + 42, ry + 33);
 
-        // Level requirement
         ctx.fillStyle = unlocked ? '#27ae60' : '#c0392b';
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText(`Lv.${sp.minLevel}`, px + 155, ry + 22);
+        ctx.fillText(`Lv.${sp.minLevel}`, px + 148, ry + 22);
 
-        // Weight range
         ctx.fillStyle = '#aaa';
         ctx.font = '10px monospace';
-        ctx.fillText(`${sp.wMin}–${sp.wMax}kg`, px + 220, ry + 22);
+        ctx.fillText(`${sp.wMin}–${sp.wMax}kg`, px + 210, ry + 22);
 
-        // XP
         ctx.fillStyle = '#f1c40f';
-        ctx.fillText(`${sp.xp} XP`, px + 295, ry + 22);
+        ctx.fillText(`${sp.xp} XP`, px + 280, ry + 22);
 
-        // Personal best
         const pb = rec && rec.heaviest > 0 ? `PB: ${rec.heaviest}kg` : '—';
         ctx.fillStyle = rec && rec.heaviest > 0 ? '#27ae60' : '#444';
-        ctx.fillText(pb, px + 370, ry + 22);
+        ctx.fillText(pb, px + 350, ry + 22);
 
-        // Catch count
         const cnt = rec ? rec.count : 0;
         ctx.fillStyle = cnt > 0 ? '#3498db' : '#333';
         ctx.textAlign = 'right';
-        ctx.fillText(`×${cnt}`, px + FISH_PW - 12, ry + 22);
+        ctx.fillText(`×${cnt}`, px + contentW + 4, ry + 22);
       }
+
     } else if (this.fishermanTab === 'records') {
       const rec = this.fishingRecords;
-      let ry = contentY + 12;
+      let ry = contentY + 12 - scroll;
+
       ctx.fillStyle = '#3498db';
       ctx.font = 'bold 13px monospace';
       ctx.textAlign = 'left';
@@ -2270,12 +2418,12 @@ export class Game {
       ry += 28;
 
       const stats = [
-        ['Total Caught',       `${rec.totalCaught} fish`],
-        ['Total Weight',       `${rec.totalWeight.toFixed(1)} kg`],
-        ['Personal Best',      rec.personalBest
+        ['Total Caught',  `${rec.totalCaught} fish`],
+        ['Total Weight',  `${rec.totalWeight.toFixed(1)} kg`],
+        ['Personal Best', rec.personalBest
           ? `${rec.personalBest.name} — ${rec.personalBest.weight}kg`
           : 'None yet'],
-        ['Fishing Level',      `${fishLevel}`],
+        ['Fishing Level', `${fishLevel}`],
       ];
       for (const [label, value] of stats) {
         ctx.fillStyle = '#666';
@@ -2284,41 +2432,43 @@ export class Game {
         ctx.fillStyle = '#ddd';
         ctx.font = 'bold 11px monospace';
         ctx.textAlign = 'right';
-        ctx.fillText(value, px + FISH_PW - 16, ry);
+        ctx.fillText(value, px + contentW + 4, ry);
         ctx.textAlign = 'left';
         ry += 24;
       }
 
-      // Per-species table
       ry += 8;
       ctx.strokeStyle = '#1a4060';
       ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(px+8, ry); ctx.lineTo(px+FISH_PW-8, ry); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px + 8, ry); ctx.lineTo(px + contentW + 4, ry); ctx.stroke();
       ry += 14;
       ctx.fillStyle = '#aaa';
       ctx.font = 'bold 10px monospace';
       ctx.fillText('Species', px + 16, ry);
       ctx.textAlign = 'center';
       ctx.fillText('Caught', px + 260, ry);
-      ctx.fillText('Heaviest', px + 380, ry);
+      ctx.fillText('Heaviest', px + 370, ry);
       ctx.textAlign = 'left';
       ry += 14;
 
       for (const sp of FISH_SPECIES) {
+        if (ry > contentY + VIEWPORT_H) break;
         const srec = rec.bySpecies[sp.id] || { count: 0, heaviest: 0 };
         ctx.fillStyle = srec.count > 0 ? '#ccc' : '#444';
         ctx.font = '10px monospace';
         ctx.fillText(sp.name, px + 16, ry);
         ctx.textAlign = 'center';
         ctx.fillText(srec.count > 0 ? String(srec.count) : '—', px + 260, ry);
-        ctx.fillText(srec.heaviest > 0 ? `${srec.heaviest}kg` : '—', px + 380, ry);
+        ctx.fillText(srec.heaviest > 0 ? `${srec.heaviest}kg` : '—', px + 370, ry);
         ctx.textAlign = 'left';
         ry += 20;
       }
+
     } else if (this.fishermanTab === 'buy') {
       for (let i = 0; i < FISH_SHOP_STOCK.length; i++) {
-        const entry = FISH_SHOP_STOCK[i];
-        const ry2   = contentY + i * FISH_ROW_H;
+        const entry  = FISH_SHOP_STOCK[i];
+        const ry2    = contentY + i * FISH_ROW_H - scroll;
+        if (ry2 + FISH_ROW_H < contentY || ry2 > contentY + VIEWPORT_H) continue;
         const canAff = gold >= entry.buyPrice;
         const iconSz = FISH_ROW_H - 8;
         ctx.fillStyle = 'rgba(20,40,60,0.5)';
@@ -2332,7 +2482,7 @@ export class Game {
         ctx.fillStyle = canAff ? '#f1c40f' : '#a06010';
         ctx.font = 'bold 11px monospace';
         ctx.fillText(`${entry.buyPrice}g`, px + 8 + iconSz + 10, ry2 + FISH_ROW_H / 2 + 10);
-        const btnW = 56, btnX2 = px + FISH_PW - btnW - 8;
+        const btnW = 56, btnX2 = px + FISH_PW - btnW - 8 - (maxScroll > 0 ? SCROLL_W + 4 : 0);
         const btnY2 = ry2 + Math.floor((FISH_ROW_H - 24) / 2);
         ctx.fillStyle = canAff ? '#1a5a8a' : '#333';
         r._roundRect(ctx, btnX2, btnY2, btnW, 24, 4);
@@ -2342,18 +2492,19 @@ export class Game {
         ctx.textAlign = 'center';
         ctx.fillText('Buy', btnX2 + btnW / 2, btnY2 + 16);
       }
+
     } else if (this.fishermanTab === 'sell') {
-      const sellable = this._getFishSellableSlots();
       if (sellable.length === 0) {
         ctx.fillStyle = '#555';
         ctx.font = '12px monospace';
         ctx.textAlign = 'center';
-        ctx.fillText('No fish to sell', px + FISH_PW / 2, contentY + FISH_ROW_H);
+        ctx.fillText('No fish to sell', px + FISH_PW / 2, contentY + FISH_ROW_H - scroll);
       } else {
-        for (let i = 0; i < Math.min(sellable.length, 9); i++) {
-          const slot  = sellable[i];
-          const price = FISH_SELL_PRICES[slot.item.id] ?? 0;
-          const ry3   = contentY + i * FISH_ROW_H;
+        for (let i = 0; i < sellable.length; i++) {
+          const slot   = sellable[i];
+          const price  = FISH_SELL_PRICES[slot.item.id] ?? 0;
+          const ry3    = contentY + i * FISH_ROW_H - scroll;
+          if (ry3 + FISH_ROW_H < contentY || ry3 > contentY + VIEWPORT_H) continue;
           const iconSz = FISH_ROW_H - 8;
           ctx.fillStyle = 'rgba(20,40,60,0.5)';
           r._roundRect(ctx, px + 8, ry3 + 4, iconSz, iconSz, 3);
@@ -2366,7 +2517,7 @@ export class Game {
           ctx.fillStyle = '#f1c40f';
           ctx.font = 'bold 11px monospace';
           ctx.fillText(`${price}g each`, px + 8 + iconSz + 10, ry3 + FISH_ROW_H / 2 + 10);
-          const btnW = 56, btnX3 = px + FISH_PW - btnW - 8;
+          const btnW = 56, btnX3 = px + FISH_PW - btnW - 8 - (maxScroll > 0 ? SCROLL_W + 4 : 0);
           const btnY3 = ry3 + Math.floor((FISH_ROW_H - 24) / 2);
           ctx.fillStyle = '#1a5a1a';
           r._roundRect(ctx, btnX3, btnY3, btnW, 24, 4);
@@ -2377,6 +2528,23 @@ export class Game {
           ctx.fillText('Sell', btnX3 + btnW / 2, btnY3 + 16);
         }
       }
+    }
+
+    ctx.restore();
+
+    // ── Scrollbar ─────────────────────────────────────────
+    if (maxScroll > 0) {
+      const sbX    = px + FISH_PW - 4 - SCROLL_W;
+      const sbTopY = contentY + 2;
+      const sbH    = VIEWPORT_H - 4;
+      ctx.fillStyle = '#0d1e2e';
+      r._roundRect(ctx, sbX, sbTopY, SCROLL_W, sbH, 4);
+      ctx.fill();
+      const thumbH = Math.max(20, (sbH * VIEWPORT_H / totalH) | 0);
+      const thumbY = sbTopY + ((sbH - thumbH) * scroll / maxScroll) | 0;
+      ctx.fillStyle = '#2980b9';
+      r._roundRect(ctx, sbX, thumbY, SCROLL_W, thumbH, 4);
+      ctx.fill();
     }
   }
 
@@ -2831,6 +2999,13 @@ export class Game {
   }
 
   _exitToWorld() {
+    // Close any shop panels that were open inside the interior
+    this.butcherShopOpen  = false;
+    this.weaponShopOpen   = false;
+    this.varietyShopOpen  = false;
+    this.capeShopOpen     = false;
+    this.fishermanOpen    = false;
+
     // Switch back to world map
     this.inInterior    = false;
     this.activeMap     = this.world;

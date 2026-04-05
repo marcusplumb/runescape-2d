@@ -4,6 +4,7 @@ import {
 } from './constants.js';
 import { ITEMS, COOK_RECIPES } from './items.js';
 import { FISH_SPECIES, makeFishItem } from './fishing.js';
+import { getBiome } from './biomes.js';
 
 // Which tree tile maps to which log item, XP, level requirement, and timing
 const TREE_MAP = {
@@ -201,8 +202,7 @@ export class Actions {
     }
 
     // ── Fish ─────────────────────────────────────────
-    const fishSpotTiles = [TILES.FISH_SPOT, TILES.FISH_SPOT_SALMON, TILES.FISH_SPOT_LOBSTER];
-    if (fishSpotTiles.includes(tile)) {
+    if (tile === TILES.FISH_SPOT) {
       if (!this.inventory.has('fishing_rod')) {
         this.notif.add('You need a fishing rod to fish.', '#e74c3c');
         return true;
@@ -404,25 +404,28 @@ export class Actions {
       }
 
       case 'fish': {
-        const fishLevel  = this.skills.getLevel(SKILL_IDS.FISHING);
-        const spotTile   = this.world.getTile(a.col, a.row);
+        const fishLevel = this.skills.getLevel(SKILL_IDS.FISHING);
 
-        // Collect eligible species for this spot + level
+        // Determine environment: dungeon maps have ids starting with 'dungeon_'
+        const isUnderground = typeof this.world.id === 'string' && this.world.id.startsWith('dungeon_');
+        const env = isUnderground ? 'underground' : getBiome(a.col, a.row);
+
+        // Collect eligible species for this biome + level
         const eligible = FISH_SPECIES.filter(
-          sp => sp.spots.includes(spotTile) && fishLevel >= sp.minLevel
+          sp => sp.biomes.includes(env) && fishLevel >= sp.minLevel
         );
         if (eligible.length === 0) {
           this.notif.add('Nothing bites...', '#aaa');
           break;
         }
 
-        // Weight-biased random selection: higher-level (rarer) fish less likely
-        const weights = eligible.map((_, i) => Math.max(1, eligible.length - i));
-        const total   = weights.reduce((s, w) => s + w, 0);
-        let pick = Math.random() * total, chosen = eligible[0];
-        for (let i = 0; i < eligible.length; i++) {
-          pick -= weights[i];
-          if (pick <= 0) { chosen = eligible[i]; break; }
+        // Weighted random selection using each species' rarityWeight
+        const total = eligible.reduce((s, sp) => s + sp.rarityWeight, 0);
+        let pick = Math.random() * total;
+        let chosen = eligible[eligible.length - 1];
+        for (const sp of eligible) {
+          pick -= sp.rarityWeight;
+          if (pick <= 0) { chosen = sp; break; }
         }
 
         // Random weight within species range (log-normal feel)
@@ -457,10 +460,9 @@ export class Actions {
         }
 
         // Roll whether the spot stays or migrates after this catch.
-        // Common fish (low minLevel) stay longer; rarer fish scatter sooner.
-        // Better fishing level gives a small bonus to staying.
-        const stayChance = Math.min(0.85, Math.max(0.1,
-          0.7 - (chosen.minLevel / 76) * 0.6 + fishLevel * 0.003
+        // Higher rarityWeight (more common) = spot stays longer.
+        const stayChance = Math.min(0.85, Math.max(0.15,
+          0.15 + (chosen.rarityWeight / 60) * 0.65 + fishLevel * 0.003
         ));
         if (!this.inventory.isFull() && Math.random() < stayChance) {
           // Spot stays — recast with a new random interval
@@ -471,10 +473,9 @@ export class Actions {
           };
         } else {
           // Spot migrates
-          const spotType = this.world.getTile(a.col, a.row);
           this.world.setTile(a.col, a.row, TILES.WATER);
           this.world.dirty = true;
-          this._moveFishSpot(a.col, a.row, spotType);
+          this._moveFishSpot(a.col, a.row);
           this.notif.add('The fish scatter — the spot has moved!', '#3498db');
         }
         break;
@@ -565,7 +566,7 @@ export class Actions {
   }
 
   /* ── Move a fishing spot to a new adjacent-to-walkable water tile ── */
-  _moveFishSpot(origCol, origRow, spotType) {
+  _moveFishSpot(origCol, origRow) {
     const WATER_TILES = new Set([TILES.WATER, TILES.SWAMP_WATER]);
     const candidates = [];
     const radius = 14;
@@ -591,12 +592,12 @@ export class Actions {
 
     if (candidates.length === 0) {
       // No valid candidate found — put it back where it was
-      this.world.setTile(origCol, origRow, spotType);
+      this.world.setTile(origCol, origRow, TILES.FISH_SPOT);
       return;
     }
 
     const pick = candidates[Math.floor(Math.random() * candidates.length)];
-    this.world.setTile(pick.c, pick.r, spotType);
+    this.world.setTile(pick.c, pick.r, TILES.FISH_SPOT);
     this.world.dirty = true;
   }
 }

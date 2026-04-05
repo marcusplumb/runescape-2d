@@ -287,14 +287,7 @@ export class World {
         );
         if (!hasLand || rng() > 0.055) continue;
 
-        const biome = getBiome(c, r);
-        if (biome === BIOMES.DANGER || biome === BIOMES.VOLCANIC) {
-          map[r][c] = TILES.FISH_SPOT_LOBSTER;
-        } else if (biome === BIOMES.TUNDRA || biome === BIOMES.SWAMP) {
-          map[r][c] = TILES.FISH_SPOT_SALMON;
-        } else {
-          map[r][c] = TILES.FISH_SPOT;
-        }
+        map[r][c] = TILES.FISH_SPOT;
       }
     }
 
@@ -302,10 +295,33 @@ export class World {
     this._placeBridges(map, rng);
 
     // ── Phase 6: Structures and roads ────────────────────
-    this.doorMap = placeAllStructures(map, this.rows, this.cols, rng);
+    const _structures  = placeAllStructures(map, this.rows, this.cols, rng);
+    this.doorMap       = _structures.doorMap;
     this.dungeonMap    = new Map();
-    this.roofBounds    = [];        // { c, r, rW, rH, bC, bR, bW, bH } per roofed building
+    this.roofBounds    = [..._structures.roofBounds]; // { c, r, rW, rH, bC, bR, bW, bH } per roofed building
     this.signLabels    = new Map(); // "col,row" → text label rendered on that SIGN tile
+
+    // Kingdom shop BARRELs sit on interior floor tiles — register ground so
+    // the PROP_TILES renderer draws the correct floor beneath them.
+    // Butcher (westC=479, bldR=200): barrels at row 205, cols 480 & 489
+    // Variety (westC=479, bldR+21=221): barrels at row 224, cols 480 & 489
+    for (const [c, r] of [[480, 205], [489, 205], [480, 224], [489, 224]])
+      this.propGroundMap.set(`${c},${r}`, TILES.WOOD_FLOOR);
+
+    // Kingdom courtyard PROP_TILES (FLOWERS, FOUNTAIN, FIRE) all sit on stone.
+    // Scan the interior of the outer wall and register any prop tile as STONE.
+    {
+      const kOx = 474, kOy = 178, kOW = 76, kOH = 60;
+      const courtYardProps = new Set([TILES.FLOWERS, TILES.FOUNTAIN, TILES.FIRE,
+                                       TILES.PLANTER_FLOWERS, TILES.PLANTER_BUSH]);
+      for (let r = kOy + 1; r < kOy + kOH - 1; r++) {
+        for (let c = kOx + 1; c < kOx + kOW - 1; c++) {
+          const t = map[r]?.[c];
+          if (courtYardProps.has(t) && !this.propGroundMap.has(`${c},${r}`))
+            this.propGroundMap.set(`${c},${r}`, TILES.STONE);
+        }
+      }
+    }
 
     // Clear a generous area around spawn so the player never starts stuck
     const spawnC = Math.floor(this.cols / 2);
@@ -627,18 +643,18 @@ export class World {
     // Fish spots at dock tips (in water, 1-4 tiles inside lake from south edge)
     const TIP_R = R2 - 4;  // 390
     if (TIP_R >= R1) {
-      map[TIP_R][DOCK1]         = TILES.FISH_SPOT_LOBSTER;
-      map[TIP_R][DOCK1 - 1]     = TILES.FISH_SPOT_SALMON;
-      map[TIP_R][DOCK2]         = TILES.FISH_SPOT_SALMON;
-      map[TIP_R][DOCK2 + 1]     = TILES.FISH_SPOT_LOBSTER;
+      map[TIP_R][DOCK1]         = TILES.FISH_SPOT;
+      map[TIP_R][DOCK1 - 1]     = TILES.FISH_SPOT;
+      map[TIP_R][DOCK2]         = TILES.FISH_SPOT;
+      map[TIP_R][DOCK2 + 1]     = TILES.FISH_SPOT;
       map[TIP_R - 1][DOCK1 + 1] = TILES.FISH_SPOT;
       map[TIP_R - 1][DOCK2 - 1] = TILES.FISH_SPOT;
     }
     // Shore-adjacent spots along the south edge (fishable from SHORE row)
     map[R2][C1 + 4]  = TILES.FISH_SPOT;
-    map[R2][C1 + 8]  = TILES.FISH_SPOT_SALMON;
+    map[R2][C1 + 8]  = TILES.FISH_SPOT;
     map[R2][C2 - 4]  = TILES.FISH_SPOT;
-    map[R2][C2 - 8]  = TILES.FISH_SPOT_SALMON;
+    map[R2][C2 - 8]  = TILES.FISH_SPOT;
 
     // Fisherman's hut (small building south of west dock)
     const HUT_C = spawnC + 16;  // 528

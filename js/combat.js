@@ -146,7 +146,7 @@ export class Combat {
 
     if (hit) {
       const damage = _rollDamage(strLvl, gear.power, gear.critChance);
-      const killed = this.targetMob.takeDamage(damage);
+      const killed = this.targetMob.takeDamage(damage, this.player);
       if (this.onMobDamaged && damage > 0) this.onMobDamaged(this.targetMob, damage);
 
       this.hitSplats.push({
@@ -291,7 +291,8 @@ export class Combat {
     //     is never set on the client, so we can't rely on it.
     if (!this.activeAttacker) {
       for (const mob of this.mobManager.mobs) {
-        if (mob.dead || !mob.aggressive) continue;
+        // Allow aggressive mobs, and retaliating mobs that are in combat
+        if (mob.dead || (!mob.aggressive && !(mob.retaliates && mob.inCombat))) continue;
         const dx = this.player.cx - mob.cx;
         const dy = this.player.cy - mob.cy;
         if (Math.sqrt(dx * dx + dy * dy) / TILE_SIZE <= MELEE_RANGE + 0.5) {

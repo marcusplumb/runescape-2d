@@ -916,34 +916,186 @@ export function getItemById(id) {
   return Object.values(ITEMS).find(it => it.id === id) || null;
 }
 
+// ── Shared fish draw helpers ──────────────────────────────────────────────
+function _rf(ctx, x, y, s, body, tail) {           // standard raw fish
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(x+s*.5, y+s*.5, s*.35, s*.15, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = tail;
+  ctx.beginPath();
+  ctx.moveTo(x+s*.15, y+s*.5); ctx.lineTo(x+s*.02, y+s*.32); ctx.lineTo(x+s*.02, y+s*.68);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#222'; ctx.fillRect(x+s*.72, y+s*.44, s*.06, s*.06);
+}
+function _re(ctx, x, y, s, body) {                // raw eel
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.ellipse(x+s*.5, y+s*.5, s*.43, s*.09, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(0,0,0,.18)';
+  ctx.beginPath();
+  ctx.ellipse(x+s*.5, y+s*.5, s*.43, s*.06, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='#222'; ctx.fillRect(x+s*.83, y+s*.46, s*.05, s*.05);
+}
+function _rp(ctx, x, y, s, body, spk) {           // raw puffer
+  ctx.fillStyle = body;
+  ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.23, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle = spk;
+  for (let i=0; i<8; i++) {
+    const a = i*Math.PI/4;
+    ctx.fillRect(x+s*.5+Math.cos(a)*s*.26-s*.02, y+s*.5+Math.sin(a)*s*.26-s*.02, s*.04, s*.04);
+  }
+  ctx.fillStyle='#222'; ctx.fillRect(x+s*.62, y+s*.46, s*.06, s*.06);
+}
+function _rj(ctx, x, y, s, body, glow) {          // raw jellyfish/jelly
+  ctx.fillStyle = body+'99';
+  ctx.beginPath(); ctx.arc(x+s*.5, y+s*.38, s*.22, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = glow+'55';
+  ctx.beginPath(); ctx.arc(x+s*.5, y+s*.38, s*.16, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = body+'77';
+  for (let i=0; i<4; i++) ctx.fillRect(x+s*(.31+i*.12), y+s*.5, s*.03, s*.26);
+}
+function _cf(ctx, x, y, s, col) {                 // cooked fish (any)
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.ellipse(x+s*.5, y+s*.5, s*.35, s*.15, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';
+  ctx.fillRect(x+s*.44, y+s*.18, s*.04, s*.14); ctx.fillRect(x+s*.56, y+s*.12, s*.04, s*.17);
+}
+function _ce(ctx, x, y, s, col) {                 // cooked eel
+  ctx.fillStyle = col;
+  ctx.beginPath();
+  ctx.ellipse(x+s*.5, y+s*.5, s*.43, s*.09, 0, 0, Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.3)';
+  ctx.fillRect(x+s*.44, y+s*.38, s*.04, s*.1); ctx.fillRect(x+s*.56, y+s*.33, s*.04, s*.12);
+}
+
+// ── New fish items ────────────────────────────────────────────────────────
+ITEMS.RAW_GUDGEON      = { id:'raw_gudgeon',      name:'Raw Gudgeon',      stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#8B7355','#6B5335')} };
+ITEMS.COOKED_GUDGEON   = { id:'cooked_gudgeon',   name:'Cooked Gudgeon',   stackable:false, heal:3,  draw(c,x,y,s){_cf(c,x,y,s,'#7A5830')} };
+ITEMS.RAW_CARP         = { id:'raw_carp',         name:'Raw Carp',         stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#D4A030','#B47820')} };
+ITEMS.COOKED_CARP      = { id:'cooked_carp',      name:'Cooked Carp',      stackable:false, heal:4,  draw(c,x,y,s){_cf(c,x,y,s,'#A07020')} };
+ITEMS.RAW_PERCH        = { id:'raw_perch',        name:'Raw Perch',        stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#6B9B3A','#4B7B2A')} };
+ITEMS.COOKED_PERCH     = { id:'cooked_perch',     name:'Cooked Perch',     stackable:false, heal:5,  draw(c,x,y,s){_cf(c,x,y,s,'#4A7020')} };
+ITEMS.RAW_BASS         = { id:'raw_bass',         name:'Raw Bass',         stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#A8C870','#788850')} };
+ITEMS.COOKED_BASS      = { id:'cooked_bass',      name:'Cooked Bass',      stackable:false, heal:6,  draw(c,x,y,s){_cf(c,x,y,s,'#706840')} };
+ITEMS.RAW_PIKE         = { id:'raw_pike',         name:'Raw Pike',         stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#487048','#284828')} };
+ITEMS.COOKED_PIKE      = { id:'cooked_pike',      name:'Cooked Pike',      stackable:false, heal:7,  draw(c,x,y,s){_cf(c,x,y,s,'#304828')} };
+ITEMS.RAW_ICE_FISH     = { id:'raw_ice_fish',     name:'Raw Ice Fish',     stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#B8E0F0','#88C0D8')} };
+ITEMS.COOKED_ICE_FISH  = { id:'cooked_ice_fish',  name:'Cooked Ice Fish',  stackable:false, heal:3,  draw(c,x,y,s){_cf(c,x,y,s,'#A0C0D0')} };
+ITEMS.RAW_WALLEYE      = { id:'raw_walleye',      name:'Raw Walleye',      stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#C8A830','#A07820')} };
+ITEMS.COOKED_WALLEYE   = { id:'cooked_walleye',   name:'Cooked Walleye',   stackable:false, heal:6,  draw(c,x,y,s){_cf(c,x,y,s,'#906818')} };
+ITEMS.RAW_ARCTIC_CHAR  = { id:'raw_arctic_char',  name:'Raw Arctic Char',  stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#D84828','#B83020')} };
+ITEMS.COOKED_ARCTIC_CHAR={ id:'cooked_arctic_char',name:'Cooked Arctic Char',stackable:false,heal:8, draw(c,x,y,s){_cf(c,x,y,s,'#A03020')} };
+ITEMS.RAW_SNOWFLAKE_EEL= { id:'raw_snowflake_eel',name:'Raw Snowflake Eel',stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#D0E8F8')} };
+ITEMS.COOKED_SNOWFLAKE_EEL={ id:'cooked_snowflake_eel',name:'Cooked Snowflake Eel',stackable:false,heal:11,draw(c,x,y,s){_ce(c,x,y,s,'#A0B8C8')} };
+ITEMS.RAW_GLACIERFISH  = { id:'raw_glacierfish',  name:'Raw Glacierfish',  stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#80C8E8','#409888')} };
+ITEMS.COOKED_GLACIERFISH={ id:'cooked_glacierfish',name:'Cooked Glacierfish',stackable:false,heal:18,draw(c,x,y,s){_cf(c,x,y,s,'#306878')} };
+ITEMS.RAW_MUDSKIPPER   = { id:'raw_mudskipper',   name:'Raw Mudskipper',   stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#7B6040','#5B4028')} };
+ITEMS.COOKED_MUDSKIPPER= { id:'cooked_mudskipper',name:'Cooked Mudskipper',stackable:false, heal:3,  draw(c,x,y,s){_cf(c,x,y,s,'#604028')} };
+ITEMS.RAW_SWAMP_EEL    = { id:'raw_swamp_eel',    name:'Raw Swamp Eel',    stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#4A6030')} };
+ITEMS.COOKED_SWAMP_EEL = { id:'cooked_swamp_eel', name:'Cooked Swamp Eel', stackable:false, heal:6,  draw(c,x,y,s){_ce(c,x,y,s,'#304020')} };
+ITEMS.RAW_SLIMEJACK    = { id:'raw_slimejack',    name:'Raw Slimejack',    stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#60A040','#A840A0')} };
+ITEMS.COOKED_SLIMEJACK = { id:'cooked_slimejack', name:'Cooked Slimejack', stackable:false, heal:11, draw(c,x,y,s){_cf(c,x,y,s,'#406830')} };
+ITEMS.RAW_MUTANT_CARP  = { id:'raw_mutant_carp',  name:'Raw Mutant Carp',  stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#506830','#809840')} };
+ITEMS.COOKED_MUTANT_CARP={ id:'cooked_mutant_carp',name:'Cooked Mutant Carp',stackable:false,heal:15,draw(c,x,y,s){_cf(c,x,y,s,'#405020')} };
+ITEMS.RAW_SANDY_GOBY   = { id:'raw_sandy_goby',   name:'Raw Sandy Goby',   stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#D0A870','#A07848')} };
+ITEMS.COOKED_SANDY_GOBY= { id:'cooked_sandy_goby',name:'Cooked Sandy Goby',stackable:false, heal:3,  draw(c,x,y,s){_cf(c,x,y,s,'#906040')} };
+ITEMS.RAW_PUFFERFISH   = { id:'raw_pufferfish',   name:'Raw Pufferfish',   stackable:false, draw(c,x,y,s){_rp(c,x,y,s,'#D4B828','#A09020')} };
+ITEMS.COOKED_PUFFERFISH= { id:'cooked_pufferfish',name:'Cooked Pufferfish',stackable:false, heal:8,  draw(c,x,y,s){_cf(c,x,y,s,'#906810')} };
+ITEMS.RAW_SANDFISH     = { id:'raw_sandfish',     name:'Raw Sandfish',     stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#E0B848','#C09828')} };
+ITEMS.COOKED_SANDFISH  = { id:'cooked_sandfish',  name:'Cooked Sandfish',  stackable:false, heal:13, draw(c,x,y,s){_cf(c,x,y,s,'#A07828')} };
+ITEMS.RAW_LAVA_EEL     = { id:'raw_lava_eel',     name:'Raw Lava Eel',     stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#D84820')} };
+ITEMS.COOKED_LAVA_EEL  = { id:'cooked_lava_eel',  name:'Cooked Lava Eel',  stackable:false, heal:9,  draw(c,x,y,s){_ce(c,x,y,s,'#903010')} };
+ITEMS.RAW_MAGMA_CARP   = { id:'raw_magma_carp',   name:'Raw Magma Carp',   stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#803020','#400808')} };
+ITEMS.COOKED_MAGMA_CARP= { id:'cooked_magma_carp',name:'Cooked Magma Carp',stackable:false, heal:13, draw(c,x,y,s){_cf(c,x,y,s,'#602010')} };
+ITEMS.RAW_DRAGON_GOBY  = { id:'raw_dragon_goby',  name:'Raw Dragon Goby',  stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#601020','#200008')} };
+ITEMS.COOKED_DRAGON_GOBY={ id:'cooked_dragon_goby',name:'Cooked Dragon Goby',stackable:false,heal:20,draw(c,x,y,s){_cf(c,x,y,s,'#400810')} };
+ITEMS.RAW_BARRACUDA    = { id:'raw_barracuda',    name:'Raw Barracuda',    stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#508098','#304860')} };
+ITEMS.COOKED_BARRACUDA = { id:'cooked_barracuda', name:'Cooked Barracuda', stackable:false, heal:9,  draw(c,x,y,s){_cf(c,x,y,s,'#304860')} };
+ITEMS.RAW_GIANT_SQUID  = { id:'raw_giant_squid',  name:'Raw Giant Squid',  stackable:false, draw(c,x,y,s){_rj(c,x,y,s,'#C03078','#F060A8')} };
+ITEMS.COOKED_GIANT_SQUID={ id:'cooked_giant_squid',name:'Cooked Giant Squid',stackable:false,heal:22,draw(c,x,y,s){_cf(c,x,y,s,'#802050')} };
+ITEMS.RAW_CAVE_FISH    = { id:'raw_cave_fish',    name:'Raw Cave Fish',    stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#D0C8B8','#A8A090')} };
+ITEMS.COOKED_CAVE_FISH = { id:'cooked_cave_fish', name:'Cooked Cave Fish', stackable:false, heal:4,  draw(c,x,y,s){_cf(c,x,y,s,'#908870')} };
+ITEMS.RAW_BLIND_CRAYFISH={ id:'raw_blind_crayfish',name:'Raw Blind Crayfish',stackable:false,draw(c,x,y,s){_rf(c,x,y,s,'#D8A880','#B07850')} };
+ITEMS.COOKED_BLIND_CRAYFISH={ id:'cooked_blind_crayfish',name:'Cooked Blind Crayfish',stackable:false,heal:7,draw(c,x,y,s){_cf(c,x,y,s,'#906040')} };
+ITEMS.RAW_GLOWJELLY    = { id:'raw_glowjelly',    name:'Raw Glowjelly',    stackable:false, draw(c,x,y,s){_rj(c,x,y,s,'#4060D0','#80A0FF')} };
+ITEMS.COOKED_GLOWJELLY = { id:'cooked_glowjelly', name:'Cooked Glowjelly', stackable:false, heal:7,  draw(c,x,y,s){_cf(c,x,y,s,'#304090')} };
+ITEMS.RAW_CRYSTAL_FISH = { id:'raw_crystal_fish', name:'Raw Crystal Fish', stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#90D0E8','#40A8C8')} };
+ITEMS.COOKED_CRYSTAL_FISH={ id:'cooked_crystal_fish',name:'Cooked Crystal Fish',stackable:false,heal:14,draw(c,x,y,s){_cf(c,x,y,s,'#308098')} };
+ITEMS.RAW_ABYSSAL_EEL  = { id:'raw_abyssal_eel',  name:'Raw Abyssal Eel',  stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#101820')} };
+ITEMS.COOKED_ABYSSAL_EEL={ id:'cooked_abyssal_eel',name:'Cooked Abyssal Eel',stackable:false,heal:17,draw(c,x,y,s){_ce(c,x,y,s,'#101820')} };
+
+/* ── Butcher meats ───────────────────────────────────── */
+function _rawMeat(ctx, x, y, s, col) {
+  ctx.fillStyle = '#c0392b'; ctx.fillRect(x+s*0.2,y+s*0.3,s*0.6,s*0.4);
+  ctx.fillStyle = col;       ctx.fillRect(x+s*0.25,y+s*0.33,s*0.5,s*0.34);
+  ctx.fillStyle = '#e8e8e8'; ctx.fillRect(x+s*0.3,y+s*0.38,s*0.15,s*0.1);
+}
+function _cookedMeat(ctx, x, y, s, col) {
+  ctx.fillStyle = '#5a3010'; ctx.fillRect(x+s*0.2,y+s*0.3,s*0.6,s*0.4);
+  ctx.fillStyle = col;       ctx.fillRect(x+s*0.25,y+s*0.33,s*0.5,s*0.34);
+  ctx.fillStyle = '#3a1a00';
+  ctx.fillRect(x+s*0.3,y+s*0.37,s*0.08,s*0.04);
+  ctx.fillRect(x+s*0.5,y+s*0.42,s*0.08,s*0.04);
+}
+ITEMS.RAW_BEEF      = { id:'raw_beef',       name:'Raw Beef',       stackable:false, draw(c,x,y,s){ _rawMeat(c,x,y,s,'#d35f5f') } };
+ITEMS.COOKED_BEEF   = { id:'cooked_beef',    name:'Cooked Beef',    stackable:false, heal:8,  draw(c,x,y,s){ _cookedMeat(c,x,y,s,'#8b4513') } };
+ITEMS.RAW_CHICKEN   = { id:'raw_chicken',    name:'Raw Chicken',    stackable:false, draw(c,x,y,s){ _rawMeat(c,x,y,s,'#f4d4a0') } };
+ITEMS.COOKED_CHICKEN= { id:'cooked_chicken', name:'Cooked Chicken', stackable:false, heal:6,  draw(c,x,y,s){ _cookedMeat(c,x,y,s,'#c8860a') } };
+ITEMS.RAW_PORK      = { id:'raw_pork',       name:'Raw Pork',       stackable:false, draw(c,x,y,s){ _rawMeat(c,x,y,s,'#e8a090') } };
+ITEMS.COOKED_PORK   = { id:'cooked_pork',    name:'Cooked Pork',    stackable:false, heal:7,  draw(c,x,y,s){ _cookedMeat(c,x,y,s,'#a0522d') } };
+ITEMS.RAW_LAMB      = { id:'raw_lamb',       name:'Raw Lamb',       stackable:false, draw(c,x,y,s){ _rawMeat(c,x,y,s,'#cc8888') } };
+ITEMS.COOKED_LAMB   = { id:'cooked_lamb',    name:'Cooked Lamb',    stackable:false, heal:9,  draw(c,x,y,s){ _cookedMeat(c,x,y,s,'#7a3b1e') } };
+ITEMS.RAW_VENISON   = { id:'raw_venison',    name:'Raw Venison',    stackable:false, draw(c,x,y,s){ _rawMeat(c,x,y,s,'#8b2222') } };
+ITEMS.COOKED_VENISON= { id:'cooked_venison', name:'Cooked Venison', stackable:false, heal:12, draw(c,x,y,s){ _cookedMeat(c,x,y,s,'#5c1f1f') } };
+ITEMS.BURNT_MEAT    = { id:'burnt_meat',     name:'Burnt Meat',     stackable:true,  draw(c,x,y,s){ c.fillStyle='#1a1a1a'; c.fillRect(x+s*0.2,y+s*0.3,s*0.6,s*0.4); c.fillStyle='#333'; c.fillRect(x+s*0.25,y+s*0.35,s*0.5,s*0.3); } };
+
 /** Cooking recipes: raw item → { cooked, burnt, burnChance } */
 export const COOK_RECIPES = {
-  [ITEMS.RAW_SHRIMP.id]: {
-    cooked: ITEMS.COOKED_SHRIMP,
-    burnt:  ITEMS.BURNT_FISH,
-    burnChance: 0.3,
-  },
-  [ITEMS.RAW_TROUT.id]: {
-    cooked: ITEMS.COOKED_TROUT,
-    burnt:  ITEMS.BURNT_FISH,
-    burnChance: 0.4,
-  },
-  [ITEMS.RAW_SALMON.id]: {
-    cooked: ITEMS.COOKED_SALMON,
-    burnt:  ITEMS.BURNT_FISH,
-    burnChance: 0.45,
-  },
-  [ITEMS.RAW_LOBSTER.id]: {
-    cooked: ITEMS.COOKED_LOBSTER,
-    burnt:  ITEMS.BURNT_FISH,
-    burnChance: 0.5,
-  },
-  [ITEMS.RAW_SARDINE.id]:   { cooked: ITEMS.COOKED_SARDINE,   burnt: ITEMS.BURNT_FISH, burnChance: 0.38 },
-  [ITEMS.RAW_HERRING.id]:   { cooked: ITEMS.COOKED_HERRING,   burnt: ITEMS.BURNT_FISH, burnChance: 0.35 },
-  [ITEMS.RAW_TUNA.id]:      { cooked: ITEMS.COOKED_TUNA,      burnt: ITEMS.BURNT_FISH, burnChance: 0.25 },
-  [ITEMS.RAW_SWORDFISH.id]: { cooked: ITEMS.COOKED_SWORDFISH, burnt: ITEMS.BURNT_FISH, burnChance: 0.20 },
-  [ITEMS.RAW_SHARK.id]:     { cooked: ITEMS.COOKED_SHARK,     burnt: ITEMS.BURNT_FISH, burnChance: 0.15 },
-};
+  [ITEMS.RAW_SHRIMP.id]:       { cooked: ITEMS.COOKED_SHRIMP,       burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_SARDINE.id]:      { cooked: ITEMS.COOKED_SARDINE,      burnt: ITEMS.BURNT_FISH, burnChance: 0.38 },
+  [ITEMS.RAW_HERRING.id]:      { cooked: ITEMS.COOKED_HERRING,      burnt: ITEMS.BURNT_FISH, burnChance: 0.35 },
+  [ITEMS.RAW_TROUT.id]:        { cooked: ITEMS.COOKED_TROUT,        burnt: ITEMS.BURNT_FISH, burnChance: 0.40 },
+  [ITEMS.RAW_SALMON.id]:       { cooked: ITEMS.COOKED_SALMON,       burnt: ITEMS.BURNT_FISH, burnChance: 0.45 },
+  [ITEMS.RAW_TUNA.id]:         { cooked: ITEMS.COOKED_TUNA,         burnt: ITEMS.BURNT_FISH, burnChance: 0.25 },
+  [ITEMS.RAW_LOBSTER.id]:      { cooked: ITEMS.COOKED_LOBSTER,      burnt: ITEMS.BURNT_FISH, burnChance: 0.50 },
+  [ITEMS.RAW_SWORDFISH.id]:    { cooked: ITEMS.COOKED_SWORDFISH,    burnt: ITEMS.BURNT_FISH, burnChance: 0.20 },
+  [ITEMS.RAW_SHARK.id]:        { cooked: ITEMS.COOKED_SHARK,        burnt: ITEMS.BURNT_FISH, burnChance: 0.15 },
+  // New fish
+  [ITEMS.RAW_GUDGEON.id]:      { cooked: ITEMS.COOKED_GUDGEON,      burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
+  [ITEMS.RAW_CARP.id]:         { cooked: ITEMS.COOKED_CARP,         burnt: ITEMS.BURNT_FISH, burnChance: 0.32 },
+  [ITEMS.RAW_PERCH.id]:        { cooked: ITEMS.COOKED_PERCH,        burnt: ITEMS.BURNT_FISH, burnChance: 0.33 },
+  [ITEMS.RAW_BASS.id]:         { cooked: ITEMS.COOKED_BASS,         burnt: ITEMS.BURNT_FISH, burnChance: 0.36 },
+  [ITEMS.RAW_PIKE.id]:         { cooked: ITEMS.COOKED_PIKE,         burnt: ITEMS.BURNT_FISH, burnChance: 0.38 },
+  [ITEMS.RAW_ICE_FISH.id]:     { cooked: ITEMS.COOKED_ICE_FISH,     burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_WALLEYE.id]:      { cooked: ITEMS.COOKED_WALLEYE,      burnt: ITEMS.BURNT_FISH, burnChance: 0.35 },
+  [ITEMS.RAW_ARCTIC_CHAR.id]:  { cooked: ITEMS.COOKED_ARCTIC_CHAR,  burnt: ITEMS.BURNT_FISH, burnChance: 0.40 },
+  [ITEMS.RAW_SNOWFLAKE_EEL.id]:{ cooked: ITEMS.COOKED_SNOWFLAKE_EEL,burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
+  [ITEMS.RAW_GLACIERFISH.id]:  { cooked: ITEMS.COOKED_GLACIERFISH,  burnt: ITEMS.BURNT_FISH, burnChance: 0.18 },
+  [ITEMS.RAW_MUDSKIPPER.id]:   { cooked: ITEMS.COOKED_MUDSKIPPER,   burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_SWAMP_EEL.id]:    { cooked: ITEMS.COOKED_SWAMP_EEL,    burnt: ITEMS.BURNT_FISH, burnChance: 0.32 },
+  [ITEMS.RAW_SLIMEJACK.id]:    { cooked: ITEMS.COOKED_SLIMEJACK,    burnt: ITEMS.BURNT_FISH, burnChance: 0.22 },
+  [ITEMS.RAW_MUTANT_CARP.id]:  { cooked: ITEMS.COOKED_MUTANT_CARP,  burnt: ITEMS.BURNT_FISH, burnChance: 0.20 },
+  [ITEMS.RAW_SANDY_GOBY.id]:   { cooked: ITEMS.COOKED_SANDY_GOBY,   burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_PUFFERFISH.id]:   { cooked: ITEMS.COOKED_PUFFERFISH,   burnt: ITEMS.BURNT_FISH, burnChance: 0.35 },
+  [ITEMS.RAW_SANDFISH.id]:     { cooked: ITEMS.COOKED_SANDFISH,     burnt: ITEMS.BURNT_FISH, burnChance: 0.22 },
+  [ITEMS.RAW_LAVA_EEL.id]:     { cooked: ITEMS.COOKED_LAVA_EEL,     burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_MAGMA_CARP.id]:   { cooked: ITEMS.COOKED_MAGMA_CARP,   burnt: ITEMS.BURNT_FISH, burnChance: 0.22 },
+  [ITEMS.RAW_DRAGON_GOBY.id]:  { cooked: ITEMS.COOKED_DRAGON_GOBY,  burnt: ITEMS.BURNT_FISH, burnChance: 0.15 },
+  [ITEMS.RAW_BARRACUDA.id]:    { cooked: ITEMS.COOKED_BARRACUDA,    burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
+  [ITEMS.RAW_GIANT_SQUID.id]:  { cooked: ITEMS.COOKED_GIANT_SQUID,  burnt: ITEMS.BURNT_FISH, burnChance: 0.12 },
+  [ITEMS.RAW_CAVE_FISH.id]:    { cooked: ITEMS.COOKED_CAVE_FISH,    burnt: ITEMS.BURNT_FISH, burnChance: 0.30 },
+  [ITEMS.RAW_BLIND_CRAYFISH.id]:{ cooked:ITEMS.COOKED_BLIND_CRAYFISH,burnt:ITEMS.BURNT_FISH, burnChance: 0.35 },
+  [ITEMS.RAW_GLOWJELLY.id]:    { cooked: ITEMS.COOKED_GLOWJELLY,    burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
+  [ITEMS.RAW_CRYSTAL_FISH.id]: { cooked: ITEMS.COOKED_CRYSTAL_FISH, burnt: ITEMS.BURNT_FISH, burnChance: 0.20 },
+  [ITEMS.RAW_ABYSSAL_EEL.id]:  { cooked: ITEMS.COOKED_ABYSSAL_EEL,  burnt: ITEMS.BURNT_FISH, burnChance: 0.15 },
+  // Meat (items defined above, before this object)
+  [ITEMS.RAW_BEEF.id]:         { cooked: ITEMS.COOKED_BEEF,         burnt: ITEMS.BURNT_MEAT, burnChance: 0.35 },
+  [ITEMS.RAW_CHICKEN.id]:      { cooked: ITEMS.COOKED_CHICKEN,      burnt: ITEMS.BURNT_MEAT, burnChance: 0.28 },
+  [ITEMS.RAW_PORK.id]:         { cooked: ITEMS.COOKED_PORK,         burnt: ITEMS.BURNT_MEAT, burnChance: 0.32 },
+  [ITEMS.RAW_LAMB.id]:         { cooked: ITEMS.COOKED_LAMB,         burnt: ITEMS.BURNT_MEAT, burnChance: 0.30 },
+  [ITEMS.RAW_VENISON.id]:      { cooked: ITEMS.COOKED_VENISON,      burnt: ITEMS.BURNT_MEAT, burnChance: 0.25 },
+}; // end COOK_RECIPES
 
 /* ── Weapons ─────────────────────────────────────────── */
 ITEMS.BRONZE_SWORD = {

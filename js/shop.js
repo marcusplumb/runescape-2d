@@ -1,6 +1,75 @@
 import { ITEMS } from './items.js';
 import { TILE_SIZE, WORLD_COLS, WORLD_ROWS } from './constants.js';
 
+
+/* ── Kingdom shop stock ─────────────────────────────── */
+
+export const BUTCHER_STOCK = [
+  { item: ITEMS.RAW_BEEF,      buyPrice:  6 },
+  { item: ITEMS.RAW_CHICKEN,   buyPrice:  4 },
+  { item: ITEMS.RAW_PORK,      buyPrice:  5 },
+  { item: ITEMS.RAW_LAMB,      buyPrice:  8 },
+  { item: ITEMS.RAW_VENISON,   buyPrice: 14 },
+  { item: ITEMS.COOKED_BEEF,   buyPrice: 14 },
+  { item: ITEMS.COOKED_CHICKEN,buyPrice: 10 },
+  { item: ITEMS.COOKED_PORK,   buyPrice: 12 },
+];
+
+export const BUTCHER_SELL_PRICES = {
+  raw_beef: 3, cooked_beef: 7,
+  raw_chicken: 2, cooked_chicken: 5,
+  raw_pork: 2, cooked_pork: 6,
+  raw_lamb: 4, cooked_lamb: 9,
+  raw_venison: 7, cooked_venison: 12,
+  burnt_meat: 1,
+};
+
+export const WEAPON_SHOP_STOCK = [
+  { item: ITEMS.STEEL_SWORD,    buyPrice:  400 },
+  { item: ITEMS.MITHRIL_SWORD,  buyPrice: 1100 },
+  { item: ITEMS.STEEL_HELM,     buyPrice:  440 },
+  { item: ITEMS.MITHRIL_HELM,   buyPrice: 1200 },
+  { item: ITEMS.STEEL_PLATE,    buyPrice: 1080 },
+  { item: ITEMS.MITHRIL_PLATE,  buyPrice: 2800 },
+];
+
+export const WEAPON_SELL_PRICES = {
+  bronze_sword: 25, iron_sword: 70, steel_sword: 200, mithril_sword: 550,
+  bronze_helm: 30, iron_helm: 80, steel_helm: 220, mithril_helm: 600,
+  bronze_plate: 80, iron_plate: 200, steel_plate: 540, mithril_plate: 1400,
+};
+
+export const VARIETY_STOCK = [
+  { item: ITEMS.AXE,           buyPrice:  40 },
+  { item: ITEMS.PICKAXE,       buyPrice:  50 },
+  { item: ITEMS.TINDERBOX,     buyPrice:  20 },
+  { item: ITEMS.FISHING_ROD,   buyPrice:  60 },
+  { item: ITEMS.FISHING_BAIT,  buyPrice:   3 },
+  { item: ITEMS.COOKED_BEEF,   buyPrice:  14 },
+  { item: ITEMS.COOKED_CHICKEN,buyPrice:  10 },
+  { item: ITEMS.COOKED_TROUT,  buyPrice:  20 },
+];
+
+export const VARIETY_SELL_PRICES = {
+  axe: 20, pickaxe: 25, tinderbox: 10, fishing_rod: 30, fishing_bait: 1,
+  logs: 5, oak_logs: 12, willow_logs: 25, maple_logs: 50, yew_logs: 100,
+  bones: 2,
+};
+
+export const CAPE_STOCK = [
+  { item: ITEMS.BROWN_CAPE,      buyPrice:  80 },
+  { item: ITEMS.RED_CAPE,        buyPrice:  80 },
+  { item: ITEMS.BLUE_CAPE,       buyPrice:  80 },
+  { item: ITEMS.GREEN_CAPE,      buyPrice:  80 },
+  { item: ITEMS.WARRIOR_CAPE,    buyPrice: 400 },
+  { item: ITEMS.BERSERKER_CAPE,  buyPrice: 600 },
+];
+
+export const CAPE_SELL_PRICES = {
+  brown_cape: 40, red_cape: 40, blue_cape: 40, green_cape: 40,
+  warrior_cape: 200, berserker_cape: 300,
+};
+
 /* ── Smithy shop (weapons + armour) ────────────────── */
 export const SMITHY_STOCK = [
   { item: ITEMS.BRONZE_SWORD, buyPrice:   60 },
@@ -374,5 +443,162 @@ export class SmithyKeeper {
     ctx.textAlign = 'center';
     ctx.strokeText(this.name, x + w / 2, y - 10);
     ctx.fillText(this.name, x + w / 2, y - 10);
+  }
+}
+
+/* ── Shared helpers for kingdom NPC rendering ──────── */
+function _drawNpcLabel(ctx, x, y, w, name) {
+  ctx.fillStyle = '#f1c40f';
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = 2;
+  ctx.font = 'bold 10px monospace';
+  ctx.textAlign = 'center';
+  ctx.strokeText(name, x + w / 2, y - 10);
+  ctx.fillText(name, x + w / 2, y - 10);
+}
+function _drawShadow(ctx, x, y, w, h) {
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
+  ctx.beginPath();
+  ctx.ellipse(x + w / 2, y + h, w / 2, 4, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+/* ── ButcherKeeper NPC ─────────────────────────────── */
+export class ButcherKeeper {
+  constructor() {
+    this.w = 24; this.h = 32;
+    this.name = 'Butcher';
+    // World coords: kingdom cx=512,cy=208 → ox=474,oy=178 → bldR=200,westC=479
+    // Butcher building: (479,200) w=12 h=8 → inner center col 485, first inner row 201
+    this.x = (479 + 1 + Math.floor((12 - 2) / 2)) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (200 + 1) * TILE_SIZE;
+  }
+  containsWorld(wx, wy) {
+    return wx >= this.x && wx <= this.x + this.w && wy >= this.y && wy <= this.y + this.h;
+  }
+  draw(ctx) {
+    const x = Math.round(this.x), y = Math.round(this.y), { w, h } = this;
+    _drawShadow(ctx, x, y, w, h);
+    ctx.fillStyle = '#2c1a08'; ctx.fillRect(x+5, y+26, 5, 6); ctx.fillRect(x+w-10, y+26, 5, 6);
+    ctx.fillStyle = '#8b1a1a'; ctx.fillRect(x+2, y+10, w-4, 18);
+    ctx.fillStyle = '#e8e0d0'; ctx.fillRect(x+4, y+12, w-8, 16); // white apron
+    ctx.fillStyle = '#8b0000';
+    ctx.fillRect(x+6, y+14, 3, 2); ctx.fillRect(x+12, y+18, 2, 3); ctx.fillRect(x+9, y+22, 4, 2); // blood
+    ctx.fillStyle = '#4a2010'; ctx.fillRect(x+2, y+22, w-4, 3); // belt
+    ctx.fillStyle = '#8b1a1a'; ctx.fillRect(x-1, y+12, 4, 9); ctx.fillRect(x+w-3, y+12, 4, 9);
+    ctx.fillStyle = '#7a7a7a'; ctx.fillRect(x+w+1, y+14, 6, 5); // cleaver blade
+    ctx.fillStyle = '#5a3a18'; ctx.fillRect(x+w+3, y+19, 2, 5); // cleaver handle
+    ctx.fillStyle = '#deb887'; ctx.fillRect(x+4, y+1, w-8, 11);
+    ctx.fillStyle = '#f0ece0'; ctx.fillRect(x+2, y+1, w-4, 5); // white cap
+    ctx.fillStyle = '#e8e4d8'; ctx.fillRect(x+1, y+3, w-2, 2);
+    ctx.fillStyle = '#222'; ctx.fillRect(x+6, y+5, 2, 2); ctx.fillRect(x+16, y+5, 2, 2);
+    ctx.fillStyle = '#5c2a00'; ctx.fillRect(x+6, y+8, w-12, 2); // moustache
+    _drawNpcLabel(ctx, x, y, w, this.name);
+  }
+}
+
+/* ── WeaponKeeper NPC ──────────────────────────────── */
+export class WeaponKeeper {
+  constructor() {
+    this.w = 24; this.h = 32;
+    this.name = 'Weaponsmith';
+    // World coords: Weapons building: (533,200) w=12 h=8 → inner center col 539, second inner row 202
+    this.x = (533 + 1 + Math.floor((12 - 2) / 2)) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (200 + 2) * TILE_SIZE;
+  }
+  containsWorld(wx, wy) {
+    return wx >= this.x && wx <= this.x + this.w && wy >= this.y && wy <= this.y + this.h;
+  }
+  draw(ctx) {
+    const x = Math.round(this.x), y = Math.round(this.y), { w, h } = this;
+    _drawShadow(ctx, x, y, w, h);
+    ctx.fillStyle = '#5a6070'; ctx.fillRect(x+5, y+26, 5, 6); ctx.fillRect(x+w-10, y+26, 5, 6); // armoured legs
+    ctx.fillStyle = '#7a8090'; ctx.fillRect(x+5, y+26, 5, 2); ctx.fillRect(x+w-10, y+26, 5, 2);
+    ctx.fillStyle = '#6a7080'; ctx.fillRect(x+2, y+10, w-4, 18); // chainmail body
+    ctx.fillStyle = '#9aabb0'; ctx.fillRect(x+5, y+12, w-10, 8); // plate chest
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(x+6, y+12, 5, 3);
+    ctx.fillStyle = '#4a3820'; ctx.fillRect(x+2, y+22, w-4, 3); // belt
+    ctx.fillStyle = '#c8a030'; ctx.fillRect(x+9, y+22, 6, 3); // buckle
+    ctx.fillStyle = '#6a7080'; ctx.fillRect(x-1, y+12, 4, 9); ctx.fillRect(x+w-3, y+12, 4, 9);
+    ctx.fillStyle = '#c8c8d0'; ctx.fillRect(x-4, y+8, 2, 18); // sword
+    ctx.fillStyle = '#c8a030'; ctx.fillRect(x-6, y+14, 6, 2); // crossguard
+    ctx.fillStyle = '#5a3818'; ctx.fillRect(x-3, y+25, 2, 5); // handle
+    ctx.fillStyle = '#deb887'; ctx.fillRect(x+4, y+1, w-8, 11);
+    ctx.fillStyle = '#6a7080'; ctx.fillRect(x+2, y+1, w-4, 6); // helmet
+    ctx.fillStyle = '#9aabb0'; ctx.fillRect(x+4, y+1, 4, 1); ctx.fillRect(x+16, y+1, 4, 1);
+    ctx.fillStyle = '#222'; ctx.fillRect(x+6, y+6, 2, 2); ctx.fillRect(x+16, y+6, 2, 2);
+    ctx.fillStyle = '#4a3010'; ctx.fillRect(x+5, y+9, w-10, 3); // beard
+    _drawNpcLabel(ctx, x, y, w, this.name);
+  }
+}
+
+/* ── VarietyKeeper NPC ─────────────────────────────── */
+export class VarietyKeeper {
+  constructor() {
+    this.w = 24; this.h = 32;
+    this.name = 'Variety Shop';
+    // World coords: Variety building: (479,221) w=12 h=7 → inner center col 485, second inner row 223
+    this.x = (479 + 1 + Math.floor((12 - 2) / 2)) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (221 + 2) * TILE_SIZE;
+  }
+  containsWorld(wx, wy) {
+    return wx >= this.x && wx <= this.x + this.w && wy >= this.y && wy <= this.y + this.h;
+  }
+  draw(ctx) {
+    const x = Math.round(this.x), y = Math.round(this.y), { w, h } = this;
+    _drawShadow(ctx, x, y, w, h);
+    ctx.fillStyle = '#2c3e50'; ctx.fillRect(x+5, y+26, 5, 6); ctx.fillRect(x+w-10, y+26, 5, 6);
+    ctx.fillStyle = '#1a6b6b'; ctx.fillRect(x+2, y+10, w-4, 18); // teal tunic
+    ctx.fillStyle = '#7a1e7a'; ctx.fillRect(x+5, y+12, w-10, 12); // purple vest
+    ctx.fillStyle = '#c8a030';
+    ctx.fillRect(x+10, y+13, 2, 2); ctx.fillRect(x+10, y+17, 2, 2); ctx.fillRect(x+10, y+21, 2, 2); // buttons
+    ctx.fillStyle = '#5a3010'; ctx.fillRect(x+2, y+22, w-4, 3);
+    ctx.fillStyle = '#8b6914'; ctx.fillRect(x+7, y+22, 6, 5); // pouch
+    ctx.fillStyle = '#1a6b6b'; ctx.fillRect(x-1, y+12, 4, 9); ctx.fillRect(x+w-3, y+12, 4, 9);
+    ctx.fillStyle = '#deb887'; ctx.fillRect(x+4, y+1, w-8, 11);
+    ctx.fillStyle = '#7a1e7a'; ctx.fillRect(x+1, y+3, w-2, 3); // hat brim
+    ctx.fillStyle = '#5a0e5a'; ctx.fillRect(x+5, y-4, w-10, 8); // hat top
+    ctx.fillStyle = '#c8a030'; ctx.fillRect(x+5, y+2, w-10, 2); // hat band
+    ctx.fillStyle = '#222'; ctx.fillRect(x+6, y+5, 2, 2); ctx.fillRect(x+16, y+5, 2, 2);
+    ctx.fillStyle = '#8b4513'; ctx.fillRect(x+7, y+8, 2, 1); ctx.fillRect(x+15, y+8, 2, 1); ctx.fillRect(x+9, y+9, 6, 1); // smile
+    _drawNpcLabel(ctx, x, y, w, this.name);
+  }
+}
+
+/* ── CapeKeeper NPC ────────────────────────────────── */
+export class CapeKeeper {
+  constructor() {
+    this.w = 24; this.h = 32;
+    this.name = 'Cape Merchant';
+    // World coords: Capes building: (533,211) w=10 h=7 → inner center col 538, second inner row 213
+    this.x = (533 + 1 + Math.floor((10 - 2) / 2)) * TILE_SIZE + (TILE_SIZE - this.w) / 2;
+    this.y = (211 + 2) * TILE_SIZE;
+  }
+  containsWorld(wx, wy) {
+    return wx >= this.x && wx <= this.x + this.w && wy >= this.y && wy <= this.y + this.h;
+  }
+  draw(ctx) {
+    const x = Math.round(this.x), y = Math.round(this.y), { w, h } = this;
+    _drawShadow(ctx, x, y, w, h);
+    // Dramatic sweeping cape
+    ctx.fillStyle = '#8b0000';
+    ctx.beginPath(); ctx.moveTo(x-4, y+8); ctx.lineTo(x-8, y+h+2);
+    ctx.lineTo(x+w+8, y+h+2); ctx.lineTo(x+w+4, y+8); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#c80000'; ctx.fillRect(x-3, y+9, w+6, h-8); // lining
+    ctx.fillStyle = '#6b0000'; ctx.fillRect(x-4, y+8, 2, h-4); ctx.fillRect(x+w+2, y+8, 2, h-4);
+    ctx.fillStyle = '#2c2010'; ctx.fillRect(x+5, y+26, 5, 6); ctx.fillRect(x+w-10, y+26, 5, 6);
+    ctx.fillStyle = '#1a1050'; ctx.fillRect(x+2, y+10, w-4, 18); // shirt
+    ctx.fillStyle = '#c8a030'; ctx.fillRect(x+8, y+10, 8, 3); // clasp
+    ctx.fillStyle = '#f0c840'; ctx.fillRect(x+10, y+10, 4, 1);
+    ctx.fillStyle = '#8b0000'; ctx.fillRect(x-1, y+12, 4, 9); ctx.fillRect(x+w-3, y+12, 4, 9);
+    ctx.fillStyle = '#deb887'; ctx.fillRect(x+4, y+1, w-8, 11);
+    ctx.fillStyle = '#1a1050'; ctx.fillRect(x+2, y+2, w-4, 3); // hat brim
+    ctx.fillStyle = '#0d0830'; ctx.fillRect(x+4, y-3, w-8, 6); // hat top
+    ctx.fillStyle = '#c8a030'; ctx.fillRect(x+4, y+1, w-8, 2); // gold band
+    ctx.fillStyle = '#e84040'; ctx.fillRect(x+15, y-6, 2, 8); // feather
+    ctx.fillStyle = '#ff6060'; ctx.fillRect(x+15, y-5, 1, 5);
+    ctx.fillStyle = '#222'; ctx.fillRect(x+6, y+5, 2, 2); ctx.fillRect(x+16, y+5, 2, 2);
+    ctx.fillStyle = '#2c1a08'; ctx.fillRect(x+7, y+8, w-14, 1); // thin moustache
+    _drawNpcLabel(ctx, x, y, w, this.name);
   }
 }

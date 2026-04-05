@@ -219,50 +219,71 @@ function _buildOutpostInterior() {
 }
 
 /**
- * Kingdom throne room (40 wide × 26 tall).
- * Grand pillared hall with central aisle, raised throne dais, and side galleries.
+ * Kingdom throne room (44 wide × 30 tall) — grand carpeted hall with raised throne.
  */
 function _buildKingdomKeepInterior() {
-  const W = 40, H = 26;
+  const W = 44, H = 30;
   const t = _grid(W, H);
 
   // Stone floor throughout
   _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
 
-  // Central aisle (dirt carpet from south entrance to throne)
-  for (let r = 2; r < H - 2; r++) _set(t, W, W >> 1, r, TILES.DIRT);
-
-  // Throne dais — raised platform of wall blocks at north wall
-  _fill(t, W, 16, 1, 8, 3, TILES.WALL);
-  // Open centre of dais (the throne seat itself walkable)
-  _set(t, W, 19, 2, TILES.STONE);
-  _set(t, W, 20, 2, TILES.STONE);
-
-  // Pillar pairs flanking the aisle (every 4 rows, 5 pairs)
-  for (let pr = 4; pr <= 20; pr += 4) {
-    _set(t, W, 4,      pr, TILES.WALL);
-    _set(t, W, 5,      pr, TILES.WALL);
-    _set(t, W, W - 6,  pr, TILES.WALL);
-    _set(t, W, W - 5,  pr, TILES.WALL);
+  // Grand carpet — 4 tiles wide, runs from south entrance to the throne dais
+  const carpetC = (W >> 1) - 2;
+  for (let r = 2; r < H - 4; r++) {
+    for (let cc = carpetC; cc < carpetC + 4; cc++) {
+      _set(t, W, cc, r, TILES.CARPET);
+    }
   }
 
-  // Side alcove benches along the outer walls
-  for (let bc = 7; bc <= 13; bc += 3) {
-    _set(t, W, bc, 8,  TILES.WALL);
-    _set(t, W, bc, 14, TILES.WALL);
-    _set(t, W, W - 1 - bc, 8,  TILES.WALL);
-    _set(t, W, W - 1 - bc, 14, TILES.WALL);
+  // Throne dais — stone platform at north end (full width inner)
+  _fill(t, W, 2, 1, W - 4, 5, TILES.WALL);
+  // Open walkable platform top
+  _fill(t, W, 3, 2, W - 6, 3, TILES.STONE);
+  // Carpet on the dais leading to throne
+  for (let r = 2; r <= 4; r++) {
+    for (let cc = carpetC; cc < carpetC + 4; cc++) {
+      _set(t, W, cc, r, TILES.CARPET);
+    }
+  }
+  // Throne itself — centred on the dais back wall
+  _set(t, W, (W >> 1) - 1, 1, TILES.THRONE);
+  _set(t, W,  W >> 1,      1, TILES.THRONE);
+
+  // Torch braziers flanking throne on dais
+  _set(t, W, 4,      2, TILES.FIRE);
+  _set(t, W, W - 5,  2, TILES.FIRE);
+
+  // Grand pillars flanking the carpet (4 pairs, stone columns with fire tops)
+  for (let pr = 6; pr <= 22; pr += 5) {
+    // Left pair
+    _set(t, W, carpetC - 2, pr, TILES.WALL);
+    _set(t, W, carpetC - 3, pr, TILES.WALL);
+    // Right pair
+    _set(t, W, carpetC + 6, pr, TILES.WALL);
+    _set(t, W, carpetC + 7, pr, TILES.WALL);
+    // Torch on top of every other pillar pair
+    if ((pr - 6) % 10 === 0) {
+      _set(t, W, carpetC - 2, pr - 1, TILES.FIRE);
+      _set(t, W, carpetC + 6, pr - 1, TILES.FIRE);
+    }
   }
 
-  // Torches (fire) — corners and flanking throne
-  _set(t, W, 1,      1,      TILES.FIRE);
-  _set(t, W, W - 2,  1,      TILES.FIRE);
-  _set(t, W, 1,      H - 2,  TILES.FIRE);
-  _set(t, W, W - 2,  H - 2,  TILES.FIRE);
-  _set(t, W, 14,     3,      TILES.FIRE);
-  _set(t, W, W - 15, 3,      TILES.FIRE);
+  // Gallery benches along the outer side walls
+  for (let br = 8; br <= 22; br += 5) {
+    _set(t, W, 1, br,     TILES.WALL);
+    _set(t, W, 1, br + 1, TILES.WALL);
+    _set(t, W, W - 2, br,     TILES.WALL);
+    _set(t, W, W - 2, br + 1, TILES.WALL);
+  }
 
-  // Stairs at south centre
+  // Corner torches
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, 1,     TILES.FIRE);
+  _set(t, W, 1,     H - 2, TILES.FIRE);
+  _set(t, W, W - 2, H - 2, TILES.FIRE);
+
+  // Stairs at south centre (carpet connects to exit)
   const exitC = W >> 1, exitR = H - 2;
   _set(t, W, exitC, exitR, TILES.STAIRS);
 
@@ -270,128 +291,208 @@ function _buildKingdomKeepInterior() {
 }
 
 /**
- * Kingdom barracks (20 wide × 14 tall).
+ * Kingdom Butcher Shop (20 wide × 14 tall).
  */
-function _buildKingdomBarracksInterior() {
+function _buildKingdomButcherInterior() {
   const W = 20, H = 14;
   const t = _grid(W, H);
 
   _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
 
-  // Bunk rows on east and west walls (pairs of WALL blocks)
-  for (let br = 2; br <= 9; br += 2) {
-    _set(t, W, 2, br, TILES.WALL); _set(t, W, 3, br, TILES.WALL);
-    _set(t, W, W - 4, br, TILES.WALL); _set(t, W, W - 3, br, TILES.WALL);
+  // Serving counter along north wall (L-shaped)
+  _fill(t, W, 2, 1, 10, 2, TILES.WALL);
+  _set(t, W, 11, 2, TILES.STONE); // service gap
+
+  // Meat hooks / hanging display (wall blocks in a row above counter)
+  for (let hc = 3; hc <= 9; hc += 2) {
+    _set(t, W, hc, 1, TILES.WALL);
   }
 
-  // Central table
-  _fill(t, W, 8, 5, 4, 2, TILES.WALL);
+  // Cutting table in the back (behind counter)
+  _fill(t, W, 14, 2, 4, 2, TILES.WALL);
 
-  // Weapon rack (north wall centre)
-  _fill(t, W, 7, 1, 6, 1, TILES.WALL);
+  // Storage barrels in NE corner
+  _set(t, W, W - 3, 1, TILES.BARREL);
+  _set(t, W, W - 2, 1, TILES.BARREL);
 
-  _set(t, W, 1,      1,     TILES.FIRE);
-  _set(t, W, W - 2,  1,     TILES.FIRE);
+  // Display tables for meat (centre of shop)
+  _fill(t, W, 4,  6, 3, 2, TILES.WALL);
+  _fill(t, W, 10, 6, 3, 2, TILES.WALL);
 
-  const exitC = W >> 1, exitR = H - 2;
-  _set(t, W, exitC, exitR, TILES.STAIRS);
-  return new InteriorMap('kingdom_barracks', 'Kingdom Barracks', W, H, t, exitC, exitR - 1);
-}
-
-/**
- * Kingdom smithy (16 wide × 12 tall).
- */
-function _buildKingdomSmithyInterior() {
-  const W = 16, H = 12;
-  const t = _grid(W, H);
-
-  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
-
-  // Forge (fire) in NW corner
-  _set(t, W, 1, 1, TILES.FIRE);
-  _set(t, W, 2, 1, TILES.FIRE);
-  _set(t, W, 1, 2, TILES.FIRE);
-
-  // Anvil block beside forge
-  _set(t, W, 4, 2, TILES.WALL);
-
-  // Work bench along east wall
-  _fill(t, W, W - 3, 2, 2, 5, TILES.WALL);
-
-  // Coal/fuel storage (south east)
-  _fill(t, W, W - 4, H - 4, 3, 2, TILES.WALL);
-
-  // Torch in NE corner
-  _set(t, W, W - 2, 1, TILES.FIRE);
-
-  const exitC = W >> 1, exitR = H - 2;
-  _set(t, W, exitC, exitR, TILES.STAIRS);
-  return new InteriorMap('kingdom_smithy', 'Kingdom Smithy', W, H, t, exitC, exitR - 1);
-}
-
-/**
- * Kingdom chapel (20 wide × 14 tall).
- */
-function _buildKingdomChapelInterior() {
-  const W = 20, H = 14;
-  const t = _grid(W, H);
-
-  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
-
-  // Central aisle (dirt)
-  for (let r = 2; r < H - 2; r++) _set(t, W, W >> 1, r, TILES.DIRT);
-
-  // Altar at north wall
-  _fill(t, W, 7, 1, 6, 2, TILES.WALL);
-  _set(t, W, 9,  2, TILES.STONE); // opening at altar centre
-  _set(t, W, 10, 2, TILES.STONE);
-
-  // Pews — 3 rows on each side of aisle
-  for (let pr = 4; pr <= 10; pr += 3) {
-    _fill(t, W, 2,          pr, 6, 1, TILES.WALL);
-    _fill(t, W, W - 8,      pr, 6, 1, TILES.WALL);
-  }
-
-  // Candles / torches in corners and flanking altar
+  // Corner torches
   _set(t, W, 1,     1,     TILES.FIRE);
-  _set(t, W, W - 2, 1,     TILES.FIRE);
-  _set(t, W, 1,     H - 2, TILES.FIRE);
   _set(t, W, W - 2, H - 2, TILES.FIRE);
-  _set(t, W, 6,     3,     TILES.FIRE);
-  _set(t, W, W - 7, 3,     TILES.FIRE);
 
   const exitC = W >> 1, exitR = H - 2;
   _set(t, W, exitC, exitR, TILES.STAIRS);
-  return new InteriorMap('kingdom_chapel', 'Kingdom Chapel', W, H, t, exitC, exitR - 1);
+  return new InteriorMap('kingdom_butcher', 'Butcher Shop', W, H, t, exitC, exitR - 1);
 }
 
 /**
- * Kingdom inn (18 wide × 12 tall).
+ * Kingdom Fishmonger (18 wide × 12 tall).
  */
-function _buildKingdomInnInterior() {
+function _buildKingdomFishmongerInterior() {
   const W = 18, H = 12;
   const t = _grid(W, H);
 
   _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
 
-  // Bar counter along north wall
+  // Main counter (north wall)
   _fill(t, W, 2, 1, 8, 2, TILES.WALL);
-  // Gap in bar for service
-  _set(t, W, 6, 2, TILES.STONE);
+  _set(t, W, 6, 2, TILES.STONE); // service gap
 
-  // Fireplace on east wall
-  _set(t, W, W - 2, 2, TILES.FIRE);
-  _set(t, W, W - 2, 3, TILES.FIRE);
+  // Fish display tanks (wall blocks along east side)
+  _fill(t, W, W - 3, 2, 2, 5, TILES.WALL);
 
-  // Tables and stools scattered around the room
-  _fill(t, W, 3, 5, 2, 2, TILES.WALL);  // table 1
-  _fill(t, W, 7, 5, 2, 2, TILES.WALL);  // table 2
-  _fill(t, W, 3, 8, 2, 2, TILES.WALL);  // table 3
-  _fill(t, W, 11,5, 2, 2, TILES.WALL);  // table 4 (east)
+  // Ice storage (back NW)
+  _fill(t, W, 11, 1, 4, 2, TILES.WALL);
+
+  // Display table
+  _fill(t, W, 3, 6, 4, 2, TILES.WALL);
+
+  // Torch / lantern
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, 1,     TILES.FIRE);
 
   const exitC = W >> 1, exitR = H - 2;
   _set(t, W, exitC, exitR, TILES.STAIRS);
-  return new InteriorMap('kingdom_inn', 'The King\'s Rest Inn', W, H, t, exitC, exitR - 1);
+  return new InteriorMap('kingdom_fishmonger', 'Fishmonger', W, H, t, exitC, exitR - 1);
+}
+
+/**
+ * Kingdom Weapon Salesman (20 wide × 14 tall).
+ */
+function _buildKingdomWeaponsInterior() {
+  const W = 20, H = 14;
+  const t = _grid(W, H);
+
+  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
+
+  // Sales counter (north wall)
+  _fill(t, W, 2, 1, 8, 2, TILES.WALL);
+  _set(t, W, 6, 2, TILES.STONE); // gap
+
+  // Weapon rack on west wall (vertical strip of wall blocks)
+  for (let wr = 2; wr <= 9; wr += 2) {
+    _set(t, W, 1, wr, TILES.WALL);
+  }
+
+  // Armour / shield rack on east wall
+  for (let er = 2; er <= 9; er += 2) {
+    _set(t, W, W - 2, er, TILES.WALL);
+  }
+
+  // Central display stands
+  _fill(t, W, 5,  5, 2, 3, TILES.WALL);
+  _fill(t, W, 11, 5, 2, 3, TILES.WALL);
+  _fill(t, W, 8,  7, 4, 2, TILES.WALL);
+
+  // Torch braziers
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, 1,     TILES.FIRE);
+  _set(t, W, 1,     H - 2, TILES.FIRE);
+  _set(t, W, W - 2, H - 2, TILES.FIRE);
+
+  const exitC = W >> 1, exitR = H - 2;
+  _set(t, W, exitC, exitR, TILES.STAIRS);
+  return new InteriorMap('kingdom_weapons', 'Weapon Salesman', W, H, t, exitC, exitR - 1);
+}
+
+/**
+ * Kingdom Variety Shop (20 wide × 12 tall).
+ */
+function _buildKingdomVarietyInterior() {
+  const W = 20, H = 12;
+  const t = _grid(W, H);
+
+  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
+
+  // Main counter along north wall
+  _fill(t, W, 2, 1, 12, 2, TILES.WALL);
+  _set(t, W, 8, 2, TILES.STONE); // service gap
+
+  // Shelving unit east wall
+  _fill(t, W, W - 3, 1, 2, 6, TILES.WALL);
+
+  // Barrels / crates along west wall
+  _set(t, W, 1, 3, TILES.BARREL);
+  _set(t, W, 1, 4, TILES.BARREL);
+  _set(t, W, 1, 6, TILES.BARREL);
+
+  // Central display table
+  _fill(t, W, 5, 5, 4, 2, TILES.WALL);
+  _fill(t, W, 11, 5, 4, 2, TILES.WALL);
+
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, H - 2, TILES.FIRE);
+
+  const exitC = W >> 1, exitR = H - 2;
+  _set(t, W, exitC, exitR, TILES.STAIRS);
+  return new InteriorMap('kingdom_variety', 'Variety Shop', W, H, t, exitC, exitR - 1);
+}
+
+/**
+ * Kingdom Cape Salesman (18 wide × 12 tall).
+ */
+function _buildKingdomCapesInterior() {
+  const W = 18, H = 12;
+  const t = _grid(W, H);
+
+  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
+
+  // Service counter
+  _fill(t, W, 2, 1, 6, 2, TILES.WALL);
+  _set(t, W, 5, 2, TILES.STONE); // gap
+
+  // Cape display racks on east and west walls
+  for (let cr = 2; cr <= 8; cr += 2) {
+    _set(t, W, 1,     cr, TILES.WALL);
+    _set(t, W, W - 2, cr, TILES.WALL);
+  }
+
+  // Mannequin-style stands in centre
+  _fill(t, W, 5, 5, 2, 2, TILES.WALL);
+  _fill(t, W, 10, 5, 2, 2, TILES.WALL);
+
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, 1,     TILES.FIRE);
+
+  const exitC = W >> 1, exitR = H - 2;
+  _set(t, W, exitC, exitR, TILES.STAIRS);
+  return new InteriorMap('kingdom_capes', 'Cape Salesman', W, H, t, exitC, exitR - 1);
+}
+
+/**
+ * Kingdom Exchange — open trading hall, no NPC (future player exchange).
+ */
+function _buildKingdomExchangeInterior() {
+  const W = 20, H = 12;
+  const t = _grid(W, H);
+
+  _fill(t, W, 1, 1, W - 2, H - 2, TILES.STONE);
+
+  // Grand central carpet strip
+  _fill(t, W, (W >> 1) - 1, 1, 3, H - 2, TILES.CARPET);
+
+  // Notice boards / pillars flanking the carpet
+  for (let pr = 2; pr <= H - 3; pr += 3) {
+    _set(t, W, (W >> 1) - 4, pr, TILES.WALL);
+    _set(t, W, (W >> 1) + 4, pr, TILES.WALL);
+  }
+
+  // Trading counters on east and west sides
+  _fill(t, W, 1,     2, 3, H - 4, TILES.WALL);
+  _fill(t, W, W - 4, 2, 3, H - 4, TILES.WALL);
+
+  // Corner torches
+  _set(t, W, 1,     1,     TILES.FIRE);
+  _set(t, W, W - 2, 1,     TILES.FIRE);
+  _set(t, W, 1,     H - 2, TILES.FIRE);
+  _set(t, W, W - 2, H - 2, TILES.FIRE);
+
+  const exitC = W >> 1, exitR = H - 2;
+  _set(t, W, exitC, exitR, TILES.STAIRS);
+  return new InteriorMap('kingdom_exchange', 'Exchange — Coming Soon', W, H, t, exitC, exitR - 1);
 }
 
 /* ── Player house interior ──────────────────────────── */
@@ -541,14 +642,18 @@ export function buildAllInteriors(doorMap) {
       interiors.set(interiorId, _buildCastleKeepInterior());
     } else if (interiorId === 'kingdom_keep') {
       interiors.set(interiorId, _buildKingdomKeepInterior());
-    } else if (interiorId === 'kingdom_barracks') {
-      interiors.set(interiorId, _buildKingdomBarracksInterior());
-    } else if (interiorId === 'kingdom_smithy') {
-      interiors.set(interiorId, _buildKingdomSmithyInterior());
-    } else if (interiorId === 'kingdom_chapel') {
-      interiors.set(interiorId, _buildKingdomChapelInterior());
-    } else if (interiorId === 'kingdom_inn') {
-      interiors.set(interiorId, _buildKingdomInnInterior());
+    } else if (interiorId === 'kingdom_butcher') {
+      interiors.set(interiorId, _buildKingdomButcherInterior());
+    } else if (interiorId === 'kingdom_fishmonger') {
+      interiors.set(interiorId, _buildKingdomFishmongerInterior());
+    } else if (interiorId === 'kingdom_weapons') {
+      interiors.set(interiorId, _buildKingdomWeaponsInterior());
+    } else if (interiorId === 'kingdom_variety') {
+      interiors.set(interiorId, _buildKingdomVarietyInterior());
+    } else if (interiorId === 'kingdom_capes') {
+      interiors.set(interiorId, _buildKingdomCapesInterior());
+    } else if (interiorId === 'kingdom_exchange') {
+      interiors.set(interiorId, _buildKingdomExchangeInterior());
     } else if (interiorId.endsWith('_interior') && interiorId.startsWith('tower')) {
       interiors.set(interiorId, _buildWatchtowerInterior(interiorId));
     } else if (interiorId === 'outpost_interior') {

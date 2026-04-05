@@ -34,8 +34,9 @@ import {
 // Tiles that animate each frame (use this.time) — excluded from the chunk cache
 const ANIMATED_TILES = new Set([
   TILES.WATER, TILES.SWAMP_WATER, TILES.LAVA,
-  TILES.FISH_SPOT, TILES.FISH_SPOT_SALMON, TILES.FISH_SPOT_LOBSTER,
+  TILES.FISH_SPOT,
   TILES.FIRE, TILES.PORTAL,
+  TILES.FOUNTAIN,
 ]);
 // Prop tiles that don't fill their cell — rendered on top of the underlying ground tile
 const PROP_TILES = new Set([
@@ -56,6 +57,10 @@ const PROP_TILES = new Set([
   TILES.ROCK_DEPLETED,
   // Dungeon ladder (drawn on top of the stone floor inside the shrine)
   TILES.DUNGEON_ENTRANCE,
+  // Kingdom courtyard decorations
+  TILES.FOUNTAIN,
+  TILES.PLANTER_FLOWERS,
+  TILES.PLANTER_BUSH,
 ]);
 const CHUNK_TILES = 16;                        // tiles per chunk side
 const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
@@ -171,7 +176,7 @@ export class Renderer {
   drawOpenDoors(world, playerCol, playerRow) {
     if (!world.roofBounds) return;
     const ctx = this.ctx;
-    for (const { doorC, doorR, doorFace, bC, bR, bW, bH } of world.roofBounds) {
+    for (const { doorC, doorR, doorFace, bC, bR, bW, bH, floorTile } of world.roofBounds) {
       if (doorC === undefined) continue;
       if (playerCol < bC || playerCol >= bC + bW) continue;
       if (playerRow < bR || playerRow >= bR + bH) continue;
@@ -180,14 +185,12 @@ export class Renderer {
       const dy = doorR * TILE_SIZE;
       const T  = TILE_SIZE;
 
-      // Floor beneath the open door
-      ctx.fillStyle = '#7a4e22'; ctx.fillRect(dx, dy, T, T);
-      const planks = ['#8b5c2a','#7e5224','#966030','#7a4c20'];
-      for (let i = 0; i < 4; i++) {
-        ctx.fillStyle = planks[i];                ctx.fillRect(dx, dy + i * 8, T, 7);
-        ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(dx, dy + i * 8, T, 1);
-        ctx.fillStyle = 'rgba(0,0,0,0.16)';       ctx.fillRect(dx, dy + i * 8 + 7, T, 1);
-      }
+      // Floor beneath the open door — uses the building's own floor tile
+      const floorId = floorTile ?? TILES.STONE;
+      ctx.fillStyle = TILE_COLORS[floorId] || '#7a7a7a';
+      ctx.fillRect(dx, dy, T, T);
+      if (TILE_HAS_DETAIL.has(floorId) && !ANIMATED_TILES.has(floorId))
+        this._drawTileDetail(ctx, floorId, dx, dy, doorC, doorR, world);
 
       // Door panel swung open against the jamb
       const panelX = doorFace === 'north' ? dx + T - 5 : dx;
@@ -270,8 +273,8 @@ export class Renderer {
           ctx.fillStyle = TILE_COLORS[tile] || '#000';
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
-        // THATCH_ROOF detail is replaced by the multi-tile overlay pass in drawWorld
-        if (TILE_HAS_DETAIL.has(tile) && !ANIMATED_TILES.has(tile) && tile !== TILES.THATCH_ROOF) {
+        // THATCH_ROOF and ROOF detail are replaced by the multi-tile overlay pass in drawWorld
+        if (TILE_HAS_DETAIL.has(tile) && !ANIMATED_TILES.has(tile) && tile !== TILES.THATCH_ROOF && tile !== TILES.ROOF) {
           this._drawTileDetail(ctx, tile, px, py, col, row, world);
         }
       }
@@ -697,48 +700,6 @@ export class Renderer {
         ctx.fillRect(px, py + FACE + 4, 32, 1);
       }
 
-      // ─── ROOF EAVE (south + east sides rendered from the wall tile) ────────
-      // The wall tiles on the south and east sides of a building render AFTER
-      // the ROOF tiles, so they can overdraw the eave area into the ROOF tile.
-      const EAVE = 14;
-      const R0 = 118, G0 = 48, B0 = 22;
-      const roofN = world && world.getTile(c, r - 1) === TILES.ROOF; // south eave
-      const roofW = world && world.getTile(c - 1, r) === TILES.ROOF; // east eave
-      if (roofN) {
-        // South-facing eave: extend EAVE px upward into ROOF tile above
-        ctx.fillStyle = `rgb(${R0-28},${G0-14},${B0-6})`;
-        ctx.fillRect(px - 2, py - EAVE, 36, EAVE);
-        ctx.fillStyle = 'rgba(0,0,0,0.20)';
-        for (let i = 0; i <= 4; i++) ctx.fillRect(px - 2 + i * 8, py - EAVE, 1, EAVE);
-        ctx.fillStyle = 'rgba(255,190,120,0.10)';
-        ctx.fillRect(px, py - EAVE + 2, 32, EAVE - 4);
-        ctx.fillStyle = `rgb(${R0-40},${G0-20},${B0-10})`;
-        ctx.fillRect(px - 2, py - EAVE, 36, 3);
-        ctx.fillStyle = 'rgba(0,0,0,0.40)';
-        ctx.fillRect(px - 2, py - EAVE, 36, 2);
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(px - 2, py - 3, 36, 3);
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
-        ctx.fillRect(px - 2, py,     36, 2);
-      }
-      if (roofW) {
-        // East-facing eave: extend EAVE px leftward into ROOF tile to the west
-        ctx.fillStyle = `rgb(${R0-28},${G0-14},${B0-6})`;
-        ctx.fillRect(px - EAVE, py - 2, EAVE, 36);
-        ctx.fillStyle = 'rgba(0,0,0,0.20)';
-        for (let i = 0; i <= 4; i++) ctx.fillRect(px - EAVE, py - 2 + i * 8, EAVE, 1);
-        ctx.fillStyle = 'rgba(255,190,120,0.10)';
-        ctx.fillRect(px - EAVE + 2, py, EAVE - 4, 32);
-        ctx.fillStyle = `rgb(${R0-40},${G0-20},${B0-10})`;
-        ctx.fillRect(px - EAVE, py - 2, 3, 36);
-        ctx.fillStyle = 'rgba(0,0,0,0.40)';
-        ctx.fillRect(px - EAVE, py - 2, 2, 36);
-        ctx.fillStyle = 'rgba(0,0,0,0.55)';
-        ctx.fillRect(px - 3, py - 2, 3, 36);
-        ctx.fillStyle = 'rgba(0,0,0,0.28)';
-        ctx.fillRect(px,     py - 2, 2, 36);
-      }
-
       return;
     }
 
@@ -946,10 +907,12 @@ export class Renderer {
 
     // ── Fish spots ────────────────────────────────────────
 
-    if (tile === TILES.FISH_SPOT || tile === TILES.FISH_SPOT_SALMON || tile === TILES.FISH_SPOT_LOBSTER) {
+    if (tile === TILES.FISH_SPOT) {
       const t = this.time;
-      const phase  = (t * 1.5 + s1 * 0.5) % 1;
-      const phase2 = (t * 1.5 + s1 * 0.5 + 0.5) % 1;
+      // Use ((x % 1) + 1) % 1 to guarantee [0, 1) even if intermediate value is negative
+      const raw   = t * 1.5 + s1 * 0.5;
+      const phase  = ((raw      ) % 1 + 1) % 1;
+      const phase2 = ((raw + 0.5) % 1 + 1) % 1;
       ctx.strokeStyle = `rgba(160,220,255,${(0.4 * (1 - phase)).toFixed(2)})`; ctx.lineWidth = 1;
       ctx.beginPath(); ctx.arc(px + 16, py + 16, 4 + phase * 10, 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = `rgba(160,220,255,${(0.4 * (1 - phase2)).toFixed(2)})`;
@@ -1197,6 +1160,1008 @@ export class Renderer {
       ctx.fillRect(px, py+31, 32, 1);
       ctx.fillRect(px+31, py, 1, 32);
 
+      return;
+    }
+
+    // ── Royal carpet ─────────────────────────────────────
+
+    if (tile === TILES.CARPET) {
+      // Gold side borders
+      ctx.fillStyle = '#c8960c';
+      ctx.fillRect(px,      py, 4, 32);
+      ctx.fillRect(px + 28, py, 4, 32);
+      // Inner border line
+      ctx.fillStyle = '#a87a08';
+      ctx.fillRect(px + 3,  py, 1, 32);
+      ctx.fillRect(px + 28, py, 1, 32);
+      // Horizontal alternating bands
+      for (let iy = 0; iy < 32; iy += 8) {
+        ctx.fillStyle = iy % 16 === 0 ? 'rgba(180,0,0,0.25)' : 'rgba(0,0,0,0.12)';
+        ctx.fillRect(px + 4, py + iy, 24, 8);
+      }
+      // Centre medallion
+      ctx.fillStyle = 'rgba(220,170,30,0.40)';
+      ctx.fillRect(px + 10, py + 10, 12, 12);
+      ctx.fillStyle = 'rgba(220,170,30,0.22)';
+      ctx.fillRect(px + 13, py + 13, 6,  6);
+      ctx.fillStyle = 'rgba(200,140,20,0.55)';
+      ctx.fillRect(px + 15, py + 15, 2,  2);
+      // Edge highlight / shadow
+      ctx.fillStyle = 'rgba(255,200,80,0.30)';
+      ctx.fillRect(px, py, 32, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(px, py + 31, 32, 1);
+      return;
+    }
+
+    // ── Throne ────────────────────────────────────────────
+
+    if (tile === TILES.THRONE) {
+      // Seat cushion (crimson velvet)
+      ctx.fillStyle = '#8b0000';
+      ctx.fillRect(px + 5, py + 18, 22, 10);
+      ctx.fillStyle = '#6b0000';
+      ctx.fillRect(px + 6, py + 19, 20, 8);
+      ctx.fillStyle = 'rgba(255,100,100,0.18)';
+      ctx.fillRect(px + 7, py + 19, 18, 3);
+      // Back rest (dark oak)
+      ctx.fillStyle = '#3a1a00';
+      ctx.fillRect(px + 5, py + 2, 22, 17);
+      ctx.fillStyle = '#4a2800';
+      ctx.fillRect(px + 6, py + 3, 20, 15);
+      // Armrests
+      ctx.fillStyle = '#3a1a00';
+      ctx.fillRect(px + 2,  py + 14, 5, 14);
+      ctx.fillRect(px + 25, py + 14, 5, 14);
+      ctx.fillStyle = '#4a2800';
+      ctx.fillRect(px + 3,  py + 15, 3, 12);
+      ctx.fillRect(px + 26, py + 15, 3, 12);
+      // Gold trim on seat edge
+      ctx.fillStyle = '#c8960c';
+      ctx.fillRect(px + 5,  py + 17, 22, 2);
+      ctx.fillRect(px + 5,  py + 27, 22, 2);
+      ctx.fillRect(px + 2,  py + 14, 3, 2);
+      ctx.fillRect(px + 27, py + 14, 3, 2);
+      // Gold trim on backrest top
+      ctx.fillStyle = '#d4a020';
+      ctx.fillRect(px + 5, py + 2, 22, 2);
+      // Crown finials at top
+      ctx.fillStyle = '#c8960c';
+      ctx.fillRect(px + 6,  py,     3, 4);
+      ctx.fillRect(px + 13, py - 1, 6, 5);
+      ctx.fillRect(px + 23, py,     3, 4);
+      // Finial tops (jewel)
+      ctx.fillStyle = '#e84040';
+      ctx.fillRect(px + 7,  py,     1, 1);
+      ctx.fillRect(px + 15, py - 1, 2, 2);
+      ctx.fillRect(px + 24, py,     1, 1);
+      // Backrest panel design (cross motif)
+      ctx.fillStyle = 'rgba(220,160,20,0.45)';
+      ctx.fillRect(px + 15, py + 4, 2, 13);
+      ctx.fillRect(px + 8,  py + 9, 16, 2);
+      return;
+    }
+
+    // ── Wooden plank floor ────────────────────────────────
+
+    if (tile === TILES.WOOD_FLOOR) {
+      // Four horizontal boards, each 8 px tall
+      const boardTones = ['#c47a32','#b86c28','#cc8038','#b47030'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = boardTones[(i + s1) % 4];
+        ctx.fillRect(px, py + i * 8, 32, 8);
+        // Wood grain — 3–4 subtle vertical streaks per board
+        ctx.fillStyle = 'rgba(0,0,0,0.09)';
+        const off = (s2 * 3 + i * 9) % 5;
+        for (let gx = off + 3; gx < 32; gx += 7 + (s3 % 3))
+          ctx.fillRect(px + gx, py + i * 8 + 1, 1, 6);
+        // Board top highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.11)';
+        ctx.fillRect(px, py + i * 8, 32, 1);
+      }
+      // Joints between boards
+      ctx.fillStyle = '#6a3810';
+      for (let i = 1; i < 4; i++) ctx.fillRect(px, py + i * 8 - 1, 32, 2);
+      // Random blood smear for atmosphere (1-in-6 tiles)
+      if (s3 % 6 === 0) {
+        ctx.fillStyle = 'rgba(110,15,15,0.22)';
+        ctx.fillRect(px + 5  + (s1 % 14), py + 3  + (s2 % 20), 7, 4);
+        ctx.fillRect(px + 9  + (s3 % 10), py + 9  + (s1 % 14), 3, 2);
+      }
+      return;
+    }
+
+    // ── Meat hooks (wall-mounted raw meat display) ────────
+
+    if (tile === TILES.MEAT_HOOK) {
+      // Dark wooden beam rail at top
+      ctx.fillStyle = '#2e1008';
+      ctx.fillRect(px, py, 32, 9);
+      ctx.fillStyle = '#4a2010';
+      ctx.fillRect(px, py + 1, 32, 5);
+      ctx.fillStyle = 'rgba(255,200,120,0.12)';
+      ctx.fillRect(px, py + 1, 32, 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(px, py + 7, 32, 2);
+
+      // Three metal S-hooks hanging from beam
+      const hx = [6, 15, 24];
+      for (const x of hx) {
+        ctx.fillStyle = '#9090a0';
+        ctx.fillRect(px + x,     py + 5, 2, 5);   // shank
+        ctx.fillRect(px + x - 1, py + 9, 4, 2);   // hook curve
+        ctx.fillStyle = 'rgba(255,255,255,0.28)';
+        ctx.fillRect(px + x,     py + 5, 1, 4);   // sheen
+      }
+
+      // Left cut — beef, deep red
+      ctx.fillStyle = '#9a2020';
+      ctx.fillRect(px + 2, py + 11, 9, 15);
+      ctx.fillStyle = '#c43030';
+      ctx.fillRect(px + 3, py + 11, 7, 13);
+      ctx.fillStyle = '#d84040';
+      ctx.fillRect(px + 4, py + 12, 5, 10);
+      // fat/marbling
+      ctx.fillStyle = 'rgba(255,235,205,0.80)';
+      ctx.fillRect(px + 4, py + 14, 3, 1);
+      ctx.fillRect(px + 7, py + 18, 2, 2);
+
+      // Centre cut — pork, slightly pink
+      ctx.fillStyle = '#b83838';
+      ctx.fillRect(px + 12, py + 11, 7, 13);
+      ctx.fillStyle = '#d04848';
+      ctx.fillRect(px + 13, py + 11, 5, 11);
+      ctx.fillStyle = 'rgba(255,235,205,0.75)';
+      ctx.fillRect(px + 14, py + 14, 3, 2);
+
+      // Right cut — venison, darker
+      ctx.fillStyle = '#8a1818';
+      ctx.fillRect(px + 21, py + 11, 9, 16);
+      ctx.fillStyle = '#b02828';
+      ctx.fillRect(px + 22, py + 11, 7, 14);
+      ctx.fillStyle = '#c83838';
+      ctx.fillRect(px + 23, py + 12, 5, 11);
+      ctx.fillStyle = 'rgba(255,235,205,0.75)';
+      ctx.fillRect(px + 24, py + 15, 2, 1);
+      ctx.fillRect(px + 26, py + 19, 1, 2);
+
+      // Bottom shadows under each cut
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(px + 2,  py + 26, 9,  4);
+      ctx.fillRect(px + 12, py + 24, 7,  4);
+      ctx.fillRect(px + 21, py + 27, 9,  4);
+      return;
+    }
+
+    // ── Butcher's chopping block ──────────────────────────
+
+    if (tile === TILES.BUTCHER_BLOCK) {
+      // Wood plank floor underneath
+      this._drawTileDetail(ctx, TILES.WOOD_FLOOR, px, py, c, r, world);
+
+      // Drop shadow beneath block
+      ctx.fillStyle = 'rgba(0,0,0,0.32)';
+      ctx.beginPath();
+      ctx.ellipse(px + 17, py + 27, 11, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Block body — thick end-grain cross section, centred
+      // Outer bark ring
+      ctx.fillStyle = '#3a2008';
+      ctx.beginPath(); ctx.ellipse(px + 16, py + 15, 13, 12, 0, 0, Math.PI * 2); ctx.fill();
+      // Sapwood ring
+      ctx.fillStyle = '#7a4e20';
+      ctx.beginPath(); ctx.ellipse(px + 16, py + 15, 11, 10, 0, 0, Math.PI * 2); ctx.fill();
+      // Heartwood ring 1
+      ctx.fillStyle = '#5a3410';
+      ctx.beginPath(); ctx.ellipse(px + 16, py + 15,  8,  7, 0, 0, Math.PI * 2); ctx.fill();
+      // Heartwood ring 2
+      ctx.fillStyle = '#7a4c1c';
+      ctx.beginPath(); ctx.ellipse(px + 16, py + 15,  5,  4, 0, 0, Math.PI * 2); ctx.fill();
+      // Pith
+      ctx.fillStyle = '#3a2008';
+      ctx.beginPath(); ctx.arc(px + 16, py + 15, 1.5, 0, Math.PI * 2); ctx.fill();
+
+      // Knife cut grooves across the surface
+      ctx.fillStyle = 'rgba(0,0,0,0.38)';
+      ctx.fillRect(px + 10, py + 12, 13, 1);
+      ctx.fillRect(px + 12, py + 17,  9, 1);
+      ctx.fillRect(px + 18, py + 10,  1, 9);
+
+      // Top-left highlight (ambient light from above-left)
+      ctx.fillStyle = 'rgba(255,255,255,0.14)';
+      ctx.beginPath(); ctx.ellipse(px + 12, py + 11, 4, 3, -0.4, 0, Math.PI * 2); ctx.fill();
+
+      // Cleaver blade (top-down: blade facing left, handle right)
+      ctx.fillStyle = '#b0b0c0'; // blade face
+      ctx.fillRect(px + 20, py + 10, 7, 10);
+      ctx.fillStyle = 'rgba(255,255,255,0.40)'; // blade sheen
+      ctx.fillRect(px + 20, py + 10, 1, 10);
+      ctx.fillStyle = '#3a3a4e'; // spine of blade
+      ctx.fillRect(px + 26, py + 10, 1, 10);
+      // Guard
+      ctx.fillStyle = '#7a7a80';
+      ctx.fillRect(px + 19, py + 9, 2, 12);
+      // Handle
+      ctx.fillStyle = '#5a2c10';
+      ctx.fillRect(px + 27, py + 11, 5, 8);
+      ctx.fillStyle = '#3a1a08';
+      ctx.fillRect(px + 27, py + 11, 5, 2);
+      ctx.fillRect(px + 27, py + 17, 5, 2);
+      return;
+    }
+
+    // ── Hearth (stone fireplace) ──────────────────────────
+
+    if (tile === TILES.HEARTH) {
+      // Wood plank floor underneath
+      this._drawTileDetail(ctx, TILES.WOOD_FLOOR, px, py, c, r, world);
+      // Individual stone blocks (top-left, top-right, bot-left, bot-right)
+      ctx.fillStyle = '#4e4444';
+      ctx.fillRect(px,     py,     14, 13);
+      ctx.fillRect(px + 18, py,    14, 13);
+      ctx.fillRect(px,     py + 19, 14, 13);
+      ctx.fillRect(px + 18, py + 19, 14, 13);
+      // Stone highlights (mortar sheen)
+      ctx.fillStyle = '#6a6060';
+      ctx.fillRect(px + 1,  py + 1,  12, 2);
+      ctx.fillRect(px + 19, py + 1,  12, 2);
+      ctx.fillRect(px + 1,  py + 20, 12, 2);
+      ctx.fillRect(px + 19, py + 20, 12, 2);
+      // Deep mortar joints
+      ctx.fillStyle = '#201818';
+      ctx.fillRect(px,      py + 13, 32, 6);  // horizontal band
+      ctx.fillRect(px + 14, py,       4, 13); // top vertical
+      ctx.fillRect(px + 14, py + 19,  4, 13); // bottom vertical
+
+      // Firebox cavity
+      ctx.fillStyle = '#140a04';
+      ctx.fillRect(px + 5, py + 5, 22, 22);
+
+      // Ash bed at the base of the fire
+      ctx.fillStyle = '#6a5a4a';
+      ctx.fillRect(px + 6, py + 22, 20, 4);
+      ctx.fillStyle = '#7a6a5a';
+      ctx.fillRect(px + 8,  py + 22, 4, 2);
+      ctx.fillRect(px + 17, py + 22, 5, 2);
+
+      // Fire — layered from ember-red at base to bright yellow at tip
+      ctx.fillStyle = '#8a2200';                       // deep ember
+      ctx.fillRect(px + 7,  py + 19, 18, 4);
+      ctx.fillStyle = '#c44000';                       // low flame
+      ctx.fillRect(px + 9,  py + 15, 14, 6);
+      ctx.fillStyle = '#e06800';                       // mid flame
+      ctx.fillRect(px + 11, py + 11, 10, 6);
+      ctx.fillStyle = '#f09020';                       // upper flame
+      ctx.fillRect(px + 13, py + 8,   6, 5);
+      ctx.fillStyle = '#f8c840';                       // tip
+      ctx.fillRect(px + 14, py + 6,   4, 4);
+      ctx.fillStyle = '#fff8a0';                       // hot point
+      ctx.fillRect(px + 15, py + 5,   2, 3);
+
+      // Flame wisps (offset flickers for texture)
+      ctx.fillStyle = '#f09020';
+      ctx.fillRect(px + 10, py + 12, 2, 3);
+      ctx.fillRect(px + 20, py + 13, 2, 4);
+      ctx.fillStyle = '#e06800';
+      ctx.fillRect(px + 8,  py + 17, 2, 3);
+      ctx.fillRect(px + 22, py + 16, 2, 4);
+
+      // Warm glow cast across firebox interior
+      ctx.fillStyle = 'rgba(255,100,0,0.12)';
+      ctx.fillRect(px + 5, py + 5, 22, 22);
+
+      // Soot smear at top of firebox opening
+      ctx.fillStyle = 'rgba(0,0,0,0.40)';
+      ctx.fillRect(px + 5, py + 5, 22, 3);
+      return;
+    }
+
+    // ── Wet stone floor (fishmonger) ─────────────────────
+
+    if (tile === TILES.WET_STONE) {
+      const v = s1 % 3;
+      // Dark wet base
+      ctx.fillStyle = '#3a5060'; ctx.fillRect(px, py, 32, 32);
+      // Top-left cobble
+      ctx.fillStyle = '#4a6470'; ctx.fillRect(px + 1,        py + 1,      13 + v, 12);
+      ctx.fillStyle = '#587480'; ctx.fillRect(px + 2,        py + 2,      11 + v, 2);   // highlight
+      // Top-right cobble
+      ctx.fillStyle = '#486270'; ctx.fillRect(px + 17,       py + 1,      13 + v, 12);
+      ctx.fillStyle = '#567278'; ctx.fillRect(px + 18,       py + 2,      11 + v, 2);
+      // Bottom cobble (spans most of width)
+      ctx.fillStyle = '#506870'; ctx.fillRect(px + 1,        py + 16,     28,     14);
+      ctx.fillStyle = '#607880'; ctx.fillRect(px + 2,        py + 17,     26,      2);
+      // Mortar joints
+      ctx.fillStyle = '#253040';
+      ctx.fillRect(px,      py + 14, 32, 2);
+      ctx.fillRect(px + 15, py,       2, 14);
+      // Water puddle (occasional)
+      if (s3 % 3 === 0) {
+        ctx.fillStyle = 'rgba(40,100,150,0.50)';
+        ctx.fillRect(px + 5 + (s2 % 8), py + 20 + (s1 % 6), 8, 3);
+        ctx.fillStyle = 'rgba(160,210,250,0.35)';
+        ctx.fillRect(px + 6 + (s2 % 8), py + 20 + (s1 % 6), 4, 1);
+      }
+      // Wet sheen
+      ctx.fillStyle = 'rgba(100,180,220,0.07)'; ctx.fillRect(px, py, 32, 32);
+      return;
+    }
+
+    // ── Fish counter (display with fish laid out) ─────────
+
+    if (tile === TILES.FISH_COUNTER) {
+      // Dark aged-wood counter body
+      ctx.fillStyle = '#3a2010'; ctx.fillRect(px, py, 32, 32);
+      // Front face planks
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(px + 1, py + 22, 30, 9);
+      ctx.fillStyle = '#4a2810'; // plank joints
+      ctx.fillRect(px + 11, py + 22, 1, 9);
+      ctx.fillRect(px + 21, py + 22, 1, 9);
+      // Rim edge
+      ctx.fillStyle = '#7a5028'; ctx.fillRect(px + 1, py + 20, 30, 3);
+      // Counter top surface (slate grey)
+      ctx.fillStyle = '#807868'; ctx.fillRect(px + 1, py + 1, 30, 20);
+      ctx.fillStyle = '#908878'; ctx.fillRect(px + 2, py + 2, 28, 2); // surface highlight
+      // Surface wear lines
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.fillRect(px + 4, py + 8, 24, 1);
+      ctx.fillRect(px + 6, py + 14, 20, 1);
+
+      // Fish 1 — herring (small silver, left side)
+      const hx = px + 2 + (s1 % 4);
+      ctx.fillStyle = '#a8b4b0'; ctx.fillRect(hx,      py + 6, 10, 5);   // body
+      ctx.fillStyle = '#c0ccc8'; ctx.fillRect(hx + 1,  py + 7,  7, 2);   // belly highlight
+      ctx.fillStyle = '#707880'; ctx.fillRect(hx - 2,  py + 7,  3, 3);   // tail
+      ctx.fillStyle = '#404848'; ctx.fillRect(hx + 8,  py + 7,  2, 2);   // eye
+      ctx.fillStyle = 'rgba(200,220,220,0.4)';
+      ctx.fillRect(hx + 3, py + 6, 2, 2); ctx.fillRect(hx + 6, py + 6, 2, 2); // scales
+
+      // Fish 2 — salmon (larger, pink-orange, right side)
+      const sx = px + 16 + (s2 % 3);
+      ctx.fillStyle = '#c86030'; ctx.fillRect(sx,      py + 4, 13, 7);   // body
+      ctx.fillStyle = '#e07848'; ctx.fillRect(sx + 1,  py + 6, 10, 3);   // belly
+      ctx.fillStyle = '#a04820'; ctx.fillRect(sx - 2,  py + 5,  3, 5);   // tail
+      ctx.fillStyle = '#380800'; ctx.fillRect(sx + 11, py + 5,  2, 2);   // eye
+      ctx.fillStyle = 'rgba(210,100,50,0.45)';
+      ctx.fillRect(sx + 3, py + 5, 2, 2); ctx.fillRect(sx + 6, py + 5, 2, 2); // scales
+
+      // Seaweed / garnish sprig between fish
+      ctx.fillStyle = '#306020';
+      ctx.fillRect(px + 13, py + 9, 2, 5); ctx.fillRect(px + 12, py + 11, 4, 2);
+      return;
+    }
+
+    // ── Fish tank (water trough with live fish) ───────────
+
+    if (tile === TILES.FISH_TANK) {
+      // Wet stone floor background with 2 px border showing
+      this._drawTileDetail(ctx, TILES.WET_STONE, px, py, c, r, world);
+      // Wooden barrel frame (2 px inset on all sides)
+      ctx.fillStyle = '#4a3018'; ctx.fillRect(px + 2, py + 2, 28, 28);
+      // Water interior
+      ctx.fillStyle = '#143060'; ctx.fillRect(px + 5, py + 5, 22, 22);
+      ctx.fillStyle = '#1a3c78'; ctx.fillRect(px + 5, py + 5, 22,  8); // surface layer
+      // Surface ripples
+      ctx.fillStyle = '#204890';
+      ctx.fillRect(px + 7,  py + 7, 6, 1); ctx.fillRect(px + 20, py + 8, 5, 1);
+      ctx.fillRect(px + 10, py + 10, 3, 1); ctx.fillRect(px + 18, py + 11, 6, 1);
+      // Subtle surface sheen
+      ctx.fillStyle = 'rgba(100,160,255,0.22)'; ctx.fillRect(px + 6, py + 6, 20, 2);
+      // Fish silhouettes underwater
+      const ft1x = px + 7 + (s1 % 6), ft1y = py + 16 + (s2 % 5);
+      ctx.fillStyle = '#0a1a40'; ctx.fillRect(ft1x,     ft1y,      9, 3); // body
+      ctx.fillStyle = '#0c2050'; ctx.fillRect(ft1x - 1, ft1y + 1,  2, 1); // tail
+      const ft2x = px + 19 + (s3 % 5), ft2y = py + 22 + (s1 % 4);
+      ctx.fillStyle = '#091838'; ctx.fillRect(ft2x,     ft2y,      8, 3);
+      ctx.fillStyle = '#0b1e48'; ctx.fillRect(ft2x + 7, ft2y,      2, 3);
+      // Wooden barrel hoops (iron bands)
+      ctx.fillStyle = '#2a1808';
+      ctx.fillRect(px + 2, py + 12, 28, 2);
+      ctx.fillRect(px + 2, py + 22, 28, 2);
+      // Barrel side staves (edge highlight)
+      ctx.fillStyle = '#6a4828';
+      ctx.fillRect(px + 2, py + 2, 2, 28); ctx.fillRect(px + 28, py + 2, 2, 28);
+      ctx.fillRect(px + 2, py + 2, 28, 2); ctx.fillRect(px + 2, py + 28, 28, 2);
+      return;
+    }
+
+    // ── Ice box (crate of fish packed in ice) ─────────────
+
+    if (tile === TILES.ICE_BOX) {
+      // Wet stone floor background with 2 px border showing
+      this._drawTileDetail(ctx, TILES.WET_STONE, px, py, c, r, world);
+      // Wooden crate exterior (2 px inset on all sides)
+      ctx.fillStyle = '#5a4030'; ctx.fillRect(px + 2, py + 2, 28, 28);
+      // Plank grain lines
+      ctx.fillStyle = '#3a2820';
+      ctx.fillRect(px + 12, py + 2,  2, 28); ctx.fillRect(px + 22, py + 2, 2, 28);
+      ctx.fillRect(px + 2,  py + 12, 28, 2); ctx.fillRect(px + 2,  py + 22, 28, 2);
+      // Ice surface inside the crate (top portion)
+      ctx.fillStyle = '#b0d0e0'; ctx.fillRect(px + 4, py + 4, 22, 14);
+      // Ice chunk highlights
+      ctx.fillStyle = '#d0eaf8';
+      ctx.fillRect(px + 5,             py + 5,  8, 5);           // chunk 1
+      ctx.fillRect(px + 16 + (s1 % 3), py + 6,  6, 4);           // chunk 2
+      ctx.fillRect(px + 5,             py + 12, 5, 4);           // chunk 3
+      ctx.fillRect(px + 13,            py + 11, 7 + (s2 % 3), 4); // chunk 4
+      ctx.fillRect(px + 22,            py + 5,  4, 7);           // chunk 5
+      // Ice crystal glints
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.fillRect(px + 5,             py + 5, 3, 1);
+      ctx.fillRect(px + 16 + (s1 % 3), py + 6, 2, 1);
+      ctx.fillRect(px + 22,            py + 5, 2, 1);
+      // Fish body sticking out below ice line
+      const fix = px + 8 + (s3 % 7);
+      ctx.fillStyle = '#b04028'; ctx.fillRect(fix,     py + 19, 7, 11);  // body
+      ctx.fillStyle = '#c05030'; ctx.fillRect(fix + 1, py + 20, 4,  3);  // belly
+      // Tail fin
+      ctx.fillStyle = '#903020';
+      ctx.fillRect(fix - 1, py + 27, 3, 3);
+      ctx.fillRect(fix + 6, py + 27, 3, 3);
+      // Cold mist wisp at ice line
+      ctx.fillStyle = 'rgba(220,240,255,0.18)'; ctx.fillRect(px + 5, py + 19, 22, 3);
+      // Corner nails
+      ctx.fillStyle = '#484030';
+      ctx.fillRect(px + 3, py +  3, 2, 2); ctx.fillRect(px + 27, py +  3, 2, 2);
+      ctx.fillRect(px + 3, py + 27, 2, 2); ctx.fillRect(px + 27, py + 27, 2, 2);
+      return;
+    }
+
+    // ── Dark armory stone floor ───────────────────────────
+
+    if (tile === TILES.STONE_TILE) {
+      // Near-black base
+      ctx.fillStyle = '#22202c'; ctx.fillRect(px, py, 32, 32);
+      // Two large stone slabs (upper / lower half)
+      ctx.fillStyle = '#2e2a38'; ctx.fillRect(px + 1,  py + 1,  30, 13);
+      ctx.fillStyle = '#282434'; ctx.fillRect(px + 1,  py + 16, 30, 15);
+      // Polished edge highlights
+      ctx.fillStyle = '#3c3848'; ctx.fillRect(px + 2,  py + 2,  28,  2);
+      ctx.fillStyle = '#3a3646'; ctx.fillRect(px + 2,  py + 17, 28,  2);
+      // Seams
+      ctx.fillStyle = '#161420';
+      ctx.fillRect(px,      py + 14, 32,  2);  // horizontal slab seam
+      ctx.fillRect(px + 16, py,       2, 14);  // vertical seam in upper slab
+      // Polished corner gloss
+      ctx.fillStyle = 'rgba(160,140,200,0.10)'; ctx.fillRect(px + 2,  py + 2,  13, 11);
+      ctx.fillStyle = 'rgba(160,140,200,0.06)'; ctx.fillRect(px + 18, py + 17, 11, 12);
+      // Iron inlay accent lines
+      ctx.fillStyle = '#3e3850';
+      ctx.fillRect(px + 5,  py + 7,  6, 1); ctx.fillRect(px + 21, py + 7,  6, 1);
+      ctx.fillRect(px + 5,  py + 22, 6, 1); ctx.fillRect(px + 21, py + 22, 6, 1);
+      return;
+    }
+
+    // ── Weapon rack (wall-mounted display) ────────────────
+
+    if (tile === TILES.WEAPON_RACK) {
+      // Dark stone wall — two block rows with mortar joints
+      ctx.fillStyle = '#1c1820'; ctx.fillRect(px, py, 32, 32);
+      ctx.fillStyle = '#252030'; ctx.fillRect(px + 1,  py + 1,  13, 14);
+      ctx.fillStyle = '#22203a'; ctx.fillRect(px + 16, py + 1,  15, 14);
+      ctx.fillStyle = '#20202e'; ctx.fillRect(px + 1,  py + 17, 30, 14);
+      ctx.fillStyle = '#2e2838';
+      ctx.fillRect(px + 2,  py + 2,  11,  2); ctx.fillRect(px + 17, py + 2,  13, 2);
+      ctx.fillRect(px + 2,  py + 18, 28,  2);
+      ctx.fillStyle = '#121018';
+      ctx.fillRect(px,      py + 15, 32,  2);
+      ctx.fillRect(px + 15, py,       2, 15); ctx.fillRect(px + 15, py + 17,  2, 15);
+
+      // Horizontal wooden rack rail
+      ctx.fillStyle = '#7a4a1e'; ctx.fillRect(px + 2,  py + 7,  28, 5);
+      ctx.fillStyle = '#9a6028'; ctx.fillRect(px + 3,  py + 8,  26, 2); // top shine
+      ctx.fillStyle = '#4a2c12'; ctx.fillRect(px + 3,  py + 11, 26, 1); // bottom shadow
+      // Rail end caps
+      ctx.fillStyle = '#9a7040';
+      ctx.fillRect(px,      py + 7, 3, 5); ctx.fillRect(px + 29, py + 7, 3, 5);
+
+      // Sword (left) — pommel-up hanging
+      ctx.fillStyle = '#5a3a1e'; ctx.fillRect(px + 4,  py + 3,  3,  5);  // handle
+      ctx.fillStyle = '#806040'; ctx.fillRect(px + 3,  py + 7,  5,  2);  // crossguard on rail
+      ctx.fillStyle = '#b8b8cc'; ctx.fillRect(px + 5,  py + 12, 2, 17);  // blade
+      ctx.fillStyle = '#d0d0e0'; ctx.fillRect(px + 5,  py + 12, 1,  8);  // blade glint
+      ctx.fillStyle = '#a0a0b8'; ctx.fillRect(px + 6,  py + 27, 1,  2);  // tip taper
+
+      // Axe (centre)
+      ctx.fillStyle = '#6a3e1c'; ctx.fillRect(px + 15, py + 3,  2,  5);  // handle top
+      ctx.fillStyle = '#8a8890'; ctx.fillRect(px + 12, py + 7,  8,  8);  // axe head
+      ctx.fillStyle = '#a8a8b0'; ctx.fillRect(px + 13, py + 8,  3,  3);  // blade face shine
+      ctx.fillStyle = '#6a3e1c'; ctx.fillRect(px + 15, py + 15, 2, 14);  // handle shaft
+
+      // Spear (right) — tip-up hanging
+      ctx.fillStyle = '#b8b8cc'; ctx.fillRect(px + 24, py + 2,  4,  7);  // spearhead
+      ctx.fillStyle = '#d0d0e0'; ctx.fillRect(px + 25, py + 3,  2,  3);  // tip glint
+      ctx.fillStyle = '#5a3a1e'; ctx.fillRect(px + 25, py + 9,  2, 20);  // shaft
+
+      // Rack shadow at bottom of display
+      ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(px + 2, py + 11, 28, 4);
+      return;
+    }
+
+    // ── Armor stand (chainmail mannequin) ─────────────────
+
+    if (tile === TILES.ARMOR_STAND) {
+      // Armory stone floor base
+      this._drawTileDetail(ctx, TILES.STONE_TILE, px, py, c, r, world);
+
+      // Wooden T-stand base
+      ctx.fillStyle = '#4a2c10'; ctx.fillRect(px + 10, py + 26, 12, 5); // base board
+      ctx.fillStyle = '#5e3a18'; ctx.fillRect(px + 11, py + 27, 10,  2); // board highlight
+      ctx.fillStyle = '#6a3e1a'; ctx.fillRect(px + 15, py + 15,  2, 12); // pole
+      // Shoulder crossbar
+      ctx.fillStyle = '#7a5020'; ctx.fillRect(px + 8,  py + 14, 16,  3);
+      ctx.fillStyle = '#9a6a2a'; ctx.fillRect(px + 9,  py + 15, 14,  1); // bar highlight
+
+      // Chainmail torso
+      ctx.fillStyle = '#585666'; ctx.fillRect(px + 10, py + 17, 12,  9);
+      // Chain link texture
+      ctx.fillStyle = '#6c6a7a';
+      ctx.fillRect(px + 11, py + 18, 2, 1); ctx.fillRect(px + 14, py + 18, 2, 1); ctx.fillRect(px + 17, py + 18, 2, 1);
+      ctx.fillRect(px + 12, py + 20, 2, 1); ctx.fillRect(px + 15, py + 20, 2, 1);
+      ctx.fillRect(px + 11, py + 22, 2, 1); ctx.fillRect(px + 14, py + 22, 2, 1); ctx.fillRect(px + 17, py + 22, 2, 1);
+      ctx.fillRect(px + 12, py + 24, 2, 1); ctx.fillRect(px + 15, py + 24, 2, 1);
+
+      // Steel pauldrons (shoulder plates)
+      ctx.fillStyle = '#8898a8';
+      ctx.fillRect(px + 5,  py + 12, 9, 6);  // left
+      ctx.fillRect(px + 18, py + 12, 9, 6);  // right
+      ctx.fillStyle = '#aab8c8'; // shine
+      ctx.fillRect(px + 6,  py + 13, 7, 2);
+      ctx.fillRect(px + 19, py + 13, 7, 2);
+      ctx.fillStyle = '#606878'; // lower shadow edge
+      ctx.fillRect(px + 5,  py + 17, 9, 1);
+      ctx.fillRect(px + 18, py + 17, 9, 1);
+
+      // Helmet
+      ctx.fillStyle = '#7888a0'; ctx.fillRect(px + 12, py + 4,  8, 8);  // dome
+      ctx.fillStyle = '#9ab0c0'; ctx.fillRect(px + 13, py + 5,  6, 3);  // dome shine
+      ctx.fillStyle = '#606878'; ctx.fillRect(px + 11, py + 11, 10, 2); // visor brim
+      ctx.fillStyle = '#282430'; ctx.fillRect(px + 13, py + 9,   6, 3); // visor slot
+      return;
+    }
+
+    // ── Textile / tailor shop floor ───────────────────────
+
+    if (tile === TILES.TEXTILE_FLOOR) {
+      const tones = ['#d09a18','#c89010','#daa420','#c08808'];
+      for (let i = 0; i < 4; i++) {
+        ctx.fillStyle = tones[i];
+        ctx.fillRect(px, py + i * 8, 32, 7);
+      }
+      // Plank joints
+      ctx.fillStyle = '#6a4808';
+      for (let i = 1; i <= 3; i++) ctx.fillRect(px, py + i * 8 - 1, 32, 2);
+      // Wood grain streaks
+      ctx.fillStyle = 'rgba(0,0,0,0.09)';
+      ctx.fillRect(px + 2 + (s1 % 12), py + 1,  1, 6);
+      ctx.fillRect(px + 4 + (s2 % 12), py + 9,  1, 6);
+      ctx.fillRect(px + 3 + (s3 % 12), py + 17, 1, 6);
+      ctx.fillRect(px + 1 + (s1 % 10), py + 25, 1, 6);
+      // Fabric swatches on floor
+      ctx.fillStyle = '#a0209a'; ctx.fillRect(px + 3 + (s2 % 6), py + 4 + (s1 % 10), 6, 3); // purple
+      ctx.fillStyle = '#c04010'; ctx.fillRect(px + 19 + (s3 % 4), py + 8 + (s2 %  8), 5, 3); // red
+      ctx.fillStyle = '#1858c0'; ctx.fillRect(px + 9 + (s1 % 6), py + 20 + (s3 %  5), 4, 3); // blue
+      // Gold thread line
+      ctx.fillStyle = '#e8c040'; ctx.fillRect(px + 14, py + 2, 1, 15);
+      return;
+    }
+
+    // ── Cape display (wall-hung capes on rod) ─────────────
+
+    if (tile === TILES.CAPE_DISPLAY) {
+      // Dark wall surface
+      ctx.fillStyle = '#1c1820'; ctx.fillRect(px, py, 32, 32);
+      ctx.fillStyle = '#242030'; ctx.fillRect(px + 1, py + 1, 30, 30);
+      ctx.fillStyle = '#2e2a38'; ctx.fillRect(px + 2, py + 2, 28,  2); // surface shimmer
+
+      // Wooden hanging rod
+      ctx.fillStyle = '#7a4a1e'; ctx.fillRect(px + 2, py + 6, 28, 4);
+      ctx.fillStyle = '#9a6228'; ctx.fillRect(px + 3, py + 7, 26, 1); // rod shine
+      ctx.fillStyle = '#4a2c12'; ctx.fillRect(px + 3, py + 9, 26, 1); // rod shadow
+      // Hook pegs
+      ctx.fillStyle = '#b09060';
+      ctx.fillRect(px + 5,  py + 5, 3, 3);
+      ctx.fillRect(px + 14, py + 5, 3, 3);
+      ctx.fillRect(px + 23, py + 5, 3, 3);
+      // Rod end caps
+      ctx.fillStyle = '#9a7040';
+      ctx.fillRect(px,      py + 5, 3, 6); ctx.fillRect(px + 29, py + 5, 3, 6);
+
+      // Cape 1 — crimson red (left)
+      ctx.fillStyle = '#b81808'; ctx.fillRect(px + 3,  py + 9,  8, 20);
+      ctx.fillStyle = '#d82818'; ctx.fillRect(px + 4,  py + 10, 4,  5); // sheen
+      ctx.fillStyle = '#881008';
+      ctx.fillRect(px + 7,  py + 10, 2, 18); ctx.fillRect(px + 4,  py + 24, 2, 5); // folds
+      ctx.fillStyle = '#d4aa00'; ctx.fillRect(px + 3,  py + 9,  8,  2); // gold trim
+
+      // Cape 2 — royal blue (centre)
+      ctx.fillStyle = '#1028b0'; ctx.fillRect(px + 12, py + 9,  8, 20);
+      ctx.fillStyle = '#1838c8'; ctx.fillRect(px + 13, py + 10, 4,  5);
+      ctx.fillStyle = '#081898';
+      ctx.fillRect(px + 16, py + 10, 2, 18); ctx.fillRect(px + 13, py + 24, 2, 5);
+      ctx.fillStyle = '#d4aa00'; ctx.fillRect(px + 12, py + 9,  8,  2);
+
+      // Cape 3 — forest green (right)
+      ctx.fillStyle = '#185a18'; ctx.fillRect(px + 21, py + 9,  8, 20);
+      ctx.fillStyle = '#207a20'; ctx.fillRect(px + 22, py + 10, 4,  5);
+      ctx.fillStyle = '#103e10';
+      ctx.fillRect(px + 25, py + 10, 2, 18); ctx.fillRect(px + 22, py + 24, 2, 5);
+      ctx.fillStyle = '#d4aa00'; ctx.fillRect(px + 21, py + 9,  8,  2);
+      return;
+    }
+
+    // ── Tailor's cutting table ─────────────────────────────
+
+    if (tile === TILES.TAILOR_TABLE) {
+      // Textile floor underneath
+      this._drawTileDetail(ctx, TILES.TEXTILE_FLOOR, px, py, c, r, world);
+      // Table leg stumps visible below
+      ctx.fillStyle = '#3a2010';
+      ctx.fillRect(px + 1,  py + 27, 5, 4); ctx.fillRect(px + 26, py + 27, 5, 4);
+      // Table top surface
+      ctx.fillStyle = '#7a5028'; ctx.fillRect(px + 1, py + 1, 30, 26);
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(px + 1, py + 25, 30,  2); // rim shadow
+
+      // Green cutting mat
+      ctx.fillStyle = '#2c6038'; ctx.fillRect(px + 3, py + 3, 26, 20);
+      // Mat measurement grid
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      for (let i = 1; i <= 4; i++) ctx.fillRect(px + 3, py + 3 + i * 4, 26, 1);
+      for (let i = 1; i <= 5; i++) ctx.fillRect(px + 3 + i * 4, py + 3,   1, 20);
+
+      // Purple fabric bolt (rolled, upper-right)
+      ctx.fillStyle = '#8818a0'; ctx.fillRect(px + 19, py + 2, 10, 6);
+      ctx.fillStyle = '#a820bc'; ctx.fillRect(px + 20, py + 3,  8, 2); // highlight
+      ctx.fillStyle = '#600e78'; ctx.fillRect(px + 19, py + 7, 10, 1); // shadow
+
+      // Scissors (crossed on mat)
+      ctx.fillStyle = '#a0a0b0';
+      ctx.fillRect(px + 5, py + 6, 1, 9);   // blade 1
+      ctx.fillRect(px + 5, py + 6, 6, 1);   // handle 1
+      ctx.fillRect(px + 8, py + 6, 1, 9);   // blade 2
+      ctx.fillRect(px + 8, py + 6, 6, 1);   // handle 2
+      ctx.fillStyle = '#c8c8d0'; ctx.fillRect(px + 6, py + 9, 3, 2); // pivot rivet
+
+      // Thread spool
+      ctx.fillStyle = '#d04820'; ctx.fillRect(px + 4, py + 17, 6, 4); // spool body
+      ctx.fillStyle = '#e86030'; ctx.fillRect(px + 5, py + 18, 4, 1); // thread highlight
+      ctx.fillStyle = '#8a3010';
+      ctx.fillRect(px + 4, py + 17, 6, 1); ctx.fillRect(px + 4, py + 20, 6, 1); // flanges
+      return;
+    }
+
+    // ── Display shelf (two-tier with goods) ───────────────
+
+    if (tile === TILES.DISPLAY_SHELF) {
+      // Dark wood frame / side panels
+      ctx.fillStyle = '#3a2010'; ctx.fillRect(px, py, 32, 32);
+      ctx.fillStyle = '#4a2a14';
+      ctx.fillRect(px + 1,  py + 1, 2, 30); ctx.fillRect(px + 29, py + 1, 2, 30);
+      ctx.fillStyle = '#281808';
+      ctx.fillRect(px + 3,  py + 5, 26, 11); // upper bay back wall
+      ctx.fillRect(px + 3,  py + 20, 26, 11); // lower bay back wall
+      ctx.fillStyle = '#4a2a14'; ctx.fillRect(px + 1, py + 30, 30, 2); // base
+
+      // Shelf boards
+      ctx.fillStyle = '#5a3818';
+      ctx.fillRect(px + 1, py + 1,  30, 5); // top board
+      ctx.fillRect(px + 1, py + 16, 30, 5); // middle board
+      ctx.fillStyle = '#7a5028'; // top-edge highlight
+      ctx.fillRect(px + 2, py + 2,  28, 1);
+      ctx.fillRect(px + 2, py + 17, 28, 1);
+
+      // Upper shelf — potion bottles
+      ctx.fillStyle = '#c01420'; ctx.fillRect(px + 5,  py + 8, 4, 7); // red potion
+      ctx.fillStyle = '#e02830'; ctx.fillRect(px + 6,  py + 9, 2, 3); // shine
+      ctx.fillStyle = '#787878'; ctx.fillRect(px + 6,  py + 6, 2, 3); // neck/cork
+      ctx.fillStyle = '#1438c0'; ctx.fillRect(px + 12, py + 8, 4, 7); // blue potion
+      ctx.fillStyle = '#1848d8'; ctx.fillRect(px + 13, py + 9, 2, 3);
+      ctx.fillStyle = '#787878'; ctx.fillRect(px + 13, py + 6, 2, 3);
+      ctx.fillStyle = '#187018'; ctx.fillRect(px + 19, py + 8, 4, 7); // green potion
+      ctx.fillStyle = '#208820'; ctx.fillRect(px + 20, py + 9, 2, 3);
+      ctx.fillStyle = '#787878'; ctx.fillRect(px + 20, py + 6, 2, 3);
+      ctx.fillStyle = '#c8a020'; ctx.fillRect(px + 25, py + 9, 4, 6); // coin pouch
+      ctx.fillStyle = '#e8c030'; ctx.fillRect(px + 26, py + 10, 2, 2); // glint
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(px + 26, py + 7,  2, 3); // pouch tie
+
+      // Lower shelf — tools and misc
+      ctx.fillStyle = '#6a6878'; ctx.fillRect(px + 5,  py + 22, 6, 5); // hammer head
+      ctx.fillStyle = '#888898'; ctx.fillRect(px + 6,  py + 23, 4, 2); // shine
+      ctx.fillStyle = '#6a4828'; ctx.fillRect(px + 7,  py + 27, 2, 3); // handle
+      ctx.fillStyle = '#9a7838'; ctx.fillRect(px + 15, py + 21, 7, 7); // rope coil
+      ctx.fillStyle = '#7a5820'; ctx.fillRect(px + 17, py + 23, 3, 3); // hollow centre
+      ctx.fillStyle = '#b09048'; ctx.fillRect(px + 16, py + 22, 5, 1); // coil highlight
+      ctx.fillStyle = '#e8e0c8'; ctx.fillRect(px + 25, py + 24, 4, 5); // candle
+      ctx.fillStyle = '#f0e8d0'; ctx.fillRect(px + 26, py + 25, 2, 2); // wax sheen
+      ctx.fillStyle = '#c04800'; ctx.fillRect(px + 26, py + 21, 2, 4); // flame
+      ctx.fillStyle = '#f0a820'; ctx.fillRect(px + 27, py + 22, 1, 2); // flame bright
+      return;
+    }
+
+    // ── Kingdom fountain (5×5 multi-tile basin) ───────────
+    // Rim tiles  = stone parapet wall (shorter than WALL but same style)
+    // Inner tiles = animated flowing water
+    // Centre tile = stone pedestal with animated water jet
+
+    if (tile === TILES.FOUNTAIN) {
+      const t = this.time;
+      const F = TILES.FOUNTAIN;
+      const nN  = world.getTile(c,   r-1) === F;
+      const nS  = world.getTile(c,   r+1) === F;
+      const nE  = world.getTile(c+1, r  ) === F;
+      const nW  = world.getTile(c-1, r  ) === F;
+      const nNE = world.getTile(c+1, r-1) === F;
+      const nNW = world.getTile(c-1, r-1) === F;
+      const nSE = world.getTile(c+1, r+1) === F;
+      const nSW = world.getTile(c-1, r+1) === F;
+      const isInner  = nN && nS && nE && nW && nNE && nNW && nSE && nSW;
+      const isCenter = isInner &&
+        world.getTile(c, r-2) === F && world.getTile(c, r+2) === F &&
+        world.getTile(c-2, r) === F && world.getTile(c+2, r) === F;
+
+      if (isInner) {
+        // ── Inner 3×3 water area ────────────────────────────
+        // Deep basin water base
+        ctx.fillStyle = '#14385a'; ctx.fillRect(px, py, 32, 32);
+
+        // Flowing wave bands — scroll with time
+        const w1y = ((t * 28 + s1 * 11) % 32) | 0;
+        const w2y = ((t * 20 + s2 * 9)  % 32) | 0;
+        const w3y = ((t * 16 + s3 * 13) % 32) | 0;
+        ctx.fillStyle = 'rgba(40,130,220,0.35)';
+        ctx.fillRect(px, py + w1y, 32, 3);
+        ctx.fillRect(px, py + ((w1y + 16) % 32), 32, 3);
+        ctx.fillStyle = 'rgba(80,170,255,0.25)';
+        ctx.fillRect(px, py + w2y, 32, 2);
+        ctx.fillRect(px, py + ((w2y + 12) % 32), 32, 2);
+        // Diagonal shimmer streaks
+        ctx.fillStyle = 'rgba(160,220,255,0.18)';
+        const sx1 = ((t * 18 + s1 * 7) % 40) | 0;
+        ctx.fillRect(px + ((sx1) % 32), py, 2, 32);
+        ctx.fillRect(px + ((sx1 + 18) % 32), py, 1, 32);
+        // Bright surface sparkle
+        ctx.fillStyle = 'rgba(220,240,255,0.50)';
+        ctx.fillRect(px + w3y % 28, py + w1y % 28, 2, 1);
+        ctx.fillRect(px + (w2y + s1) % 26, py + w3y % 26, 3, 1);
+        // Ambient depth shadow at tile edges (continuity with rim)
+        ctx.fillStyle = 'rgba(0,0,0,0.20)';
+        if (!nN) ctx.fillRect(px, py, 32, 3);
+        if (!nS) ctx.fillRect(px, py + 29, 32, 3);
+        if (!nW) ctx.fillRect(px, py, 3, 32);
+        if (!nE) ctx.fillRect(px + 29, py, 3, 32);
+
+        if (isCenter) {
+          // Pedestal base (stone disc at water level)
+          ctx.fillStyle = '#505868'; ctx.fillRect(px + 11, py + 21, 10, 7);
+          ctx.fillStyle = '#606878'; ctx.fillRect(px + 12, py + 22, 8,  5);
+          // Column shaft
+          ctx.fillStyle = '#585870'; ctx.fillRect(px + 14, py + 8, 4, 14);
+          ctx.fillStyle = '#686882'; ctx.fillRect(px + 15, py + 9, 2, 12);
+          // Capital (wider top)
+          ctx.fillStyle = '#606878'; ctx.fillRect(px + 12, py + 6, 8, 3);
+          ctx.fillStyle = '#9090a8'; ctx.fillRect(px + 13, py + 6, 6, 1);
+          // ── Animated water jet ────────────────────────────
+          const jh = (Math.sin(t * 4) * 2 + 5) | 0; // jet height 3-7px
+          // Main upward jet
+          ctx.fillStyle = 'rgba(160,225,255,0.95)';
+          ctx.fillRect(px + 15, py + 6 - jh, 2, jh + 1);
+          // Falling arc droplets (time-based)
+          for (let i = 0; i < 4; i++) {
+            const phase = (t * 2 + i * 1.5) % 6;
+            const dx = (Math.sin(phase * 1.2 + i) * 7) | 0;
+            const dy = (phase * phase * 0.4 - 2) | 0;
+            const alpha = Math.max(0, 1 - phase / 6);
+            ctx.fillStyle = `rgba(140,210,255,${(alpha * 0.9).toFixed(2)})`;
+            ctx.fillRect(px + 16 + dx, py + 6 - jh + 2 + dy, 2, 2);
+          }
+          // Splash ring at water surface
+          ctx.fillStyle = 'rgba(180,230,255,0.55)';
+          const sr = (Math.sin(t * 3) * 1.5 + 3) | 0;
+          ctx.fillRect(px + 16 - sr, py + 7, sr * 2, 1);
+          // Foam ring around pedestal base
+          ctx.fillStyle = 'rgba(200,240,255,0.30)';
+          ctx.fillRect(px + 10, py + 27, 12, 1);
+        }
+      } else {
+        // ── Rim tile — shorter stone parapet wall ──────────
+        // Like the WALL tile: if the tile directly south is also fountain,
+        // this rim tile is an interior walkway surface (no face visible yet).
+        // Only the southernmost exposed rim row shows the ledge + face + shadow.
+        const rimBelow = world.getTile(c, r + 1) === TILES.FOUNTAIN;
+        const TOP = 8;
+        const s4F = (c * 17 + r * 5) % 29;
+
+        if (rimBelow) {
+          // ─── WALKWAY (rim continues below — only top surface visible) ──
+          ctx.fillStyle = 'rgba(255,255,255,0.52)'; ctx.fillRect(px, py, 32, 32);
+          ctx.fillStyle = 'rgba(255,228,180,0.15)'; ctx.fillRect(px, py, 32, 32);
+          // Full-tile flagstone joints (continuous across stacked tiles)
+          const tvx = 8 + (s1 % 16);
+          const thy  = 5 + (s2 % 22);
+          const thy2 = thy + 10 + (s3 % 12);
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';
+          ctx.fillRect(px + tvx, py, 1, 32);
+          ctx.fillRect(px, py + thy, 32, 1);
+          if (thy2 < 32) ctx.fillRect(px, py + thy2, 32, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.fillRect(px + 1, py + 1, tvx - 2, 1);
+          ctx.fillRect(px + tvx + 1, py + 1, 31 - tvx, 1);
+          // Left-edge highlight
+          ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(px, py, 2, 32);
+          // Subtle water tint on inward-facing edges
+          ctx.fillStyle = 'rgba(20,80,160,0.18)';
+          if (nS) ctx.fillRect(px, py + 30, 32, 2);
+          if (nE) ctx.fillRect(px + 30, py, 2, 32);
+          if (nW) ctx.fillRect(px, py, 2, 32);
+        } else {
+          // ─── PARAPET EDGE (bottom-exposed rim tile — face visible) ────
+          ctx.fillStyle = 'rgba(255,255,255,0.52)'; ctx.fillRect(px, py, 32, TOP);
+          ctx.fillStyle = 'rgba(255,228,180,0.15)'; ctx.fillRect(px, py, 32, TOP);
+          // Flagstone joints on top surface
+          const tvx = 8 + (s1 % 16);
+          const thy = 2 + (s2 % 5);
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';
+          ctx.fillRect(px + tvx, py + 1, 1, TOP - 1);
+          ctx.fillRect(px + 1, py + thy, 31, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)';
+          ctx.fillRect(px + 1,    py + 1, tvx - 1, 1);
+          ctx.fillRect(px + tvx + 1, py + 1, 31 - tvx, 1);
+          // Ledge (3D parapet edge)
+          ctx.fillStyle = 'rgba(255,255,255,0.62)'; ctx.fillRect(px, py + TOP, 32, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.20)'; ctx.fillRect(px, py + TOP + 1, 32, 1);
+          // Wall face with stone courses
+          const FACE = 24;
+          const faceStart = TOP + 2;
+          ctx.fillStyle = 'rgba(0,0,0,0.30)';
+          ctx.fillRect(px, py + faceStart, 32, FACE - faceStart);
+          this._drawWallCourses(ctx, px, py, faceStart, FACE, r, s1, s2, s3, s4F);
+          // Cast shadow
+          ctx.fillStyle = 'rgba(0,0,0,0.48)'; ctx.fillRect(px, py + FACE,     32, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.24)'; ctx.fillRect(px, py + FACE + 2, 32, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(px, py + FACE + 4, 32, 1);
+          // Water-blue tint on inner-facing edge of the top surface
+          ctx.fillStyle = 'rgba(20,80,160,0.30)';
+          if (nS) ctx.fillRect(px, py,          32, 2);
+          if (nN) ctx.fillRect(px, py + TOP - 2, 32, 2);
+          if (nE) ctx.fillRect(px + 28, py,       4, TOP);
+          if (nW) ctx.fillRect(px,      py,        4, TOP);
+        }
+      }
+      return;
+    }
+
+    // ── Elevated stone planters (3×6 connected block) ─────
+    // Outer tiles (some neighbour is not same type) → stone parapet wall face.
+    // Inner tiles (all 8 neighbours same type) → soil / plants.
+
+    if (tile === TILES.PLANTER_FLOWERS || tile === TILES.PLANTER_BUSH) {
+      const P = tile;
+      const pN  = world.getTile(c,   r-1) === P;
+      const pS  = world.getTile(c,   r+1) === P;
+      const pE  = world.getTile(c+1, r  ) === P;
+      const pW  = world.getTile(c-1, r  ) === P;
+      const pNE = world.getTile(c+1, r-1) === P;
+      const pNW = world.getTile(c-1, r-1) === P;
+      const pSE = world.getTile(c+1, r+1) === P;
+      const pSW = world.getTile(c-1, r+1) === P;
+      const pInner = pN && pS && pE && pW && pNE && pNW && pSE && pSW;
+
+      if (pInner) {
+        // ── Interior tile: rich soil with plants ────────────
+        ctx.fillStyle = '#3a2010'; ctx.fillRect(px, py, 32, 32);
+        // Soil texture variation
+        ctx.fillStyle = 'rgba(80,40,10,0.35)';
+        ctx.fillRect(px + (s1 % 8),       py + (s2 % 10),       14, 10);
+        ctx.fillRect(px + 14 + (s2 % 10), py + 10 + (s3 % 12),  12, 8);
+
+        if (tile === TILES.PLANTER_FLOWERS) {
+          // Grass/turf base
+          ctx.fillStyle = '#2d5a1e'; ctx.fillRect(px + 1, py + 1, 30, 30);
+          ctx.fillStyle = '#38702a';
+          ctx.fillRect(px + 1 + (s1 % 10), py + 1 + (s2 % 8), 8, 6);
+          ctx.fillRect(px + 14 + (s2 % 8), py + 16 + (s1 % 8), 10, 5);
+          // Flower stems
+          ctx.fillStyle = '#3a8a2a';
+          ctx.fillRect(px + 7,  py + 16, 1, 10);
+          ctx.fillRect(px + 14, py + 14, 1, 12);
+          ctx.fillRect(px + 21, py + 18, 1, 8);
+          ctx.fillRect(px + 26, py + 12, 1, 14);
+          // Flower heads (seeded colour per position)
+          const fc1 = ['#e84040','#e8d840','#e040e8','#ffffff','#40c8e8','#f08020'];
+          ctx.fillStyle = fc1[(c * 3 + r * 5) % fc1.length];
+          ctx.fillRect(px + 5,  py + 13, 4, 4);
+          ctx.fillStyle = fc1[(c * 7 + r * 2) % fc1.length];
+          ctx.fillRect(px + 12, py + 11, 4, 4);
+          ctx.fillStyle = fc1[(c * 5 + r * 7) % fc1.length];
+          ctx.fillRect(px + 19, py + 15, 4, 4);
+          ctx.fillStyle = fc1[(c * 2 + r * 11) % fc1.length];
+          ctx.fillRect(px + 24, py + 9,  4, 4);
+          // Flower centres
+          ctx.fillStyle = '#f0d020';
+          ctx.fillRect(px + 6,  py + 14, 2, 2);
+          ctx.fillRect(px + 13, py + 12, 2, 2);
+          ctx.fillRect(px + 20, py + 16, 2, 2);
+          ctx.fillRect(px + 25, py + 10, 2, 2);
+        } else {
+          // PLANTER_BUSH: rounded bush mass
+          ctx.fillStyle = '#1e4a18'; ctx.fillRect(px + 2, py + 8, 28, 18);
+          ctx.fillStyle = '#1e4a18'; ctx.fillRect(px + 6, py + 4, 20, 26);
+          // Bush highlight patches (light from top-left)
+          ctx.fillStyle = '#2e6828';
+          ctx.fillRect(px + 3,  py + 9,  10, 6);
+          ctx.fillRect(px + 18, py + 6,  8,  5);
+          ctx.fillRect(px + 8,  py + 4,  6,  3);
+          // Berries (seeded colour)
+          const bc = (c * 7 + r * 3) % 3;
+          ctx.fillStyle = bc === 0 ? '#c03030' : bc === 1 ? '#e0a020' : '#6040c8';
+          ctx.fillRect(px + 5  + (s1 % 8), py + 12 + (s2 % 6), 3, 3);
+          ctx.fillRect(px + 18 + (s2 % 7), py + 8  + (s3 % 8), 3, 3);
+          ctx.fillRect(px + 10 + (s3 % 6), py + 20 + (s1 % 5), 3, 3);
+        }
+      } else {
+        // ── Outer tile: stone planter parapet wall ──────────
+        // Same walkway-vs-parapet-edge logic as the WALL tile:
+        // if the tile south is also the same planter type, this tile is a
+        // continuous walkway surface. Only the bottom-exposed row shows the face.
+        const planterBelow = world.getTile(c, r + 1) === P;
+        const TOP = 7;
+        const s4P = (c * 17 + r * 5) % 29;
+
+        if (planterBelow) {
+          // ─── WALKWAY (planter continues below) ───────────
+          ctx.fillStyle = 'rgba(255,255,255,0.48)'; ctx.fillRect(px, py, 32, 32);
+          ctx.fillStyle = 'rgba(200,180,140,0.22)'; ctx.fillRect(px, py, 32, 32);
+          // Full-tile flagstone joints (continuous across stacked tiles)
+          const tvx = 9 + (s1 % 14);
+          const thy  = 5 + (s2 % 22);
+          const thy2 = thy + 11 + (s3 % 11);
+          ctx.fillStyle = 'rgba(0,0,0,0.24)';
+          ctx.fillRect(px + tvx, py, 1, 32);
+          ctx.fillRect(px, py + thy, 32, 1);
+          if (thy2 < 32) ctx.fillRect(px, py + thy2, 32, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.14)';
+          ctx.fillRect(px + 1, py + 1, tvx - 2, 1);
+          ctx.fillRect(px + tvx + 1, py + 1, 31 - tvx, 1);
+          // Left-edge highlight
+          ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(px, py, 2, 32);
+          // Soil-peek tint on inward-facing edges
+          ctx.fillStyle = 'rgba(58,32,16,0.25)';
+          if (pS) ctx.fillRect(px, py + 30, 32, 2);
+          if (pE) ctx.fillRect(px + 30, py, 2, 32);
+          if (pW) ctx.fillRect(px, py, 2, 32);
+        } else {
+          // ─── PARAPET EDGE (bottom-exposed planter tile) ──
+          ctx.fillStyle = 'rgba(255,255,255,0.48)'; ctx.fillRect(px, py, 32, TOP);
+          ctx.fillStyle = 'rgba(200,180,140,0.22)'; ctx.fillRect(px, py, 32, TOP);
+          // Flagstone joints on top surface
+          const tvx = 9 + (s1 % 14);
+          const thy = 2 + (s2 % 4);
+          ctx.fillStyle = 'rgba(0,0,0,0.26)';
+          ctx.fillRect(px + tvx, py + 1, 1, TOP - 1);
+          ctx.fillRect(px + 1, py + thy, 31, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.16)';
+          ctx.fillRect(px + 1,    py + 1, tvx - 1, 1);
+          ctx.fillRect(px + tvx + 1, py + 1, 31 - tvx, 1);
+          // Ledge
+          ctx.fillStyle = 'rgba(255,255,255,0.58)'; ctx.fillRect(px, py + TOP, 32, 1);
+          ctx.fillStyle = 'rgba(255,255,255,0.18)'; ctx.fillRect(px, py + TOP + 1, 32, 1);
+          // Wall face
+          const FACE_P = 22;
+          ctx.fillStyle = 'rgba(0,0,0,0.28)';
+          ctx.fillRect(px, py + TOP + 2, 32, FACE_P - TOP - 2);
+          this._drawWallCourses(ctx, px, py, TOP + 2, FACE_P, r, s1, s2, s3, s4P);
+          // Cast shadow
+          ctx.fillStyle = 'rgba(0,0,0,0.44)'; ctx.fillRect(px, py + FACE_P,     32, 2);
+          ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(px, py + FACE_P + 2, 32, 2);
+          // Soil-peek on inner edges
+          ctx.fillStyle = 'rgba(58,32,16,0.45)';
+          if (pS) ctx.fillRect(px, py,          32, 2);
+          if (pN) ctx.fillRect(px, py + TOP - 2, 32, 2);
+          if (pE) ctx.fillRect(px + 28, py,       4, TOP);
+          if (pW) ctx.fillRect(px,      py,        4, TOP);
+        }
+      }
       return;
     }
 
@@ -3773,7 +4738,7 @@ export class Renderer {
   /* ═══════════════════════════════════════════════════════
      SHOP PANEL
      ═══════════════════════════════════════════════════════ */
-  drawShopPanel(shopTab, shopStock, inventory) {
+  drawShopPanel(shopTab, shopStock, inventory, title = 'General Store') {
     const ctx = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
@@ -3797,7 +4762,7 @@ export class Renderer {
     ctx.fillStyle = '#f1c40f';
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'left';
-    ctx.fillText('General Store', px + 12, py + 24);
+    ctx.fillText(title, px + 12, py + 24);
 
     // Header — subtitle hint
     ctx.fillStyle = '#888';

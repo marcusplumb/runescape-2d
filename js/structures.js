@@ -295,22 +295,235 @@ function placeKingdom(map, rows, cols, cx, cy) {
     [kc - 1, kr + KH - 2], [kc + KW - 2, kr + KH - 2],
   ]) _fill(map, rows, cols, tc, tr, 3, 3, TILES.WALL);
 
-  // ── INTERIOR BUILDINGS ──────────────────────────────────────
-  const bldR = oy + 22; // first-tier building start row
+  // ── MARKETPLACE BUILDINGS ───────────────────────────────────
+  const bldR  = oy + 22;          // first-tier building start row
+  const westC = ox + 5;           // west building column
+  const eastC = ox + OW - 17;     // east building column
 
-  // West barracks (12×8)
-  const barrC = ox + 5;
-  doors.push({ door: _house(map, rows, cols, barrC, bldR,      12, 8, 'S'), id: 'kingdom_barracks' });
+  /** Helper: push a building, record its door and roof bounds */
+  const roofBounds = [];
+  function _bld(c, r, w, h, id, floorTile = TILES.STONE) {
+    const door = _house(map, rows, cols, c, r, w, h, 'S');
+    doors.push({ door, id });
+    roofBounds.push({ c: c + 1, r: r + 1, rW: w - 2, rH: h - 2,
+                      bC: c, bR: r, bW: w, bH: h,
+                      doorC: door.col, doorR: door.row, doorFace: 'south', floorTile });
+  }
 
-  // West smithy below barracks (10×7)
-  doors.push({ door: _house(map, rows, cols, barrC, bldR + 11, 10, 7, 'S'), id: 'kingdom_smithy' });
+  // Keep roof bounds
+  roofBounds.push({ c: kc + 1, r: kr + 1, rW: KW - 2, rH: KH - 2,
+                    bC: kc, bR: kr, bW: KW, bH: KH,
+                    doorC: keepDoor.col, doorR: keepDoor.row, doorFace: 'south' });
 
-  // East chapel (12×8, mirrors barracks)
-  const chapelC = ox + OW - 17;
-  doors.push({ door: _house(map, rows, cols, chapelC, bldR,      12, 8, 'S'), id: 'kingdom_chapel' });
+  // ── West side (3 stacked) ───────────────────────────────────
+  _bld(westC, bldR,      12, 8, 'kingdom_butcher',    TILES.WOOD_FLOOR);
+  // ── Butcher interior ──────────────────────────────────────────
+  // Building: (westC, bldR) 12 wide × 8 tall, inner 10×6 at offsets dc=1..10, dr=1..6
+  {
+    const bc = westC, br = bldR;
 
-  // East inn below chapel (10×7)
-  doors.push({ door: _house(map, rows, cols, chapelC, bldR + 11, 10, 7, 'S'), id: 'kingdom_inn' });
+    // Warm wooden plank floor throughout
+    for (let dr = 1; dr <= 6; dr++)
+      for (let dc = 1; dc <= 10; dc++)
+        map[br + dr][bc + dc] = TILES.WOOD_FLOOR;
+
+    // Meat hook display along north inner wall (row br+1)
+    // Gap at bc+6 aligns with NPC position and door below
+    const gapC = bc + 6;
+    for (let dc = 1; dc <= 10; dc++)
+      if (bc + dc !== gapC) map[br + 1][bc + dc] = TILES.MEAT_HOOK;
+
+    // Butcher's chopping blocks flanking the aisle (row br+3)
+    map[br + 3][bc + 3] = TILES.BUTCHER_BLOCK;
+    map[br + 3][bc + 8] = TILES.BUTCHER_BLOCK;
+
+    // Storage barrels in the rear corners (row br+5)
+    map[br + 5][bc + 1]  = TILES.BARREL;
+    map[br + 5][bc + 10] = TILES.BARREL;
+
+    // Hearth fireplace in the south-west inner corner (row br+6)
+    map[br + 6][bc + 1]  = TILES.HEARTH;
+  }
+
+  _bld(westC, bldR + 11, 10, 7, 'kingdom_fishmonger', TILES.WET_STONE);
+  // ── Fishmonger interior ────────────────────────────────────────────────────
+  // Building: (westC, bldR+11) 10 wide × 7 tall → inner 8×5 at dc=1..8, dr=1..5
+  // Fishmonger NPC stands at col westC+5 (gap in counter row)
+  {
+    const bc = westC, br = bldR + 11;
+    // Wet cobblestone floor throughout
+    for (let dr = 1; dr <= 5; dr++)
+      for (let dc = 1; dc <= 8; dc++)
+        map[br + dr][bc + dc] = TILES.WET_STONE;
+    // Fish counter along north inner wall; gap at dc=5 for NPC
+    for (let dc = 1; dc <= 8; dc++)
+      if (dc !== 5) map[br + 1][bc + dc] = TILES.FISH_COUNTER;
+    // Fish tanks flanking the aisle (row br+2)
+    map[br + 2][bc + 1] = TILES.FISH_TANK;
+    map[br + 2][bc + 8] = TILES.FISH_TANK;
+    // Ice boxes near the entrance (row br+4)
+    map[br + 4][bc + 1] = TILES.ICE_BOX;
+    map[br + 4][bc + 8] = TILES.ICE_BOX;
+  }
+
+  _bld(westC, bldR + 21, 12, 7, 'kingdom_variety',    TILES.WOOD_FLOOR);
+  // ── Variety shop interior ──────────────────────────────────────────────────
+  // Building: (westC, bldR+21) 12 wide × 7 tall → inner 10×5 at dc=1..10, dr=1..5
+  // VarietyKeeper NPC at col westC+6 (dc=6), row bldR+23 (dr=2)
+  {
+    const bc = westC, br = bldR + 21;
+    // Warm wood floor throughout
+    for (let dr = 1; dr <= 5; dr++)
+      for (let dc = 1; dc <= 10; dc++)
+        map[br + dr][bc + dc] = TILES.WOOD_FLOOR;
+    // Display shelves along north inner wall (dr=1, full row)
+    for (let dc = 1; dc <= 10; dc++)
+      map[br + 1][bc + dc] = TILES.DISPLAY_SHELF;
+    // Barrels flanking mid-aisle (dr=3, corners)
+    map[br + 3][bc + 1]  = TILES.BARREL;
+    map[br + 3][bc + 10] = TILES.BARREL;
+    // Side shelves near entrance (dr=4, outer pairs)
+    map[br + 4][bc + 1]  = TILES.DISPLAY_SHELF;
+    map[br + 4][bc + 2]  = TILES.DISPLAY_SHELF;
+    map[br + 4][bc + 9]  = TILES.DISPLAY_SHELF;
+    map[br + 4][bc + 10] = TILES.DISPLAY_SHELF;
+  }
+
+  // ── East side (3 stacked) ───────────────────────────────────
+  _bld(eastC, bldR,      12, 8, 'kingdom_weapons',    TILES.STONE_TILE);
+  // ── Weapons shop interior ─────────────────────────────────────────────────
+  // Building: (eastC, bldR) 12 wide × 8 tall → inner 10×6 at dc=1..10, dr=1..6
+  // WeaponKeeper NPC at col eastC+6 (dc=6), row bldR+202 (dr=2)
+  {
+    const bc = eastC, br = bldR;
+    // Dark armory stone floor throughout
+    for (let dr = 1; dr <= 6; dr++)
+      for (let dc = 1; dc <= 10; dc++)
+        map[br + dr][bc + dc] = TILES.STONE_TILE;
+    // Weapon racks along full north inner wall (dr=1)
+    for (let dc = 1; dc <= 10; dc++)
+      map[br + 1][bc + dc] = TILES.WEAPON_RACK;
+    // Armor stands flanking the room in two rows
+    map[br + 2][bc + 1]  = TILES.ARMOR_STAND;
+    map[br + 2][bc + 10] = TILES.ARMOR_STAND;
+    map[br + 4][bc + 1]  = TILES.ARMOR_STAND;
+    map[br + 4][bc + 10] = TILES.ARMOR_STAND;
+  }
+
+  _bld(eastC, bldR + 11, 10, 7, 'kingdom_capes',      TILES.TEXTILE_FLOOR);
+  // ── Cape shop interior ────────────────────────────────────────────────────
+  // Building: (eastC, bldR+11) 10 wide × 7 tall → inner 8×5 at dc=1..8, dr=1..5
+  // CapeKeeper NPC at col eastC+5 (dc=5), row bldR+213 (dr=2)
+  {
+    const bc = eastC, br = bldR + 11;
+    // Textile floor throughout
+    for (let dr = 1; dr <= 5; dr++)
+      for (let dc = 1; dc <= 8; dc++)
+        map[br + dr][bc + dc] = TILES.TEXTILE_FLOOR;
+    // Cape displays along full north inner wall (dr=1)
+    for (let dc = 1; dc <= 8; dc++)
+      map[br + 1][bc + dc] = TILES.CAPE_DISPLAY;
+    // Tailor tables flanking the room (dr=2 and dr=4, sides)
+    map[br + 2][bc + 1] = TILES.TAILOR_TABLE;
+    map[br + 2][bc + 8] = TILES.TAILOR_TABLE;
+    map[br + 4][bc + 1] = TILES.TAILOR_TABLE;
+    map[br + 4][bc + 8] = TILES.TAILOR_TABLE;
+  }
+
+  _bld(eastC, bldR + 21, 12, 7, 'kingdom_exchange');
+
+  // ── MARKETPLACE PATH NETWORK ────────────────────────────────
+  // Central spine: 3-wide cobblestone walkway from south gate to top of shops
+  // (spine centre = cx; runs cols cx-1 .. cx+1 = 511..513)
+  const spineC1 = cx - 1, spineC2 = cx + 1;
+  for (let pr = bldR + 1; pr <= oy + OH - 2; pr++) {
+    for (let pc = spineC1; pc <= spineC2; pc++) {
+      if (map[pr][pc] !== TILES.WALL && map[pr][pc] !== TILES.DOOR)
+        map[pr][pc] = TILES.PATH;
+    }
+  }
+
+  // Horizontal branches: 2 rows wide, starting one row below each door row.
+  // Extend from west building left edge to spine (west side) and spine to east
+  // building right edge — so the path covers the full area in front of each door.
+  const shopTiers = [
+    { doorRow: bldR + 8,  eastW: 12 },  // one row below butcher/weapons doors
+    { doorRow: bldR + 18, eastW: 10 },  // one row below fishmonger/capes doors
+    { doorRow: bldR + 28, eastW: 12 },  // one row below variety/exchange doors
+  ];
+  for (const { doorRow, eastW } of shopTiers) {
+    for (let dr = 0; dr < 2; dr++) {
+      const pr = doorRow + dr;
+      if (pr < 0 || pr >= rows) continue;
+      // West branch: west building left edge → spine left edge
+      for (let pc = westC; pc < spineC1; pc++) {
+        if (pc >= 0 && pc < cols && map[pr][pc] !== TILES.WALL && map[pr][pc] !== TILES.DOOR)
+          map[pr][pc] = TILES.PATH;
+      }
+      // East branch: spine right edge → east building right edge (inclusive)
+      for (let pc = spineC2 + 1; pc <= eastC + eastW - 1; pc++) {
+        if (pc >= 0 && pc < cols && map[pr][pc] !== TILES.WALL && map[pr][pc] !== TILES.DOOR)
+          map[pr][pc] = TILES.PATH;
+      }
+    }
+  }
+
+  // 5×5 fountains flanking the spine at the top of the marketplace
+  const fountainRow = bldR + 5;   // row 205 — fountain centres
+  const fountainWC  = cx - 8;     // col 504 — west fountain centre
+  const fountainEC  = cx + 8;     // col 520 — east fountain centre
+  for (const fc of [fountainWC, fountainEC]) {
+    for (let dr = -2; dr <= 2; dr++) {
+      for (let dc = -2; dc <= 2; dc++) {
+        const fr = fountainRow + dr, fcc = fc + dc;
+        if (fr >= 0 && fr < rows && fcc >= 0 && fcc < cols)
+          map[fr][fcc] = TILES.FOUNTAIN;
+      }
+    }
+  }
+
+  // ── Elevated planter boxes (3 wide × 6 tall each) ───────
+  // Placed in the open stone strips between the buildings and the central spine.
+  // westC=479, west building east wall = westC+11=490  → first free col = 491
+  // eastC=533, east building west wall = eastC        → last free col  = 532
+  // Each planter: top-left corner at (planterCol, planterRow), size 3×6.
+
+  /** Fill a 3-wide × 6-tall planter block, skipping walls/doors/paths/fountains. */
+  function _planter(pc, pr, type) {
+    for (let dr = 0; dr < 6; dr++) {
+      for (let dc = 0; dc < 3; dc++) {
+        const fc = pc + dc, fr = pr + dr;
+        if (fr >= 0 && fr < rows && fc >= 0 && fc < cols &&
+            map[fr][fc] !== TILES.WALL && map[fr][fc] !== TILES.DOOR &&
+            map[fr][fc] !== TILES.PATH && map[fr][fc] !== TILES.FOUNTAIN)
+          map[fr][fc] = type;
+      }
+    }
+  }
+
+  // All planters centred at X=507 (west) and X=517 (east).
+  // 3-wide block: left col = centre - 1 → col 506 (west) and col 516 (east).
+  const pWest = 506, pEast = 516;
+
+  // Middle tier (rows bldR+11..+16 = 211-216): PLANTER_BUSH — alongside tier-2 buildings
+  _planter(pWest, bldR + 11, TILES.PLANTER_BUSH);
+  _planter(pEast, bldR + 11, TILES.PLANTER_BUSH);
+  // Lower tier (rows bldR+21..+26 = 221-226): PLANTER_FLOWERS — alongside tier-3 buildings
+  _planter(pWest, bldR + 21, TILES.PLANTER_FLOWERS);
+  _planter(pEast, bldR + 21, TILES.PLANTER_FLOWERS);
+  // New bottom tier (rows bldR+31..+36 = 231-236): PLANTER_BUSH — south of tier-3 path
+  _planter(pWest, bldR + 31, TILES.PLANTER_BUSH);
+  _planter(pEast, bldR + 31, TILES.PLANTER_BUSH);
+
+  // ── Signposts outside shop doors ───────────────────────────
+  // (SIGN tile placed 1 row south of each door, on the walkway)
+  const signRow = bldR + 8 - 1 + 1;  // 1 tile south of first-row doors
+  if (signRow >= 0 && signRow < rows) {
+    const midW = westC + 6;
+    const midE = eastC + 6;
+    if (midW >= 0 && midW < cols) map[signRow][midW] = TILES.SIGN;
+    if (midE >= 0 && midE < cols) map[signRow][midE] = TILES.SIGN;
+  }
 
   // ── DECORATIONS ─────────────────────────────────────────────
   // Central plaza well (between inner gate and south buildings)
@@ -341,7 +554,7 @@ function placeKingdom(map, rows, cols, cx, cy) {
       map[torchR][torchC] = TILES.FIRE;
   }
 
-  return doors;
+  return { doors, roofBounds };
 }
 
 /**
@@ -460,6 +673,7 @@ export function placeAllStructures(map, rows, cols, rng) {
   for (const n of STRUCTURE_NODES) nodes[n.id] = { c: n.c, r: n.r };
 
   const doorMap = new Map(); // "col,row" → interiorId string
+  const roofBounds = [];
 
   // 1. Draw roads first
   for (const [a, b] of ROADS) {
@@ -480,7 +694,8 @@ export function placeAllStructures(map, rows, cols, rng) {
       }
       case 'kingdom': {
         const kd = placeKingdom(map, rows, cols, node.c, node.r);
-        kd.forEach(({ door, id }) => doorMap.set(`${door.col},${door.row}`, id));
+        kd.doors.forEach(({ door, id }) => doorMap.set(`${door.col},${door.row}`, id));
+        kd.roofBounds.forEach(rb => roofBounds.push(rb));
         break;
       }
       case 'watchtower': {
@@ -499,5 +714,5 @@ export function placeAllStructures(map, rows, cols, rng) {
     }
   }
 
-  return doorMap;
+  return { doorMap, roofBounds };
 }

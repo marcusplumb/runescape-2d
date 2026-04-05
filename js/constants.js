@@ -96,6 +96,33 @@ export const TILES = {
   FARM_PATCH_GROWING: 64,  // crop sprouting
   FARM_PATCH_READY:   65,  // ready to harvest
   DUNGEON_ENTRANCE:   66,
+  // Kingdom decorations
+  CARPET:             67,  // royal red carpet — walkable
+  THRONE:             68,  // throne seat — solid
+  // Butcher shop interior
+  WOOD_FLOOR:         69,  // warm wooden plank floor — walkable
+  MEAT_HOOK:          70,  // wall-mounted meat hooks display — solid
+  BUTCHER_BLOCK:      71,  // chopping block with cleaver — solid
+  HEARTH:             72,  // stone fireplace — solid, decorative
+  // Fishmonger shop interior
+  WET_STONE:          73,  // wet cobblestone floor — walkable
+  FISH_COUNTER:       74,  // wooden counter with fish display — solid
+  FISH_TANK:          75,  // water trough with live fish — solid
+  ICE_BOX:            76,  // crate of fish packed in ice — solid
+  // Weapons shop interior
+  STONE_TILE:         77,  // dark polished armory stone floor — walkable
+  WEAPON_RACK:        78,  // wall rack with sword/axe/spear — solid
+  ARMOR_STAND:        79,  // chainmail mannequin on T-stand — solid
+  // Cape shop interior
+  TEXTILE_FLOOR:      80,  // golden maple wood floor with fabric scraps — walkable
+  CAPE_DISPLAY:       81,  // wall rod with hanging capes — solid
+  TAILOR_TABLE:       82,  // cutting table with mat, scissors, fabric — solid
+  // Variety shop interior
+  DISPLAY_SHELF:      83,  // two-tier shelf with potions/tools/misc — solid
+  // Kingdom courtyard decorations
+  FOUNTAIN:           84,  // stone basin fountain — solid prop (use 5×5 block)
+  PLANTER_FLOWERS:    85,  // elevated stone planter box with soil and flowers — solid prop
+  PLANTER_BUSH:       86,  // elevated stone planter box with soil and a bush — solid prop
 };
 
 // Which tiles block movement
@@ -144,6 +171,28 @@ export const SOLID_TILES = new Set([
   // Housing furniture
   TILES.FURN_BED,
   TILES.FURN_BENCH,
+  // Kingdom
+  TILES.THRONE,
+  // Butcher shop
+  TILES.MEAT_HOOK,
+  TILES.BUTCHER_BLOCK,
+  TILES.HEARTH,
+  // Fishmonger shop
+  TILES.FISH_COUNTER,
+  TILES.FISH_TANK,
+  TILES.ICE_BOX,
+  // Weapons shop
+  TILES.WEAPON_RACK,
+  TILES.ARMOR_STAND,
+  // Cape shop
+  TILES.CAPE_DISPLAY,
+  TILES.TAILOR_TABLE,
+  // Variety shop
+  TILES.DISPLAY_SHELF,
+  // Kingdom courtyard
+  TILES.FOUNTAIN,
+  TILES.PLANTER_FLOWERS,
+  TILES.PLANTER_BUSH,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -224,6 +273,32 @@ export const TILE_COLORS = {
   [TILES.FARM_PATCH_GROWING]: '#5a6a2a',
   [TILES.FARM_PATCH_READY]:   '#3a7a22',
   [TILES.DUNGEON_ENTRANCE]: '#1a1218',
+  [TILES.CARPET]: '#6b0000',
+  [TILES.THRONE]: '#2a1500',
+  // Butcher shop interior
+  [TILES.WOOD_FLOOR]:     '#b87030',
+  [TILES.MEAT_HOOK]:      '#2e1008',
+  [TILES.BUTCHER_BLOCK]:  '#6a3e18',
+  [TILES.HEARTH]:         '#4a3c38',
+  // Fishmonger shop interior
+  [TILES.WET_STONE]:      '#3a5060',
+  [TILES.FISH_COUNTER]:   '#807868',
+  [TILES.FISH_TANK]:      '#143060',
+  [TILES.ICE_BOX]:        '#b0d0e0',
+  // Weapons shop interior
+  [TILES.STONE_TILE]:     '#22202c',
+  [TILES.WEAPON_RACK]:    '#1c1820',
+  [TILES.ARMOR_STAND]:    '#28243a',
+  // Cape shop interior
+  [TILES.TEXTILE_FLOOR]:  '#c89010',
+  [TILES.CAPE_DISPLAY]:   '#1c1820',
+  [TILES.TAILOR_TABLE]:   '#2c6038',
+  // Variety shop interior
+  [TILES.DISPLAY_SHELF]:  '#3a2010',
+  // Kingdom courtyard
+  [TILES.FOUNTAIN]:         '#506070',
+  [TILES.PLANTER_FLOWERS]:  '#787060',
+  [TILES.PLANTER_BUSH]:     '#787060',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -254,6 +329,21 @@ export const TILE_HAS_DETAIL = new Set([
   TILES.FARM_PATCH, TILES.FARM_PATCH_SEEDED,
   TILES.FARM_PATCH_GROWING, TILES.FARM_PATCH_READY,
   TILES.DUNGEON_ENTRANCE,
+  TILES.CARPET, TILES.THRONE,
+  // Butcher shop
+  TILES.WOOD_FLOOR, TILES.MEAT_HOOK, TILES.BUTCHER_BLOCK, TILES.HEARTH,
+  // Fishmonger shop
+  TILES.WET_STONE, TILES.FISH_COUNTER, TILES.FISH_TANK, TILES.ICE_BOX,
+  // Weapons shop
+  TILES.STONE_TILE, TILES.WEAPON_RACK, TILES.ARMOR_STAND,
+  // Cape shop
+  TILES.TEXTILE_FLOOR, TILES.CAPE_DISPLAY, TILES.TAILOR_TABLE,
+  // Variety shop
+  TILES.DISPLAY_SHELF,
+  // Kingdom courtyard
+  TILES.FOUNTAIN,
+  TILES.PLANTER_FLOWERS,
+  TILES.PLANTER_BUSH,
 ]);
 
 // ── Inventory ────────────────────────────────────────────
@@ -312,15 +402,42 @@ export const SKILL_UNLOCKS = [
   ],
   // 2 — Fishing
   [
-    { level:  1, text: 'Shrimp (Common) — any Fishing Spot, 10 XP',      icon: 'raw_shrimp' },
-    { level:  5, text: 'Sardine (Common) — Fishing & Salmon Spots',       icon: 'raw_sardine' },
-    { level: 10, text: 'Herring (Common) — Fishing & Salmon Spots',       icon: 'raw_herring' },
-    { level: 20, text: 'Trout (Uncommon) — Fishing & Salmon Spots',       icon: 'raw_trout' },
-    { level: 30, text: 'Salmon (Uncommon) — Salmon Spots only',           icon: 'raw_salmon' },
-    { level: 40, text: 'Tuna (Rare) — Lobster Spots only',                icon: 'raw_tuna' },
-    { level: 50, text: 'Lobster (Rare) — Lobster Spots only',             icon: 'raw_lobster' },
-    { level: 60, text: 'Swordfish (Very Rare) — Lobster Spots only',      icon: 'raw_swordfish' },
-    { level: 76, text: 'Shark (Legendary) — Lobster Spots only',          icon: 'raw_shark' },
+    { level:  1, text: 'Gudgeon (Common) — Plains & Forest',              icon: 'raw_gudgeon' },
+    { level:  1, text: 'Shrimp (Common) — Plains',                        icon: 'raw_shrimp' },
+    { level:  5, text: 'Sardine (Common) — Plains & Forest',              icon: 'raw_sardine' },
+    { level:  5, text: 'Carp (Common) — Plains, Forest & Swamp',          icon: 'raw_carp' },
+    { level:  5, text: 'Sandy Goby (Common) — Desert',                    icon: 'raw_sandy_goby' },
+    { level: 10, text: 'Herring (Common) — Plains & Forest',              icon: 'raw_herring' },
+    { level: 10, text: 'Mudskipper (Common) — Swamp',                     icon: 'raw_mudskipper' },
+    { level: 12, text: 'Perch (Common) — Plains & Forest',                icon: 'raw_perch' },
+    { level: 15, text: 'Ice Fish (Common) — Tundra',                      icon: 'raw_ice_fish' },
+    { level: 20, text: 'Trout (Uncommon) — Plains & Forest',              icon: 'raw_trout' },
+    { level: 20, text: 'Swamp Eel (Uncommon) — Swamp',                    icon: 'raw_swamp_eel' },
+    { level: 20, text: 'Cave Fish (Common) — Underground',                icon: 'raw_cave_fish' },
+    { level: 20, text: 'Pufferfish (Uncommon) — Desert',                  icon: 'raw_pufferfish' },
+    { level: 25, text: 'Bass (Uncommon) — Forest & Plains',               icon: 'raw_bass' },
+    { level: 25, text: 'Arctic Char (Uncommon) — Tundra',                 icon: 'raw_arctic_char' },
+    { level: 25, text: 'Lava Eel (Uncommon) — Volcanic',                  icon: 'raw_lava_eel' },
+    { level: 28, text: 'Walleye (Uncommon) — Plains',                     icon: 'raw_walleye' },
+    { level: 30, text: 'Salmon (Uncommon) — Forest & Plains',             icon: 'raw_salmon' },
+    { level: 30, text: 'Blind Crayfish (Uncommon) — Underground',         icon: 'raw_blind_crayfish' },
+    { level: 35, text: 'Pike (Uncommon) — Forest & Plains',               icon: 'raw_pike' },
+    { level: 35, text: 'Slimejack (Rare) — Swamp',                        icon: 'raw_slimejack' },
+    { level: 40, text: 'Tuna (Rare) — Plains & Forest',                   icon: 'raw_tuna' },
+    { level: 40, text: 'Snowflake Eel (Rare) — Tundra',                   icon: 'raw_snowflake_eel' },
+    { level: 40, text: 'Sandfish (Rare) — Desert',                        icon: 'raw_sandfish' },
+    { level: 45, text: 'Magma Carp (Rare) — Volcanic',                    icon: 'raw_magma_carp' },
+    { level: 45, text: 'Glowjelly (Rare) — Underground',                  icon: 'raw_glowjelly' },
+    { level: 50, text: 'Lobster (Rare) — Danger & Plains',                icon: 'raw_lobster' },
+    { level: 50, text: 'Barracuda (Rare) — Forest & Danger',              icon: 'raw_barracuda' },
+    { level: 55, text: 'Mutant Carp (Very Rare) — Swamp',                 icon: 'raw_mutant_carp' },
+    { level: 60, text: 'Swordfish (Very Rare) — Plains & Forest',         icon: 'raw_swordfish' },
+    { level: 60, text: 'Crystal Fish (Very Rare) — Underground',          icon: 'raw_crystal_fish' },
+    { level: 65, text: 'Glacierfish (Legendary) — Tundra',                icon: 'raw_glacierfish' },
+    { level: 65, text: 'Dragon Goby (Very Rare) — Volcanic',              icon: 'raw_dragon_goby' },
+    { level: 65, text: 'Giant Squid (Very Rare) — Danger & Plains',       icon: 'raw_giant_squid' },
+    { level: 75, text: 'Abyssal Eel (Legendary) — Underground',           icon: 'raw_abyssal_eel' },
+    { level: 76, text: 'Shark (Legendary) — Plains & Danger',             icon: 'raw_shark' },
     { level: 99, text: 'Master Fisher — fastest catch speed',             icon: null },
   ],
   // 3 — Cooking

@@ -221,6 +221,19 @@ export const MOB_DEFS = {
     prey: ['rabbit', 'chicken', 'deer'],
   },
 
+  // ── Kingdom guards ────────────────────────────────────
+  guard: {
+    name: 'Guard', hp: 40, speed: 56, w: 24, h: 32,
+    aggressive: false, retaliates: true,
+    attackLevel: 20, strengthLevel: 18, defenceLevel: 16,
+    xpHp: 8, wanderRadius: 10,
+    drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.8, qty: 12 },
+    ],
+    biomes: [],
+  },
+
   // ── Dungeon mobs ──────────────────────────────────────
   cave_rat: {
     name: 'Cave Rat', hp: 10, speed: 70, w: 16, h: 12,
@@ -400,7 +413,10 @@ export class Mob {
       def.defenceLevel + def.hp +
       Math.floor(Math.max(def.attackLevel, def.strengthLevel) * 1.3)
     )));
-    this.drops = def.drops;
+    this.drops      = def.drops;
+    this.retaliates = def.retaliates ?? false;
+    // Per-mob wander radius (tiles); falls back to module constant if not set
+    this._wanderRadius = def.wanderRadius ?? WANDER_RADIUS;
 
     // Spawn anchor — mob returns here when not chasing
     const spawnCol    = Math.round(x / TILE_SIZE);
@@ -531,7 +547,7 @@ export class Mob {
       switch (this.state) {
         case 'idle':
           this.wanderTimer -= dt;
-          if (this.wanderTimer <= 0) this._startWander();
+          if (this.wanderTimer <= 0) this._startWander(world);
           break;
 
         case 'wandering':
@@ -694,16 +710,23 @@ export class Mob {
    * Begin wandering to a random point within WANDER_RADIUS of the spawn anchor.
    * Mobs stay near their home territory rather than drifting across the world.
    */
-  _startWander() {
-    const angle  = Math.random() * Math.PI * 2;
-    const radius = (0.5 + Math.random() * 0.5) * WANDER_RADIUS; // in tiles
-    const tCol   = Math.round(this.spawnCol + Math.cos(angle) * radius);
-    const tRow   = Math.round(this.spawnRow + Math.sin(angle) * radius);
-    const col    = Math.max(0, Math.min(tCol, WORLD_COLS - 1));
-    const row    = Math.max(0, Math.min(tRow, WORLD_ROWS - 1));
-    this.targetX = col * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
-    this.targetY = row * TILE_SIZE + TILE_SIZE      - this.h;
-    this.state   = 'wandering';
+  _startWander(world) {
+    const MAX_TRIES = 8;
+    for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+      const angle  = Math.random() * Math.PI * 2;
+      const radius = (0.5 + Math.random() * 0.5) * this._wanderRadius; // in tiles
+      const tCol   = Math.round(this.spawnCol + Math.cos(angle) * radius);
+      const tRow   = Math.round(this.spawnRow + Math.sin(angle) * radius);
+      const col    = Math.max(0, Math.min(tCol, WORLD_COLS - 1));
+      const row    = Math.max(0, Math.min(tRow, WORLD_ROWS - 1));
+      if (world && world.isSolid(col, row)) continue;
+      this.targetX = col * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
+      this.targetY = row * TILE_SIZE + TILE_SIZE      - this.h;
+      this.state   = 'wandering';
+      return;
+    }
+    // All attempts landed on solid tiles — stay idle a bit longer
+    this.wanderTimer = this.idleTime + Math.random() * 2;
   }
 
   /** Disengage and walk back to spawn anchor. HP is not reset. */
@@ -731,8 +754,13 @@ export class Mob {
   }
 
 
-  takeDamage(amount) {
+  takeDamage(amount, attacker = null) {
     this.hp = Math.max(0, this.hp - amount);
+    // Retaliatory mobs (e.g. guards) fight back when first struck
+    if (this.retaliates && !this.inCombat && attacker && amount > 0) {
+      this.inCombat     = true;
+      this.combatTarget = attacker;
+    }
     return this.hp <= 0;
   }
 
@@ -805,10 +833,13 @@ export class Mob {
       _drawUndeadWarrior(ctx, x, y, w, h, bob, legBob, facingLeft);
     } else if (type === 'dragon_whelp') {
       _drawDragonWhelp(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'guard') {
+      _drawGuard(ctx, x, y, w, h, bob, legBob, facingLeft);
     }
 
     // Name tag — "Name (Lvl. X)", matching player label style
-    const nameColor = this.aggressive ? '#e74c3c' : '#fff';
+    // aggressive=red, retaliates=yellow, passive=white
+    const nameColor = this.aggressive ? '#e74c3c' : this.retaliates ? '#f1c40f' : '#fff';
     const label = `${name} (Lvl. ${this.combatLevel})`;
     ctx.fillStyle = nameColor;
     ctx.strokeStyle = '#000';
@@ -1738,6 +1769,79 @@ function _drawDragonWhelp(ctx, x, y, w, h, bob, legBob, facingLeft) {
   ctx.beginPath(); ctx.arc(x+w*(facingLeft?.12:.88), y+h*.11-bob, w*.03, 0, Math.PI*2); ctx.fill();
 }
 
+function _drawGuard(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  const mx = facingLeft ? -1 : 1;
+  const cx = x + w / 2;
+
+  // Legs — steel greaves
+  ctx.fillStyle = '#7890a8';
+  ctx.fillRect(cx - w * 0.28 - legBob * mx, y + h * 0.62 - bob, w * 0.22, h * 0.38);
+  ctx.fillRect(cx + w * 0.06 + legBob * mx, y + h * 0.62 - bob, w * 0.22, h * 0.38);
+  // Boot soles
+  ctx.fillStyle = '#282830';
+  ctx.fillRect(cx - w * 0.28 - legBob * mx, y + h - 3, w * 0.22, 3);
+  ctx.fillRect(cx + w * 0.06 + legBob * mx, y + h - 3, w * 0.22, 3);
+
+  // Tabard (royal blue surcoat over armour)
+  ctx.fillStyle = '#1a3a8a';
+  ctx.fillRect(cx - w * 0.30, y + h * 0.30 - bob, w * 0.60, h * 0.40);
+  // Surcoat cross emblem
+  ctx.fillStyle = '#d4aa00';
+  ctx.fillRect(cx - w * 0.04, y + h * 0.33 - bob, w * 0.08, h * 0.22); // vertical
+  ctx.fillRect(cx - w * 0.13, y + h * 0.38 - bob, w * 0.26, h * 0.07); // horizontal
+
+  // Chainmail body (under tabard, visible at sides)
+  ctx.fillStyle = '#8898a8';
+  ctx.fillRect(cx - w * 0.36, y + h * 0.30 - bob, w * 0.10, h * 0.35);
+  ctx.fillRect(cx + w * 0.26, y + h * 0.30 - bob, w * 0.10, h * 0.35);
+
+  // Pauldrons (shoulder armour)
+  ctx.fillStyle = '#6880a0';
+  ctx.fillRect(cx - w * 0.42, y + h * 0.22 - bob, w * 0.18, h * 0.14);
+  ctx.fillRect(cx + w * 0.24, y + h * 0.22 - bob, w * 0.18, h * 0.14);
+  ctx.fillStyle = '#8aa0c0'; // pauldron shine
+  ctx.fillRect(cx - w * 0.42, y + h * 0.22 - bob, w * 0.18, h * 0.04);
+  ctx.fillRect(cx + w * 0.24, y + h * 0.22 - bob, w * 0.18, h * 0.04);
+
+  // Spear (held in right hand — opposite of facingLeft)
+  const spearX = facingLeft ? cx - w * 0.48 : cx + w * 0.38;
+  ctx.fillStyle = '#6a4818'; // shaft
+  ctx.fillRect(spearX, y - h * 0.35 - bob, w * 0.07, h * 1.30);
+  ctx.fillStyle = '#c0c8d0'; // spearhead
+  ctx.beginPath();
+  ctx.moveTo(spearX + w * 0.035, y - h * 0.35 - bob);
+  ctx.lineTo(spearX, y - h * 0.10 - bob);
+  ctx.lineTo(spearX + w * 0.07, y - h * 0.10 - bob);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; // blade sheen
+  ctx.fillRect(spearX + w * 0.010, y - h * 0.32 - bob, w * 0.020, h * 0.18);
+
+  // Head (skin)
+  ctx.fillStyle = '#e8b87a';
+  ctx.beginPath(); ctx.arc(cx, y + h * 0.14 - bob, w * 0.22, 0, Math.PI * 2); ctx.fill();
+  // Neck
+  ctx.fillStyle = '#d4a060';
+  ctx.fillRect(cx - w * 0.10, y + h * 0.28 - bob, w * 0.20, h * 0.08);
+
+  // Helmet — full steel bucket helm with visor
+  ctx.fillStyle = '#7890a8';
+  ctx.beginPath(); ctx.arc(cx, y + h * 0.10 - bob, w * 0.24, Math.PI, 0); ctx.fill(); // dome
+  ctx.fillRect(cx - w * 0.24, y + h * 0.10 - bob, w * 0.48, h * 0.10); // brim
+  // Visor slot
+  ctx.fillStyle = '#282830';
+  ctx.fillRect(cx - w * 0.14, y + h * 0.12 - bob, w * 0.28, h * 0.05);
+  // Helmet cheek guards
+  ctx.fillStyle = '#6880a0';
+  ctx.fillRect(cx - w * 0.24, y + h * 0.10 - bob, w * 0.08, h * 0.10);
+  ctx.fillRect(cx + w * 0.16, y + h * 0.10 - bob, w * 0.08, h * 0.10);
+  // Helmet crest (plume)
+  ctx.fillStyle = '#c02020';
+  ctx.fillRect(cx - w * 0.04, y - h * 0.02 - bob, w * 0.08, h * 0.12);
+  ctx.fillStyle = '#e03030';
+  ctx.fillRect(cx - w * 0.02, y - h * 0.02 - bob, w * 0.04, h * 0.10);
+}
+
 /* ── MobManager ─────────────────────────────────────── */
 
 export class MobManager {
@@ -1749,6 +1853,26 @@ export class MobManager {
     // on every page load (same world seed → same mob positions).
     const rng = makeRng(MOB_SEED);
     this._spawnMissing(world, Infinity, rng);
+    this._spawnKingdomGuards();
+  }
+
+  /** Place guards at fixed positions throughout the kingdom marketplace. */
+  _spawnKingdomGuards() {
+    // Kingdom centre: cx=512, cy=208.  Marketplace rows 200–237, cols 479–544.
+    const guardSpawns = [
+      // Flanking the entrance (south path)
+      [509, 231], [515, 231],
+      // Mid-marketplace, west and east of central path
+      [499, 213], [526, 213],
+      [499, 222], [526, 222],
+      // Near west and east building rows
+      [487, 208], [540, 208],
+    ];
+    for (const [col, row] of guardSpawns) {
+      const x = col * TILE_SIZE;
+      const y = row * TILE_SIZE;
+      this.mobs.push(new Mob('guard', x, y));
+    }
   }
 
   _buildDesiredCounts(world) {
