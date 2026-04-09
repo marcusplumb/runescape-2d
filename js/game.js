@@ -240,6 +240,13 @@ export class Game {
     this.weaponShopOpen   = false;  this.weaponShopTab   = 'buy';
     this.varietyShopOpen  = false;  this.varietyShopTab  = 'buy';
     this.capeShopOpen     = false;  this.capeShopTab     = 'buy';
+    // Scroll offsets (pixels) for each shop panel
+    this.shopScroll        = 0;
+    this.smithyShopScroll  = 0;
+    this.butcherShopScroll = 0;
+    this.weaponShopScroll  = 0;
+    this.varietyShopScroll = 0;
+    this.capeShopScroll    = 0;
     this.houseShopOpen = false;
     this.houseShopKeeper = new HouseShopKeeper();
     this.placingFurniture = null; // { item, slotIndex } when in furniture placement mode
@@ -419,6 +426,24 @@ export class Game {
         e.preventDefault();
         const tab = this.fishermanTab;
         this.fishermanScrolls[tab] = Math.max(0, (this.fishermanScrolls[tab] || 0) + e.deltaY);
+      } else if (this.shopOpen) {
+        e.preventDefault();
+        this.shopScroll = Math.max(0, this.shopScroll + e.deltaY);
+      } else if (this.smithyShopOpen) {
+        e.preventDefault();
+        this.smithyShopScroll = Math.max(0, this.smithyShopScroll + e.deltaY);
+      } else if (this.butcherShopOpen) {
+        e.preventDefault();
+        this.butcherShopScroll = Math.max(0, this.butcherShopScroll + e.deltaY);
+      } else if (this.weaponShopOpen) {
+        e.preventDefault();
+        this.weaponShopScroll = Math.max(0, this.weaponShopScroll + e.deltaY);
+      } else if (this.varietyShopOpen) {
+        e.preventDefault();
+        this.varietyShopScroll = Math.max(0, this.varietyShopScroll + e.deltaY);
+      } else if (this.capeShopOpen) {
+        e.preventDefault();
+        this.capeShopScroll = Math.max(0, this.capeShopScroll + e.deltaY);
       }
     }, { passive: false });
 
@@ -1365,22 +1390,22 @@ export class Game {
       );
     }
     if (this.shopOpen) {
-      this.renderer.drawShopPanel(this.shopTab, SHOP_STOCK, this.inventory);
+      this.renderer.drawShopPanel(this.shopTab, SHOP_STOCK, this.inventory, 'General Store', this.shopScroll);
     }
     if (this.smithyShopOpen) {
-      this.renderer.drawShopPanel(this.smithyShopTab, SMITHY_STOCK, this.inventory, 'Weapon Salesman');
+      this.renderer.drawShopPanel(this.smithyShopTab, SMITHY_STOCK, this.inventory, 'Weapon Salesman', this.smithyShopScroll);
     }
     if (this.butcherShopOpen) {
-      this.renderer.drawShopPanel(this.butcherShopTab, BUTCHER_STOCK, this.inventory, 'Butcher Shop');
+      this.renderer.drawShopPanel(this.butcherShopTab, BUTCHER_STOCK, this.inventory, 'Butcher Shop', this.butcherShopScroll);
     }
     if (this.weaponShopOpen) {
-      this.renderer.drawShopPanel(this.weaponShopTab, WEAPON_SHOP_STOCK, this.inventory, 'Weaponsmith');
+      this.renderer.drawShopPanel(this.weaponShopTab, WEAPON_SHOP_STOCK, this.inventory, 'Weaponsmith', this.weaponShopScroll);
     }
     if (this.varietyShopOpen) {
-      this.renderer.drawShopPanel(this.varietyShopTab, VARIETY_STOCK, this.inventory, 'Variety Shop');
+      this.renderer.drawShopPanel(this.varietyShopTab, VARIETY_STOCK, this.inventory, 'Variety Shop', this.varietyShopScroll);
     }
     if (this.capeShopOpen) {
-      this.renderer.drawShopPanel(this.capeShopTab, CAPE_STOCK, this.inventory, 'Cape Merchant');
+      this.renderer.drawShopPanel(this.capeShopTab, CAPE_STOCK, this.inventory, 'Cape Merchant', this.capeShopScroll);
     }
     if (this.houseShopOpen) {
       this.renderer.drawHouseShopPanel(HOUSE_SHOP_STOCK, this.inventory);
@@ -2067,19 +2092,19 @@ export class Game {
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
     if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
-      this.shopOpen = false;
+      this.shopOpen = false; this.shopScroll = 0;
       return;
     }
     const tabY = py + SHOP_HEADER_H;
     const tabW = Math.floor(SHOP_PW / 2) - 8;
     if (sy >= tabY && sy <= tabY + SHOP_TAB_H) {
-      if (sx >= px + 4 && sx <= px + 4 + tabW) this.shopTab = 'buy';
-      else if (sx >= px + SHOP_PW / 2 + 4)     this.shopTab = 'sell';
+      if (sx >= px + 4 && sx <= px + 4 + tabW) { this.shopTab = 'buy';  this.shopScroll = 0; }
+      else if (sx >= px + SHOP_PW / 2 + 4)     { this.shopTab = 'sell'; this.shopScroll = 0; }
       return;
     }
     const contentY = tabY + SHOP_TAB_H;
     if (sy < contentY) return;
-    const row = Math.floor((sy - contentY) / SHOP_ROW_H);
+    const row = Math.floor((sy - contentY + this.shopScroll) / SHOP_ROW_H);
     const btnX = px + SHOP_PW - 64;
     if (sx < btnX) return;
     if (this.shopTab === 'buy') {
@@ -2094,19 +2119,19 @@ export class Game {
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
     if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
-      this.smithyShopOpen = false;
+      this.smithyShopOpen = false; this.smithyShopScroll = 0;
       return;
     }
     const tabY = py + SHOP_HEADER_H;
     const tabW = Math.floor(SHOP_PW / 2) - 8;
     if (sy >= tabY && sy <= tabY + SHOP_TAB_H) {
-      if (sx >= px + 4 && sx <= px + 4 + tabW) this.smithyShopTab = 'buy';
-      else if (sx >= px + SHOP_PW / 2 + 4)     this.smithyShopTab = 'sell';
+      if (sx >= px + 4 && sx <= px + 4 + tabW) { this.smithyShopTab = 'buy';  this.smithyShopScroll = 0; }
+      else if (sx >= px + SHOP_PW / 2 + 4)     { this.smithyShopTab = 'sell'; this.smithyShopScroll = 0; }
       return;
     }
     const contentY = tabY + SHOP_TAB_H;
     if (sy < contentY) return;
-    const row = Math.floor((sy - contentY) / SHOP_ROW_H);
+    const row = Math.floor((sy - contentY + this.smithyShopScroll) / SHOP_ROW_H);
     const btnX = px + SHOP_PW - 64;
     if (sx < btnX) return;
     if (this.smithyShopTab === 'buy') {
@@ -2119,29 +2144,29 @@ export class Game {
 
   _handleKingdomShopClick(sx, sy, shopType) {
     const SHOP_CFG = {
-      butcher:  { openFlag: 'butcherShopOpen',  tabFlag: 'butcherShopTab',  stock: BUTCHER_STOCK,     prices: BUTCHER_SELL_PRICES  },
-      weapon:   { openFlag: 'weaponShopOpen',   tabFlag: 'weaponShopTab',   stock: WEAPON_SHOP_STOCK, prices: WEAPON_SELL_PRICES   },
-      variety:  { openFlag: 'varietyShopOpen',  tabFlag: 'varietyShopTab',  stock: VARIETY_STOCK,     prices: VARIETY_SELL_PRICES  },
-      cape:     { openFlag: 'capeShopOpen',     tabFlag: 'capeShopTab',     stock: CAPE_STOCK,        prices: CAPE_SELL_PRICES     },
+      butcher:  { openFlag: 'butcherShopOpen',  tabFlag: 'butcherShopTab',  scrollFlag: 'butcherShopScroll',  stock: BUTCHER_STOCK,     prices: BUTCHER_SELL_PRICES  },
+      weapon:   { openFlag: 'weaponShopOpen',   tabFlag: 'weaponShopTab',   scrollFlag: 'weaponShopScroll',   stock: WEAPON_SHOP_STOCK, prices: WEAPON_SELL_PRICES   },
+      variety:  { openFlag: 'varietyShopOpen',  tabFlag: 'varietyShopTab',  scrollFlag: 'varietyShopScroll',  stock: VARIETY_STOCK,     prices: VARIETY_SELL_PRICES  },
+      cape:     { openFlag: 'capeShopOpen',     tabFlag: 'capeShopTab',     scrollFlag: 'capeShopScroll',     stock: CAPE_STOCK,        prices: CAPE_SELL_PRICES     },
     };
     const cfg = SHOP_CFG[shopType];
     if (!cfg) return;
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
     if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
-      this[cfg.openFlag] = false;
+      this[cfg.openFlag] = false; this[cfg.scrollFlag] = 0;
       return;
     }
     const tabY = py + SHOP_HEADER_H;
     const tabW = Math.floor(SHOP_PW / 2) - 8;
     if (sy >= tabY && sy <= tabY + SHOP_TAB_H) {
-      if (sx >= px + 4 && sx <= px + 4 + tabW) this[cfg.tabFlag] = 'buy';
-      else if (sx >= px + SHOP_PW / 2 + 4)     this[cfg.tabFlag] = 'sell';
+      if (sx >= px + 4 && sx <= px + 4 + tabW) { this[cfg.tabFlag] = 'buy';  this[cfg.scrollFlag] = 0; }
+      else if (sx >= px + SHOP_PW / 2 + 4)     { this[cfg.tabFlag] = 'sell'; this[cfg.scrollFlag] = 0; }
       return;
     }
     const contentY = tabY + SHOP_TAB_H;
     if (sy < contentY) return;
-    const row  = Math.floor((sy - contentY) / SHOP_ROW_H);
+    const row  = Math.floor((sy - contentY + (this[cfg.scrollFlag] || 0)) / SHOP_ROW_H);
     const btnX = px + SHOP_PW - 64;
     if (sx < btnX) return;
     if (this[cfg.tabFlag] === 'buy') {
@@ -2915,11 +2940,14 @@ export class Game {
   _handleContextMenuClick(sx, sy) {
     const m = this.contextMenu;
     if (!m) return;
-    const optH = 26, menuW = 170;
-    const mx = m.x, my = m.y;
+    const optH = 26, menuW = 170, PAD = 4;
+    const PH = m.options.length * optH + PAD * 2;
+    // Mirror the renderer's clamping so hit zones match the visible menu
+    const mx = Math.min(m.x, this.canvas.width  - menuW - 4);
+    const my = Math.min(m.y, this.canvas.height - PH    - 4);
     let hit = false;
     m.options.forEach((opt, i) => {
-      const oy = my + i * optH;
+      const oy = my + PAD + i * optH;
       if (sx >= mx && sx <= mx + menuW && sy >= oy && sy <= oy + optH) {
         opt.cb();
         hit = true;

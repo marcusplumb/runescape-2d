@@ -4738,7 +4738,7 @@ export class Renderer {
   /* ═══════════════════════════════════════════════════════
      SHOP PANEL
      ═══════════════════════════════════════════════════════ */
-  drawShopPanel(shopTab, shopStock, inventory, title = 'General Store') {
+  drawShopPanel(shopTab, shopStock, inventory, title = 'General Store', scroll = 0) {
     const ctx = this.ctx;
     const W = this.canvas.width;
     const H = this.canvas.height;
@@ -4820,29 +4820,56 @@ export class Renderer {
     ctx.lineTo(px + SHOP_PW - 8, contentY);
     ctx.stroke();
 
-    // Item rows
+    // Build item list for the active tab
+    const VIEWPORT_H = 8 * SHOP_ROW_H;
+    let rows;
     if (shopTab === 'buy') {
-      for (let i = 0; i < shopStock.length; i++) {
-        this._drawShopRow(ctx, px, contentY + i * SHOP_ROW_H, SHOP_PW, SHOP_ROW_H,
-          shopStock[i].item, shopStock[i].buyPrice, null, gold, 'Buy');
-      }
+      rows = shopStock.map(s => ({ item: s.item, price: s.buyPrice, qty: null, afford: gold }));
     } else {
-      const sellable = inventory.slots
-        .filter(s => s && SELL_PRICES[s.item.id] !== undefined);
-      if (sellable.length === 0) {
-        ctx.fillStyle = '#666';
-        ctx.font = '12px monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText('Nothing to sell', px + SHOP_PW / 2, contentY + SHOP_ROW_H);
-      } else {
-        for (let i = 0; i < Math.min(sellable.length, 8); i++) {
-          const slot = sellable[i];
-          const qty = slot.item.stackable ? slot.qty : 1;
-          const total = SELL_PRICES[slot.item.id] * qty;
-          this._drawShopRow(ctx, px, contentY + i * SHOP_ROW_H, SHOP_PW, SHOP_ROW_H,
-            slot.item, total, qty > 1 ? qty : null, Infinity, 'Sell');
-        }
+      const sellable = inventory.slots.filter(s => s && SELL_PRICES[s.item.id] !== undefined);
+      rows = sellable.map(s => {
+        const qty = s.item.stackable ? s.qty : 1;
+        return { item: s.item, price: SELL_PRICES[s.item.id] * qty, qty: qty > 1 ? qty : null, afford: Infinity };
+      });
+    }
+
+    // Clamp scroll to actual content
+    const totalH   = rows.length * SHOP_ROW_H;
+    const maxScroll = Math.max(0, totalH - VIEWPORT_H);
+    const sc        = Math.min(scroll, maxScroll);
+
+    // Clip to content viewport so rows don't bleed outside the panel
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, contentY, SHOP_PW, VIEWPORT_H);
+    ctx.clip();
+
+    if (rows.length === 0) {
+      ctx.fillStyle = '#666';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Nothing to sell', px + SHOP_PW / 2, contentY + SHOP_ROW_H - sc);
+    } else {
+      for (let i = 0; i < rows.length; i++) {
+        const ry = contentY + i * SHOP_ROW_H - sc;
+        if (ry + SHOP_ROW_H < contentY || ry > contentY + VIEWPORT_H) continue;
+        const r = rows[i];
+        this._drawShopRow(ctx, px, ry, SHOP_PW, SHOP_ROW_H, r.item, r.price, r.qty, r.afford, shopTab === 'buy' ? 'Buy' : 'Sell');
       }
+    }
+
+    ctx.restore();
+
+    // Scrollbar
+    if (totalH > VIEWPORT_H) {
+      const SBW   = 4;
+      const sbX   = px + SHOP_PW - SBW - 2;
+      const thumbH = Math.max(24, VIEWPORT_H * VIEWPORT_H / totalH);
+      const thumbY = contentY + (sc / maxScroll) * (VIEWPORT_H - thumbH);
+      ctx.fillStyle = 'rgba(90,64,16,0.35)';
+      ctx.fillRect(sbX, contentY, SBW, VIEWPORT_H);
+      ctx.fillStyle = '#8b6914';
+      ctx.fillRect(sbX, thumbY, SBW, thumbH);
     }
   }
 

@@ -2,6 +2,10 @@ import { TILE_SIZE, WORLD_COLS, WORLD_ROWS, TILES, AGGRO_RANGE, MOB_RESPAWN_TIME
 import { BIOMES, getBiome } from './biomes.js';
 import { ITEMS } from './items.js';
 
+// Safe debug flag — works in the browser (_dbgOn()) and in Node.js (no window).
+// Enable in the browser console: window.MOB_AI_DEBUG = true
+const _dbgOn = () => typeof window !== 'undefined' && !!window.MOB_AI_DEBUG;
+
 // Seeded PRNG (mulberry32) — same algorithm as world.js so mob spawn positions
 // are deterministic across page refreshes as long as the world seed is unchanged.
 const MOB_SEED = 137;
@@ -317,23 +321,21 @@ export const MOB_DEFS = {
   },
 };
 
-// ── Mob AI tuning constants ───────────────────────────────────────────────────
-// Max tiles from its spawn anchor a mob will wander during idle roaming.
-// Increase to make mobs drift further from their home territory.
-const WANDER_RADIUS   = 6;
-// Tiles from the target at which a melee mob stops moving and enters attack stance.
-// Must be ≤ the combat.js attack range (3 tiles) so hits fire reliably.
-const MELEE_RANGE     = 1.5;
-// Tiles from spawn anchor that counts as "home" — ends the returning walk.
-const HOME_RADIUS     = 2;
-// Radius (tiles) within which prey animals detect and flee from predators.
-const FLEE_RANGE      = 7;
-// Distance (tiles) prey runs when fleeing — long enough to escape aggro radius.
-const FLEE_SPREAD     = 14;
-// Radius (tiles) predator wildlife scans when looking for killable prey mobs.
-const HUNT_RANGE      = 8;
-
-const AGGRO_LOSE_RANGE = AGGRO_RANGE + 4;  // tiles before aggro mob gives up and returns
+// ── AI Tuning constants ───────────────────────────────────────────────────────
+// AGGRO_RANGE (imported from constants.js) = 8 tiles
+const LEASH_DISTANCE        = 18;   // tiles from spawn: mob gives up chase and returns home
+const WANDER_RADIUS         = 6;    // tiles: max idle wander distance from spawn
+const WANDER_COOLDOWN_MIN   = 3.0;  // s: minimum stand-still time between wanders
+const WANDER_COOLDOWN_MAX   = 8.0;  // s: maximum stand-still time between wanders
+const CHASE_REPATH_INTERVAL = 0.35; // s: interval between chase target updates (prevents jitter)
+const PATH_FAIL_TIMEOUT     = 4.0;  // s: fully blocked this long while chasing → return home
+const MELEE_RANGE           = 1.5;  // tiles: engagement range (must match combat.js)
+const MELEE_HOLD_DISTANCE   = 1.9;  // tiles: mob re-chases when player exceeds this (> MELEE_RANGE to prevent oscillation from sub-tile player movement)
+const HOME_RADIUS           = 2;    // tiles: within this of spawn = at home
+const AGGRO_REACQUIRE_GAP   = 3.0;  // s: lockout after returning home before re-aggroing
+const FLEE_RANGE            = 7;    // tiles: prey detects predator within this range
+const FLEE_SPREAD           = 14;   // tiles: distance prey flees to
+const HUNT_RANGE            = 8;    // tiles: predator wildlife spots prey mobs
 
 /**
  * Bresenham tile-walk line-of-sight check.
@@ -377,6 +379,52 @@ function _snap(mob) {
   mob.x   = centerCol * TILE_SIZE + TILE_SIZE / 2 - mob.w / 2;
   mob.row = feetRow - 1;
   mob.col = centerCol;
+}
+
+/**
+ * Committed horizontal center of a combat target.
+ * When the target is mid-step (moving=true), use the destination tile's center
+ * instead of the interpolated pixel — makes distance checks tile-discrete.
+ */
+function _tgtCx(t) {
+  return t.targetCol != null
+    ? t.targetCol * TILE_SIZE + TILE_SIZE / 2
+    : t.cx;
+}
+/** Committed vertical center of a combat target (same rationale as _tgtCx). */
+function _tgtCy(t) {
+  return t.targetRow != null
+    ? t.targetRow * TILE_SIZE + TILE_SIZE / 2
+    : t.cy;
+}
+
+/**
+ * Return the tile-aligned pixel position the mob should walk to when entering
+ * melee combat. Targets the tile immediately to the left or right of the
+ * combat target's tile column, at the target's feet row — so the mob snaps
+ * to a proper grid tile (exactly 1 tile away horizontally) rather than an
+ * arbitrary pixel position mid-tile or on a diagonal.
+ */
+function _meleeSlot(mob, target) {
+  // Use committed tile position when target is mid-step so the slot doesn't
+  // oscillate between two columns during the walk animation.
+  const tCol = target.targetCol != null
+    ? target.targetCol
+    : Math.floor(target.cx / TILE_SIZE);
+  let tFeetRow;
+  if (target.targetRow != null) {
+    tFeetRow = target.targetRow + 1;   // feet row = tile row + 1 (tile bottom)
+  } else {
+    const th    = target.h ?? TILE_SIZE;
+    const feetY = target.y != null ? target.y + th : target.cy + th / 2;
+    tFeetRow    = Math.round(feetY / TILE_SIZE);
+  }
+  // Stand one tile to the left or right of the target's committed column
+  const slotCol = mob.cx <= _tgtCx(target) ? tCol - 1 : tCol + 1;
+  return {
+    x: slotCol * TILE_SIZE + TILE_SIZE / 2 - mob.w / 2,
+    y: tFeetRow * TILE_SIZE - mob.h,
+  };
 }
 
 // Auto-build flee table: prey animals automatically know which predators to run from
@@ -451,8 +499,14 @@ export class Mob {
     this.atMeleeStop     = false;
 
     // Movement state machine
-    // States: 'idle' | 'wandering' | 'chasing' | 'returning' | 'fleeing'
+    // States: 'idle' | 'wandering' | 'chasing' | 'in_combat' | 'returning' | 'fleeing'
     this.state = 'idle';
+
+    // Chase / path-fail tracking
+    this._repathTimer    = 0;   // countdown to next chase target update
+    this._stuckTimer     = 0;   // accumulated time fully blocked during chase
+    this._reAggroLockout = 0;   // prevents re-aggro immediately after returning home
+    this._facingFlipTimer = 0;  // prevents rapid facing direction flips
 
     // Death / respawn
     this.dead         = false;
@@ -461,6 +515,10 @@ export class Mob {
     // Wildlife: hunting prey mobs
     this.huntTarget = null;
     this.huntTimer  = 1 + Math.random();
+
+    // Debug overlay data — populated each frame when _dbgOn() is truthy.
+    // Enable in the browser console: _dbgOn() = true
+    this._dbg = null;
   }
 
   update(dt, world, player, mobs) {
@@ -469,66 +527,108 @@ export class Mob {
       return;
     }
 
-    // Drop aggro if the combat target escapes far enough.
-    // Compare against combatTarget directly (not the player parameter) so this
-    // works on both the client (combatTarget = player) and the server
-    // (combatTarget = position proxy { cx, cy }).
-    if (this.aggressive && this.inCombat && this.combatTarget) {
-      const pdx = this.combatTarget.cx - this.cx;
-      const pdy = this.combatTarget.cy - this.cy;
-      const distTiles = Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE;
+    // Tick cooldown timers
+    if (this._reAggroLockout > 0) this._reAggroLockout -= dt;
+    if (this._facingFlipTimer > 0) this._facingFlipTimer -= dt;
 
-      if (distTiles > AGGRO_LOSE_RANGE) {
+    const myDef = MOB_DEFS[this.type];
+
+    // ── 1. Leash check ────────────────────────────────────────────────────
+    // If mob has chased too far from its spawn, abandon combat and return home.
+    if (this.inCombat) {
+      const homeDist = Math.hypot(
+        this.cx - (this.spawnCol * TILE_SIZE + TILE_SIZE / 2),
+        this.cy - (this.spawnRow * TILE_SIZE + TILE_SIZE / 2)
+      ) / TILE_SIZE;
+      if (homeDist > LEASH_DISTANCE) {
         this._startReturn();
       }
     }
 
-    const myDef = MOB_DEFS[this.type];
-
-    // ── 1. Aggressive mobs self-detect the player ─────────────────────
-    if (this.aggressive && player && !this.inCombat) {
+    // ── 2. Aggro detection ────────────────────────────────────────────────
+    // Aggressive mobs scan for the player. Lockout prevents re-aggro immediately
+    // after returning home (stops rapid drop-and-reacquire loops).
+    if (this.aggressive && player && !this.inCombat && this._reAggroLockout <= 0) {
       const pdx = player.cx - this.cx;
       const pdy = player.cy - this.cy;
       if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= AGGRO_RANGE &&
           hasLineOfSight(world, this.cx, this.cy, player.cx, player.cy)) {
         this.inCombat     = true;
         this.combatTarget = player;
+        this.state        = 'chasing';
+        this._repathTimer = 0;
+        this._stuckTimer  = 0;
       }
     }
 
-    // ── 2. Combat movement ────────────────────────────────────────────
-    // When in combat, skip ALL other AI and move straight toward the player.
-    
+    // ── 3. State machine ──────────────────────────────────────────────────
     if (this.inCombat && this.combatTarget) {
-      this.state = 'chasing';
-      const tdx = this.combatTarget.cx - this.cx;
-      const tdy = this.combatTarget.cy - this.cy;
+      // ── Combat branch ─────────────────────────────────────────────────
+      const tdx       = _tgtCx(this.combatTarget) - this.cx;
+      const tdy       = _tgtCy(this.combatTarget) - this.cy;
       const distTiles = Math.sqrt(tdx * tdx + tdy * tdy) / TILE_SIZE;
 
-      if (distTiles <= MELEE_RANGE) {
-        if (!this.atMeleeStop) {
-          _snap(this);
-          this.atMeleeStop = true;
+      switch (this.state) {
+        case 'chasing': {
+          // Repath toward the adjacent tile slot (left or right) rather than the
+          // player's centre — keeps the approach horizontal and tile-aligned.
+          this._repathTimer -= dt;
+          if (this._repathTimer <= 0) {
+            this._repathTimer = CHASE_REPATH_INTERVAL;
+            const slot = _meleeSlot(this, this.combatTarget);
+            this.targetX = slot.x;
+            this.targetY = slot.y;
+          }
+          // Emergency fallback: commit to melee if the target walks into the mob
+          // (primary commitment is handled by arrival detection after movement).
+          if (distTiles <= MELEE_RANGE * 0.6) {
+            this._enterMelee();
+          }
+          break;
         }
-        this.targetX = null;
-        this.targetY = null;
-      } else if (this.atMeleeStop && distTiles <= MELEE_RANGE + 1.0) {
-        // Hysteresis: stay put until player is clearly far enough away.
-        this.targetX = null;
-        this.targetY = null;
-      } else {
-        this.atMeleeStop = false;
-        this.targetX = this.combatTarget.cx - this.w / 2;
-        this.targetY = this.combatTarget.cy - this.h / 2;
+
+        case 'in_combat': {
+          if (distTiles > MELEE_HOLD_DISTANCE) {
+            // Player stepped away — follow (MELEE_HOLD_DISTANCE > MELEE_RANGE prevents
+            // oscillation when player is at a fractional tile position just over MELEE_RANGE)
+            if (_dbgOn()) console.log(`[${this.name}] in_combat→chasing  dist=${distTiles.toFixed(2)} > hold=${MELEE_HOLD_DISTANCE}`);
+            this.state        = 'chasing';
+            this.atMeleeStop  = false;
+            this._repathTimer = 0;
+            this._stuckTimer  = 0;
+            const slot        = _meleeSlot(this, this.combatTarget);
+            this.targetX      = slot.x;
+            this.targetY      = slot.y;
+          } else {
+            // In range — hold and let combat.js handle the attack tick.
+            this.targetX     = null;
+            this.targetY     = null;
+            this.atMeleeStop = true;
+          }
+          break;
+        }
+
+        default: {
+          // Entered inCombat from a non-combat state (e.g. retaliating guard) — start chasing.
+          // Must set targetX here; if left null the post-movement arrival check would fire
+          // immediately and lock the mob in in_combat before it moves anywhere.
+          this.state        = 'chasing';
+          this._repathTimer = CHASE_REPATH_INTERVAL; // don't repath again this frame
+          this._stuckTimer  = 0;
+          const slot        = _meleeSlot(this, this.combatTarget);
+          this.targetX      = slot.x;
+          this.targetY      = slot.y;
+        }
       }
+
     } else {
-      // ── 3. Non-combat AI ─────────────────────────────────────────────
-      // Reset to idle if combat was just released
-      if (this.state === 'chasing' || this.state === 'attacking') {
+      // ── Non-combat branch ─────────────────────────────────────────────
+      // Clean up if combat was just released from outside (e.g. combat.js _releaseMob)
+      if (this.state === 'chasing' || this.state === 'in_combat') {
         this._transitionIdle();
       }
 
-      // Prey flee from nearby predators
+      // Prey animals flee from nearby predators (skip during return/flee)
       if (this.state !== 'returning' && this.state !== 'fleeing') {
         const predators = _fleeFrom[this.type];
         if (predators) {
@@ -543,7 +643,6 @@ export class Mob {
         }
       }
 
-      // Idle / wander / return / flee states
       switch (this.state) {
         case 'idle':
           this.wanderTimer -= dt;
@@ -551,7 +650,12 @@ export class Mob {
           break;
 
         case 'wandering':
-          if (this.targetX !== null) {
+          if (this.targetX === null) {
+            // Movement block already snapped and cleared targetX — go idle.
+            // (Happens when a fast mob crosses the 4px arrival threshold in one frame.)
+            this.state       = 'idle';
+            this.wanderTimer = WANDER_COOLDOWN_MIN + Math.random() * (WANDER_COOLDOWN_MAX - WANDER_COOLDOWN_MIN);
+          } else {
             const dx = this.targetX - this.x;
             const dy = this.targetY - this.y;
             if (Math.sqrt(dx * dx + dy * dy) <= 4) {
@@ -559,7 +663,7 @@ export class Mob {
               this.state       = 'idle';
               this.targetX     = null;
               this.targetY     = null;
-              this.wanderTimer = this.idleTime + Math.random() * 2;
+              this.wanderTimer = WANDER_COOLDOWN_MIN + Math.random() * (WANDER_COOLDOWN_MAX - WANDER_COOLDOWN_MIN);
             }
           }
           break;
@@ -574,12 +678,13 @@ export class Mob {
 
         case 'fleeing':
           if (this.targetX === null || this.targetY === null ||
-            Math.hypot(this.targetX - this.x, this.targetY - this.y) <= 4) {
+              Math.hypot(this.targetX - this.x, this.targetY - this.y) <= 4) {
             this._transitionIdle();
           }
           break;
 
-        default: this.state = 'idle';
+        default:
+          this.state = 'idle';
       }
 
       // Wildlife: hunt prey mobs
@@ -597,9 +702,13 @@ export class Mob {
         }
         if (this.huntTarget) {
           this.huntTimer -= dt;
-          const dx = this.huntTarget.cx - this.cx;
-          const dy = this.huntTarget.cy - this.cy;
-          if (dx * dx + dy * dy < (TILE_SIZE * 1.5) ** 2) {
+          const dx     = this.huntTarget.cx - this.cx;
+          const dy     = this.huntTarget.cy - this.cy;
+          const distSq = dx * dx + dy * dy;
+          if (distSq < (TILE_SIZE * 1.5) ** 2) {
+            // Within attack range — stop and fight.
+            // Snap once on first arrival to tile-align and prevent boundary oscillation.
+            if (this.targetX !== null) _snap(this);
             this.targetX = null;
             this.targetY = null;
             if (this.huntTimer <= 0) {
@@ -612,74 +721,127 @@ export class Mob {
               }
               this.huntTimer = 1.8 + Math.random() * 0.6;
             }
-          } else {
+          } else if (distSq >= (TILE_SIZE * 2.0) ** 2) {
+            // Prey escaped beyond 2 tiles — resume chasing.
+            // The 0.5-tile gap (1.5 stop → 2.0 restart) prevents oscillation when
+            // the prey is right at the boundary.
             this.targetX = this.huntTarget.x;
             this.targetY = this.huntTarget.y;
           }
+          // Between 1.5 and 2.0 tiles: hold position (hysteresis zone).
         }
       } else {
         this.huntTarget = null;
       }
     }
 
-  // ── 4. Move toward target ─────────────────────────────────────────
-  this.moving = false;
-  if (this.targetX !== null && this.targetY !== null) {
-    const dx = this.targetX - this.x;
-    const dy = this.targetY - this.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+    // ── 4. Move toward target ─────────────────────────────────────────────
+    this.moving = false;
+    if (this.targetX !== null && this.targetY !== null) {
+      const dx   = this.targetX - this.x;
+      const dy   = this.targetY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-    if (dist > 2) {
-      const nx = dx / dist;
-      const ny = dy / dist;
+      if (dist > 2) {
+        const nx = dx / dist;
+        const ny = dy / dist;
 
-      if (dx < 0) this.facingLeft = true;
-      else if (dx > 0) this.facingLeft = false;
+        // Suppress rapid facing flips — only update direction after a short delay
+        if (this._facingFlipTimer <= 0) {
+          if      (dx < -4) { this.facingLeft = true;  this._facingFlipTimer = 0.15; }
+          else if (dx >  4) { this.facingLeft = false; this._facingFlipTimer = 0.15; }
+        }
 
-      const prevX = this.x;
-      const prevY = this.y;
+        const prevX = this.x;
+        const prevY = this.y;
+        let blockedX = false;
+        let blockedY = false;
 
-      let blockedX = false;
-      let blockedY = false;
+        // Clamp step to remaining distance so the mob never overshoots the
+        // target and oscillates back and forth past it each tick.
+        const step = Math.min(this.speed * dt, dist);
 
-      const newX = this.x + nx * this.speed * dt;
-      if (!world.isBlocked(newX, this.y, this.w, this.h)) {
-        this.x = newX;
+        const newX = this.x + nx * step;
+        if (!world.isBlocked(newX, this.y, this.w, this.h)) {
+          this.x = newX;
+        } else {
+          blockedX = true;
+        }
+
+        const newY = this.y + ny * step;
+        if (!world.isBlocked(this.x, newY, this.w, this.h)) {
+          this.y = newY;
+        } else {
+          blockedY = true;
+        }
+
+        // Accumulate stuck time only when fully blocked on both axes.
+        // If only one axis is blocked the mob can still slide around corners.
+        if (blockedX && blockedY) {
+          this._stuckTimer += dt;
+          if (this._stuckTimer >= PATH_FAIL_TIMEOUT && this.state === 'chasing') {
+            if (_dbgOn()) console.log(`[${this.name}] chasing→returning  PATH_FAIL after ${this._stuckTimer.toFixed(1)}s stuck`);
+            this._startReturn();
+          }
+        } else {
+          this._stuckTimer = 0;
+        }
+
+        // Wandering / returning mobs give up on an obstacle rather than stuttering
+        if ((blockedX || blockedY) && (this.state === 'wandering' || this.state === 'returning')) {
+          this._transitionIdle();
+        }
+
+        this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
+        this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
+
+        this.moving = Math.abs(this.x - prevX) > 0.01 || Math.abs(this.y - prevY) > 0.01;
       } else {
-        blockedX = true;
+        _snap(this);
+        this.targetX = null;
+        this.targetY = null;
       }
-
-      const newY = this.y + ny * this.speed * dt;
-      if (!world.isBlocked(this.x, newY, this.w, this.h)) {
-        this.y = newY;
-      } else {
-        blockedY = true;
-      }
-
-      if ((blockedX || blockedY) && this.state === 'wandering') {
-        // Pause briefly instead of immediately re-picking a direction — prevents
-        // rapid left/right oscillation when surrounded by obstacles.
-        this._transitionIdle();
-      }
-
-      if ((blockedX || blockedY) && this.state === 'returning') {
-        this._transitionIdle();
-      }
-
-      this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
-      this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
-
-      this.moving =
-        Math.abs(this.x - prevX) > 0.01 || Math.abs(this.y - prevY) > 0.01;
-    } else {
-      // Arrived — snap to tile with feet-aligned position
-      _snap(this);
-      this.targetX = null;
-      this.targetY = null;
     }
-  }
 
-    // ── 5. Walk animation ─────────────────────────────────────────────
+    // ── Arrival at melee slot ─────────────────────────────────────────────
+    // The movement block above clears targetX when the mob reaches its destination.
+    // Commit to melee only if the player hasn't moved farther than MELEE_HOLD_DISTANCE
+    // in the meantime — if they have, the next repath will send us to the new slot.
+    if (this.state === 'chasing' && this.inCombat && this.combatTarget && this.targetX === null) {
+      const tdx = _tgtCx(this.combatTarget) - this.cx;
+      const tdy = _tgtCy(this.combatTarget) - this.cy;
+      if (Math.sqrt(tdx * tdx + tdy * tdy) / TILE_SIZE <= MELEE_HOLD_DISTANCE) {
+        this._enterMelee();
+      }
+    }
+
+    // ── 5. Debug state capture ───────────────────────────────────────────
+    // Enable via: _dbgOn() = true  (browser console)
+    if (_dbgOn()) {
+      const pd = player
+        ? Math.hypot(player.cx - this.cx, player.cy - this.cy) / TILE_SIZE
+        : -1;
+      const hd = Math.hypot(
+        this.cx - (this.spawnCol * TILE_SIZE + TILE_SIZE / 2),
+        this.cy - (this.spawnRow * TILE_SIZE + TILE_SIZE / 2)
+      ) / TILE_SIZE;
+      this._dbg = {
+        state:           this.state,
+        inCombat:        this.inCombat,
+        atMeleeStop:     this.atMeleeStop,
+        distPlayer:      pd,       // tiles to player (-1 = no player)
+        distHome:        hd,       // tiles from spawn anchor
+        attackCooldown:  this.attackCooldown,
+        repathTimer:     this._repathTimer,
+        stuckTimer:      this._stuckTimer,
+        reAggroLockout:  this._reAggroLockout,
+        // Thresholds — shown in overlay so mismatches are immediately visible
+        meleeRange:  MELEE_RANGE,   // mob enters/holds in_combat; re-chases if exceeded
+        leashRange:  LEASH_DISTANCE,
+      };
+    }
+
+    // ── 6. Walk animation ─────────────────────────────────────────────────
     if (this.moving) {
       this.animTimer += dt;
       if (this.animTimer > 0.18) {
@@ -702,8 +864,28 @@ export class Mob {
     this.state        = 'idle';
     this.targetX      = null;
     this.targetY      = null;
-    this.wanderTimer  = 1 + Math.random() * 2;
+    this._stuckTimer  = 0;
+    // Deliberate stand-still pause before next wander
+    this.wanderTimer  = WANDER_COOLDOWN_MIN + Math.random() * (WANDER_COOLDOWN_MAX - WANDER_COOLDOWN_MIN);
     _snap(this);
+  }
+
+  /** Commit to melee stance — snap to the current tile and hold.
+   *  The mob arrives here after reaching the tile-aligned slot returned by
+   *  _meleeSlot(), so it is already on an adjacent tile (1 tile from target).
+   *  Snapping is safe: the slot is exactly 1 tile away, well within MELEE_RANGE. */
+  _enterMelee() {
+    if (_dbgOn()) {
+      const d = this.combatTarget
+        ? Math.hypot(this.combatTarget.cx - this.cx, this.combatTarget.cy - this.cy) / TILE_SIZE
+        : -1;
+      console.log(`[${this.name}] chasing→in_combat  dist=${d.toFixed(2)}  meleeRange=${MELEE_RANGE}`);
+    }
+    _snap(this);
+    this.state       = 'in_combat';
+    this.atMeleeStop = true;
+    this.targetX     = null;
+    this.targetY     = null;
   }
 
   /**
@@ -725,18 +907,27 @@ export class Mob {
       this.state   = 'wandering';
       return;
     }
-    // All attempts landed on solid tiles — stay idle a bit longer
-    this.wanderTimer = this.idleTime + Math.random() * 2;
+    // All attempts landed on solid tiles — stand still for a full cooldown cycle
+    this.wanderTimer = WANDER_COOLDOWN_MAX;
   }
 
   /** Disengage and walk back to spawn anchor. HP is not reset. */
   _startReturn() {
-    this.inCombat     = false;
-    this.combatTarget = null;
-    this.atMeleeStop  = false;
-    this.state        = 'returning';
-    this.targetX      = this.spawnX;
-    this.targetY      = this.spawnY;
+    if (_dbgOn()) {
+      const hd = Math.hypot(
+        this.cx - (this.spawnCol * TILE_SIZE + TILE_SIZE / 2),
+        this.cy - (this.spawnRow * TILE_SIZE + TILE_SIZE / 2)
+      ) / TILE_SIZE;
+      console.log(`[${this.name}] →returning  homeDist=${hd.toFixed(2)}  leash=${LEASH_DISTANCE}  stuck=${this._stuckTimer.toFixed(2)}`);
+    }
+    this.inCombat        = false;
+    this.combatTarget    = null;
+    this.atMeleeStop     = false;
+    this.state           = 'returning';
+    this.targetX         = this.spawnX;
+    this.targetY         = this.spawnY;
+    this._stuckTimer     = 0;
+    this._reAggroLockout = AGGRO_REACQUIRE_GAP; // prevent immediate re-aggro after leashing
   }
 
   /** Run directly away from a predator to the flee spread distance. */
@@ -871,10 +1062,102 @@ export class Mob {
       ctx.fillText(`${hp}/${maxHp}`, bx + bw / 2, by - 1);
       ctx.textAlign = 'left';
     }
+
+    // Debug overlay (enable via _dbgOn() = true in browser console)
+    if (_dbgOn() && this._dbg) {
+      _drawMobDebug(ctx, x, y, this);
+    }
   }
 
   get cx() { return this.x + this.w / 2; }
   get cy() { return this.y + this.h / 2; }
+}
+
+/* ── Debug overlay ─────────────────────────────────────
+ * Enable:  _dbgOn() = true   (browser console)
+ * Disable: _dbgOn() = false
+ *
+ * Shows per-mob:
+ *  • State (colour-coded border + label)
+ *  • Distance to player vs key thresholds
+ *  • Attack cooldown, repath timer, stuck timer
+ *  • Melee-range circle (red) and hold-break-range circle (dashed orange)
+ *  • Leash circle (faint green) centred on spawn anchor
+ */
+function _drawMobDebug(ctx, x, y, mob) {
+  const dbg = mob._dbg;
+  const cx  = x + mob.w / 2;
+  const cy  = y + mob.h / 2;
+  const ts  = TILE_SIZE;
+
+  const stateColor = {
+    idle:      '#888',
+    wandering: '#4af',
+    chasing:   '#f80',
+    in_combat: '#f44',
+    returning: '#4d4',
+    fleeing:   '#ff0',
+  }[dbg.state] ?? '#fff';
+
+  // Tinted border around mob sprite
+  ctx.strokeStyle = stateColor;
+  ctx.lineWidth   = 1.5;
+  ctx.strokeRect(x, y, mob.w, mob.h);
+
+  // Range circles (only when actively in combat)
+  if (dbg.inCombat) {
+    // Melee-range: mob enters in_combat here
+    ctx.beginPath();
+    ctx.arc(cx, cy, dbg.meleeRange * ts, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(255,60,60,0.55)';
+    ctx.lineWidth   = 1;
+    ctx.setLineDash([]);
+    ctx.stroke();
+
+  }
+
+  // Leash circle centred on spawn anchor (always shown)
+  ctx.beginPath();
+  ctx.arc(
+    mob.spawnCol * ts + ts / 2,
+    mob.spawnRow * ts + ts / 2,
+    dbg.leashRange * ts, 0, Math.PI * 2
+  );
+  ctx.strokeStyle = 'rgba(80,255,120,0.18)';
+  ctx.lineWidth   = 1;
+  ctx.stroke();
+
+  // Spawn anchor dot
+  ctx.fillStyle = 'rgba(80,255,120,0.7)';
+  ctx.beginPath();
+  ctx.arc(mob.spawnCol * ts + ts / 2, mob.spawnRow * ts + ts / 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Text block to the right of the mob
+  const lines = [
+    `[${dbg.state}]`,
+    `dist:${dbg.distPlayer < 0 ? 'n/a' : dbg.distPlayer.toFixed(2)}t`,
+    `meleeRange:${dbg.meleeRange}t`,
+    `home:${dbg.distHome.toFixed(1)}t / leash:${dbg.leashRange}`,
+    `atk:${dbg.attackCooldown.toFixed(2)}s  rp:${dbg.repathTimer.toFixed(2)}s`,
+    dbg.stuckTimer > 0.05   ? `STUCK:${dbg.stuckTimer.toFixed(1)}s / ${PATH_FAIL_TIMEOUT}s` : null,
+    dbg.reAggroLockout > 0  ? `re-aggro lockout:${dbg.reAggroLockout.toFixed(1)}s` : null,
+    dbg.atMeleeStop         ? 'atMeleeStop=true' : null,
+  ].filter(Boolean);
+
+  const lh  = 9;
+  const bx  = x + mob.w + 3;
+  const by0 = y;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.7)';
+  ctx.fillRect(bx - 1, by0, 148, lines.length * lh + 3);
+
+  ctx.font      = '8px monospace';
+  ctx.textAlign = 'left';
+  lines.forEach((line, i) => {
+    ctx.fillStyle = i === 0 ? stateColor : '#ddd';
+    ctx.fillText(line, bx, by0 + lh * (i + 1));
+  });
 }
 
 /* ── Per-type draw helpers ──────────────────────────── */

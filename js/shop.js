@@ -70,17 +70,31 @@ export const CAPE_SELL_PRICES = {
   warrior_cape: 200, berserker_cape: 300,
 };
 
-/* ── Smithy shop (weapons + armour) ────────────────── */
+/* ── Smithy shop (weapons + armour up to steel) ─────── */
 export const SMITHY_STOCK = [
-  { item: ITEMS.BRONZE_SWORD, buyPrice:   60 },
-  { item: ITEMS.IRON_SWORD,   buyPrice:  160 },
-  { item: ITEMS.STEEL_SWORD,  buyPrice:  400 },
-  { item: ITEMS.BRONZE_HELM,  buyPrice:   70 },
-  { item: ITEMS.IRON_HELM,    buyPrice:  180 },
-  { item: ITEMS.STEEL_HELM,   buyPrice:  440 },
-  { item: ITEMS.BRONZE_PLATE, buyPrice:  170 },
-  { item: ITEMS.IRON_PLATE,   buyPrice:  440 },
-  { item: ITEMS.STEEL_PLATE,  buyPrice: 1080 },
+  // Weapons
+  { item: ITEMS.BRONZE_SWORD,      buyPrice:   60 },
+  { item: ITEMS.IRON_SWORD,        buyPrice:  160 },
+  { item: ITEMS.STEEL_SWORD,       buyPrice:  400 },
+  // Helmets
+  { item: ITEMS.BRONZE_HELM,       buyPrice:   70 },
+  { item: ITEMS.IRON_HELM,         buyPrice:  180 },
+  { item: ITEMS.STEEL_HELM,        buyPrice:  440 },
+  // Chestplates
+  { item: ITEMS.BRONZE_PLATE,      buyPrice:  170 },
+  { item: ITEMS.IRON_PLATE,        buyPrice:  440 },
+  { item: ITEMS.STEEL_PLATE,       buyPrice: 1080 },
+  // Leggings (no steel legs exists)
+  { item: ITEMS.BRONZE_LEGS,       buyPrice:   90 },
+  { item: ITEMS.IRON_LEGS,         buyPrice:  230 },
+  // Gauntlets
+  { item: ITEMS.BRONZE_GAUNTLETS,  buyPrice:   50 },
+  { item: ITEMS.IRON_GAUNTLETS,    buyPrice:  130 },
+  { item: ITEMS.STEEL_GAUNTLETS,   buyPrice:  300 },
+  // Boots
+  { item: ITEMS.BRONZE_BOOTS,      buyPrice:   50 },
+  { item: ITEMS.IRON_BOOTS,        buyPrice:  130 },
+  { item: ITEMS.STEEL_BOOTS,       buyPrice:  300 },
 ];
 
 /* ── Panel geometry (shared with game.js for hit-testing) ── */
@@ -155,6 +169,8 @@ export const SELL_PRICES = {
   moonstone_staff:  2500,
   iron_axe:         65,
   iron_legs:        65,
+  iron_gauntlets:   40,
+  iron_boots:   40,
   steel_axe:        160,
   iron_pickaxe:     65,
   steel_pickaxe:    160,
@@ -166,7 +182,63 @@ export const SELL_PRICES = {
   bronze_plate:     85,
   iron_plate:       220,
   steel_plate:      540,
+  steel_gauntlets:  150,
   tungsten_plate:   1600,
+  // Mithril (also in weapon shop but sellable here too)
+  mithril_helm:     600,
+  mithril_plate:    1400,
+  mithril_legs:     500,
+  // Bronze/leather armour tiers
+  bronze_legs:      40,
+  bronze_gauntlets: 20,
+  bronze_boots:     20,
+  leather_cap:      15,
+  leather_body:     35,
+  leather_legs:     25,
+  leather_gloves:   12,
+  leather_boots:    12,
+  steel_boots:      80,
+  // Epic equipment (rare drops)
+  berserker_axe:    800,
+  shadow_dagger:    600,
+  venom_blade:      700,
+  berserker_mask:   500,
+  shadow_tunic:     700,
+  berserker_wraps:  300,
+  shadow_treads:    300,
+  // Farming seeds
+  potato_seed:      1,
+  berry_seed:       1,
+  herb_seed:        2,
+  flax_seed:        3,
+  magic_seed:       10,
+  // Farming harvest
+  potato:           3,
+  berries:          2,
+  herb:             5,
+  flax:             8,
+  magic_herb:       25,
+  // Raid materials
+  ancient_bone:     50,
+  silk_thread:      80,
+  stone_core:       100,
+  dragon_scale:     200,
+  raid_token:       10,
+  chaos_fragment:   150,
+  // Raid weapons
+  raid_blade:       2000,
+  voidbane_sword:   3000,
+  chaos_edge:       4000,
+  dungeon_greataxe: 2500,
+  // Raid armour
+  raiders_helm:     800,
+  raiders_plate:    1800,
+  raiders_legs:     1200,
+  raiders_gauntlets:500,
+  voidguard_helm:   1500,
+  voidguard_plate:  3500,
+  voidguard_legs:   2500,
+  voidguard_boots:  1000,
 };
 
 /* ── House furniture shop ──────────────────────────────── */
