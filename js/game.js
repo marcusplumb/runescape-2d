@@ -885,7 +885,7 @@ export class Game {
             this.clickDest = { col: clickCol, row: clickRow };
           }
         } else {
-          // ── Interior: plain walk, or farm patch interaction ─
+          // ── Interior: plain walk, farm patch, or furniture interaction ─
           const iTile = this.activeMap.getTile(clickCol, clickRow);
           if (this.activeMap.id === 'player_house' &&
               (iTile === TILES.FARM_PATCH || iTile === TILES.FARM_PATCH_SEEDED ||
@@ -893,6 +893,17 @@ export class Game {
             this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
             this.pendingInteract = { type: 'farm_patch', col: clickCol, row: clickRow };
             this.clickDest = { col: clickCol, row: clickRow };
+          } else if (TILE_TOOLTIPS[iTile] !== undefined) {
+            // Furniture or interactive tile inside interior — walk adjacent then interact
+            const solid = this.activeMap.isSolid(clickCol, clickRow);
+            const target = solid
+              ? nearestWalkableAdjacent(this.activeMap, clickCol, clickRow, this.player.col, this.player.row)
+              : { col: clickCol, row: clickRow };
+            if (target) {
+              this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, target.col, target.row));
+              this.pendingInteract = { type: 'action', col: clickCol, row: clickRow, worldX: worldPos.x, worldY: worldPos.y };
+              this.clickDest = { col: clickCol, row: clickRow };
+            }
           } else {
             this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
             this.clickDest = { col: clickCol, row: clickRow };
