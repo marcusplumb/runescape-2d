@@ -123,6 +123,21 @@ export const TILES = {
   FOUNTAIN:           84,  // stone basin fountain — solid prop (use 5×5 block)
   PLANTER_FLOWERS:    85,  // elevated stone planter box with soil and flowers — solid prop
   PLANTER_BUSH:       86,  // elevated stone planter box with soil and a bush — solid prop
+  // Cave-specific tiles (used in underground dungeons)
+  CAVE_FLOOR:         87,  // packed-earth cave floor — walkable, organic texture
+  CAVE_WALL:          88,  // rough natural dirt/rock cave wall — solid
+  SPIDER_WEB:         89,  // spider web prop — walkable, decorative
+  // Overworld forageable resources
+  BERRY_BUSH:         90,  // harvestable berry bush — solid, interactive
+  BERRY_BUSH_EMPTY:   99,  // berry bush after picking — solid, not interactive, regrows
+  MUSHROOM:           91,  // mushroom cluster — solid, interactive
+  WILD_HERB:          92,  // wild herb plant — solid, interactive
+  REEDS:              93,  // reed cluster near water — solid, interactive
+  FLAX_PLANT:         94,  // tall flax plant — Plains, drops flax
+  SNOWBERRY:          95,  // snowberry bush — Tundra only
+  SULFUR_ROCK:        96,  // sulfur crystal deposit — Volcanic only
+  THORN_BUSH:         97,  // gnarled thorn bush — Danger zone only
+  DESERT_FLOWER:      98,  // succulent bloom — Desert only
 };
 
 // Which tiles block movement
@@ -193,6 +208,19 @@ export const SOLID_TILES = new Set([
   TILES.FOUNTAIN,
   TILES.PLANTER_FLOWERS,
   TILES.PLANTER_BUSH,
+  // Cave tiles
+  TILES.CAVE_WALL,
+  // Forageable overworld resources (solid so player walks adjacent)
+  TILES.BERRY_BUSH,
+  TILES.BERRY_BUSH_EMPTY,
+  TILES.MUSHROOM,
+  TILES.WILD_HERB,
+  TILES.REEDS,
+  TILES.FLAX_PLANT,
+  TILES.SNOWBERRY,
+  TILES.SULFUR_ROCK,
+  TILES.THORN_BUSH,
+  TILES.DESERT_FLOWER,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -299,6 +327,21 @@ export const TILE_COLORS = {
   [TILES.FOUNTAIN]:         '#506070',
   [TILES.PLANTER_FLOWERS]:  '#787060',
   [TILES.PLANTER_BUSH]:     '#787060',
+  // Cave tiles
+  [TILES.CAVE_FLOOR]:       '#3d2b1a',  // dark packed earth
+  [TILES.CAVE_WALL]:        '#2a1a0e',  // near-black rough dirt wall
+  [TILES.SPIDER_WEB]:       '#3d2b1a',  // same as cave floor — web drawn as prop on top
+  // Forageable resources (ground colour shown when depleted)
+  [TILES.BERRY_BUSH]:       '#3d7a34',  // dense green bush
+  [TILES.BERRY_BUSH_EMPTY]: '#3d7a34',  // same bush, no berries
+  [TILES.MUSHROOM]:         '#3d7a34',  // dark grass base
+  [TILES.WILD_HERB]:        '#4a8c3f',  // grass base
+  [TILES.REEDS]:            '#9a8432',  // golden-tan reed stalk colour
+  [TILES.FLAX_PLANT]:       '#4a8c3f',  // grass base
+  [TILES.SNOWBERRY]:        '#dce8f0',  // snow base
+  [TILES.SULFUR_ROCK]:      '#3a2a2a',  // volcanic rock base
+  [TILES.THORN_BUSH]:       '#8a7a50',  // dead grass base
+  [TILES.DESERT_FLOWER]:    '#b8a060',  // sand dark base
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -344,6 +387,21 @@ export const TILE_HAS_DETAIL = new Set([
   TILES.FOUNTAIN,
   TILES.PLANTER_FLOWERS,
   TILES.PLANTER_BUSH,
+  // Cave tiles
+  TILES.CAVE_FLOOR,
+  TILES.CAVE_WALL,
+  TILES.SPIDER_WEB,
+  // Forageable overworld resources
+  TILES.BERRY_BUSH,
+  TILES.BERRY_BUSH_EMPTY,
+  TILES.MUSHROOM,
+  TILES.WILD_HERB,
+  TILES.REEDS,
+  TILES.FLAX_PLANT,
+  TILES.SNOWBERRY,
+  TILES.SULFUR_ROCK,
+  TILES.THORN_BUSH,
+  TILES.DESERT_FLOWER,
 ]);
 
 // ── Inventory ────────────────────────────────────────────

@@ -67,6 +67,65 @@ const ORE_MAP = {
   [TILES.ROCK_MOONSTONE]:{ item: ITEMS.ORE_MOONSTONE,xp: XP_REWARDS.MINE_MOONSTONE, toolTier: 2, levelReq: 85 },
 };
 
+// Forageable overworld resources — no tool required, gives Farming XP
+const FORAGE_MAP = {
+  [TILES.BERRY_BUSH]: {
+    item: ITEMS.BERRIES, qtyMin: 2, qtyMax: 5,
+    xp: 12, time: 2.5, respawn: 45,
+    label: 'Picking berries...', msg: 'You pick some berries.',
+    ground: TILES.DARK_GRASS,
+    depletedTile: TILES.BERRY_BUSH_EMPTY,  // bush stays; just loses its berries
+  },
+  [TILES.MUSHROOM]: {
+    item: ITEMS.MUSHROOM, qtyMin: 1, qtyMax: 3,
+    xp: 8,  time: 2.0, respawn: 35,
+    label: 'Picking mushrooms...', msg: 'You pick some mushrooms.',
+    ground: TILES.DARK_GRASS,
+  },
+  [TILES.WILD_HERB]: {
+    item: ITEMS.HERB, qtyMin: 1, qtyMax: 2,
+    xp: 15, time: 3.0, respawn: 50,
+    label: 'Picking herbs...', msg: 'You pick a grimy herb.',
+    ground: TILES.GRASS,
+  },
+  [TILES.REEDS]: {
+    item: ITEMS.REEDS, qtyMin: 2, qtyMax: 5,
+    xp: 6,  time: 2.0, respawn: 30,
+    label: 'Cutting reeds...', msg: 'You cut some reeds.',
+    ground: TILES.GRASS,
+  },
+  [TILES.FLAX_PLANT]: {
+    item: ITEMS.FLAX, qtyMin: 1, qtyMax: 3,
+    xp: 10, time: 2.5, respawn: 45,
+    label: 'Picking flax...', msg: 'You pick some flax.',
+    ground: TILES.GRASS,
+  },
+  [TILES.SNOWBERRY]: {
+    item: ITEMS.SNOWBERRIES, qtyMin: 2, qtyMax: 4,
+    xp: 10, time: 2.5, respawn: 55,
+    label: 'Picking snowberries...', msg: 'You pick some snowberries.',
+    ground: TILES.SNOW,
+  },
+  [TILES.SULFUR_ROCK]: {
+    item: ITEMS.SULFUR, qtyMin: 1, qtyMax: 2,
+    xp: 12, time: 3.0, respawn: 65,
+    label: 'Chipping sulfur...', msg: 'You chip off some sulfur.',
+    ground: TILES.VOLCANIC_ROCK,
+  },
+  [TILES.THORN_BUSH]: {
+    item: ITEMS.THORN_VINE, qtyMin: 1, qtyMax: 3,
+    xp: 8,  time: 2.5, respawn: 40,
+    label: 'Cutting thorns...', msg: 'You carefully cut a thorn vine.',
+    ground: TILES.DEAD_GRASS,
+  },
+  [TILES.DESERT_FLOWER]: {
+    item: ITEMS.CACTUS_BLOOM, qtyMin: 1, qtyMax: 2,
+    xp: 14, time: 3.0, respawn: 60,
+    label: 'Picking bloom...', msg: 'You pluck a cactus bloom.',
+    ground: TILES.SAND_DARK,
+  },
+};
+
 // Which log type maps to fire XP, lifetime, Firemaking level requirement, and proximity perk
 const LOG_MAP = {
   logs:        { xp:  40, fireLifetime:  60, levelReq:  1, perk: null,         name: 'logs' },
@@ -116,6 +175,9 @@ export class Actions {
 
     // Depleted ore tracking: { "col,row": remainingSeconds }
     this.depletedRocks = {};
+
+    // Depleted forageable tracking: { "col,row": { timer, original } }
+    this.depletedForageables = {};
 
     this.fishingRecords = null;
   }
@@ -198,6 +260,22 @@ export class Actions {
         label: `Mining ${oreName}...`,
       };
       this.notif.add('You swing your pickaxe at the rock.', '#aaa');
+      return true;
+    }
+
+    // ── Forage (berry bush, mushroom, wild herb, reeds) ──
+    if (FORAGE_MAP[tile]) {
+      const info = FORAGE_MAP[tile];
+      if (this.inventory.isFull()) {
+        this.notif.add('Your inventory is full.', '#e74c3c');
+        return true;
+      }
+      this.active = {
+        type: 'forage', col, row,
+        timer: 0, duration: info.time + Math.random() * 1.0,
+        forageTile: tile,
+        label: info.label,
+      };
       return true;
     }
 
@@ -293,6 +371,17 @@ export class Actions {
         const [c, r] = key.split(',').map(Number);
         this.world.setTile(c, r, this.depletedRocks[key].original);
         delete this.depletedRocks[key];
+        this.world.dirty = true;
+      }
+    }
+
+    // Update depleted forageables
+    for (const key of Object.keys(this.depletedForageables)) {
+      this.depletedForageables[key].timer -= dt;
+      if (this.depletedForageables[key].timer <= 0) {
+        const [c, r] = key.split(',').map(Number);
+        this.world.setTile(c, r, this.depletedForageables[key].original);
+        delete this.depletedForageables[key];
         this.world.dirty = true;
       }
     }
@@ -400,6 +489,24 @@ export class Actions {
           };
           this.notif.add('The rock is depleted.', '#95a5a6');
         }
+        break;
+      }
+
+      case 'forage': {
+        const info = FORAGE_MAP[a.forageTile];
+        if (!info) break;
+        const qty = info.qtyMin + Math.floor(Math.random() * (info.qtyMax - info.qtyMin + 1));
+        this.inventory.add(info.item, qty);
+        const res = this._awardXp(SKILL_IDS.FARMING, info.xp);
+        this.notif.add(`${info.msg} (+${res.awarded} Farming XP)`, '#27ae60');
+        if (res.result.leveled) this.notif.add(`🎉 Farming level ${res.result.newLevel}!`, '#f1c40f');
+        // Deplete — use depletedTile if set (e.g. empty bush), otherwise revert to ground
+        this.world.setTile(a.col, a.row, info.depletedTile ?? info.ground);
+        this.world.dirty = true;
+        this.depletedForageables[`${a.col},${a.row}`] = {
+          timer: info.respawn + Math.random() * 15,
+          original: a.forageTile,
+        };
         break;
       }
 

@@ -9,11 +9,12 @@ export class Skills {
 
   /** Add XP to a skill. Returns { leveled, newLevel } */
   addXp(skillId, amount) {
+    const rounded = Math.round(amount);
     const oldLevel = this.getLevel(skillId);
     const progBefore = this.progressToNext(skillId);
-    this.xp[skillId] += amount;
+    this.xp[skillId] += rounded;
     const progAfter = this.progressToNext(skillId);
-    this.xpGainQueue.push({ skillId, gained: amount, progBefore, progAfter });
+    this.xpGainQueue.push({ skillId, gained: rounded, progBefore, progAfter });
     const newLevel = this.getLevel(skillId);
     return { leveled: newLevel > oldLevel, newLevel };
   }

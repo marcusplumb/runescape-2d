@@ -215,6 +215,12 @@ export const SELL_PRICES = {
   // Farming harvest
   potato:           3,
   berries:          2,
+  mushroom:         3,
+  reeds:            2,
+  snowberries:      5,
+  sulfur:           18,
+  thorn_vine:       6,
+  cactus_bloom:     10,
   herb:             5,
   flax:             8,
   magic_herb:       25,
@@ -239,6 +245,11 @@ export const SELL_PRICES = {
   voidguard_plate:  3500,
   voidguard_legs:   2500,
   voidguard_boots:  1000,
+  // Vitality items
+  dragonhide_helm:  600,
+  trollhide_vest:   700,
+  obsidian_plate:   2200,
+  vitality_cape:    400,
 };
 
 /* ── House furniture shop ──────────────────────────────── */

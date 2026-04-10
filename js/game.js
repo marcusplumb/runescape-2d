@@ -9,7 +9,7 @@ import { Skills } from './skills.js';
 import { Actions } from './actions.js';
 import { Notifications } from './notifications.js';
 import { ITEMS, EQUIP_ID_TO_ITEM } from './items.js';
-import { GEAR_BY_ID, meetsRequirements } from './gear.js';
+import { GEAR_BY_ID, meetsRequirements, getTotalStats } from './gear.js';
 import { MobManager, Mob } from './mobs.js';
 import { Combat } from './combat.js';
 import { ShopKeeper, SHOP_STOCK, SELL_PRICES, SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
@@ -86,6 +86,16 @@ const TILE_TOOLTIPS = {
   [TILES.ROCK_OBSIDIAN]:     'Obsidian Vent — click to mine (need Tungsten Pickaxe)',
   [TILES.ROCK_MOONSTONE]:    'Moonstone Vein — click to mine (need Tungsten Pickaxe)',
   [TILES.ROCK_DEPLETED]:     'Depleted Rock — wait for it to refill',
+  [TILES.BERRY_BUSH]:       'Berry Bush — click to pick berries',
+  [TILES.BERRY_BUSH_EMPTY]: 'Berry Bush — berries are regrowing...',
+  [TILES.MUSHROOM]:      'Mushroom — click to pick',
+  [TILES.WILD_HERB]:     'Wild Herb — click to pick',
+  [TILES.REEDS]:         'Reeds — click to cut',
+  [TILES.FLAX_PLANT]:   'Flax Plant — click to pick flax',
+  [TILES.SNOWBERRY]:    'Snowberry Bush — click to pick',
+  [TILES.SULFUR_ROCK]:  'Sulfur Deposit — click to chip off sulfur',
+  [TILES.THORN_BUSH]:   'Thorn Bush — click to cut thorn vines',
+  [TILES.DESERT_FLOWER]:'Desert Flower — click to pluck bloom',
   [TILES.FURNACE]:               'Furnace — smelt ores into bars',
   [TILES.ANVIL]:                 'Anvil — smith bars into equipment',
   [TILES.FARM_PATCH]:            'Empty soil patch — click to plant a seed',
@@ -907,11 +917,12 @@ export class Game {
       this.notifications.add('Action cancelled.', '#aaa');
     }
 
-    // Keep local player's combat level up to date (cheap: 4 array lookups)
+    // Keep local player's combat level and max HP up to date
     this.player.combatLevel = Math.max(1, Math.floor(
       (this.skills.getLevel(SKILL_IDS.ATTACK)    + this.skills.getLevel(SKILL_IDS.STRENGTH) +
        this.skills.getLevel(SKILL_IDS.DEFENCE)   + this.skills.getLevel(SKILL_IDS.HITPOINTS)) / 4
     ));
+    this._recalcMaxHp();
 
     // Sync combat level and HP changes to other players
     if (this.network) {
@@ -1058,6 +1069,12 @@ export class Game {
               this.player.currentAction = 'mine';
             else if (t === TILES.FIRE)
               this.player.currentAction = 'cook';
+            else if (t === TILES.BERRY_BUSH   || t === TILES.MUSHROOM ||
+                     t === TILES.WILD_HERB    || t === TILES.REEDS    ||
+                     t === TILES.FLAX_PLANT   || t === TILES.SNOWBERRY ||
+                     t === TILES.SULFUR_ROCK  || t === TILES.THORN_BUSH ||
+                     t === TILES.DESERT_FLOWER)
+              this.player.currentAction = 'forage';
             else
               this.player.currentAction = 'idle';
           }
@@ -1352,6 +1369,44 @@ export class Game {
         }
       }
     this.camera.end(ctx);
+
+    // Dungeon darkness — radial vignette centred on player gives a torchlight feel
+    if (this.inDungeon) {
+      const cw = this.canvas.width, ch = this.canvas.height;
+      const pcx = this.player.cx - this.camera.x;
+      const pcy = this.player.cy - this.camera.y;
+      const r0 = Math.min(cw, ch) * 0.18;
+      const r1 = Math.min(cw, ch) * 0.72;
+      const grad = ctx.createRadialGradient(pcx, pcy, r0, pcx, pcy, r1);
+      grad.addColorStop(0,    'rgba(0,0,0,0)');
+      grad.addColorStop(0.55, 'rgba(0,0,0,0.28)');
+      grad.addColorStop(1,    'rgba(0,0,0,0.82)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, cw, ch);
+
+      // Fire glow — warm light pools around each campfire, additive over the vignette
+      const startCol = Math.floor(this.camera.x / TILE_SIZE) - 2;
+      const startRow = Math.floor(this.camera.y / TILE_SIZE) - 2;
+      const endCol   = startCol + Math.ceil(cw / TILE_SIZE) + 5;
+      const endRow   = startRow + Math.ceil(ch / TILE_SIZE) + 5;
+      ctx.globalCompositeOperation = 'lighter';
+      for (let row = startRow; row <= endRow; row++) {
+        for (let col = startCol; col <= endCol; col++) {
+          if (this.activeMap.getTile(col, row) !== TILES.FIRE) continue;
+          const scx = col * TILE_SIZE + TILE_SIZE / 2 - this.camera.x;
+          const scy = row * TILE_SIZE + TILE_SIZE / 2 - this.camera.y;
+          const flicker = 0.88 + Math.sin(this.renderer.time * 2.5 + col * 2.3 + row * 1.7) * 0.12;
+          const glowR = TILE_SIZE * 8;
+          const glow = ctx.createRadialGradient(scx, scy, 0, scx, scy, glowR);
+          glow.addColorStop(0,   `rgba(255,180,60,${(0.32 * flicker).toFixed(3)})`);
+          glow.addColorStop(0.35, `rgba(220,100,20,${(0.18 * flicker).toFixed(3)})`);
+          glow.addColorStop(1,   'rgba(0,0,0,0)');
+          ctx.fillStyle = glow;
+          ctx.fillRect(scx - glowR, scy - glowR, glowR * 2, glowR * 2);
+        }
+      }
+      ctx.globalCompositeOperation = 'source-over';
+    }
 
     // Screen-space UI
     if (!this.inInterior && !this.inRaid && !this.inDungeon) {
@@ -2888,6 +2943,17 @@ export class Game {
     this.contextMenu = null;
   }
 
+  _recalcMaxHp() {
+    const hpLevel  = this.skills.getLevel(SKILL_IDS.HITPOINTS);
+    const { hp: bonusHp } = getTotalStats(this.player.equipment);
+    const newMax   = Math.floor(9 + hpLevel) + bonusHp;
+    if (newMax === this.player.maxHp) return;
+    const diff = newMax - this.player.maxHp;
+    this.player.maxHp = newMax;
+    if (diff > 0) this.player.hp = Math.min(newMax, this.player.hp + diff);
+    this.player.hp = Math.min(this.player.hp, this.player.maxHp);
+  }
+
   _equipItem(invSlot) {
     const slot = this.inventory.slots[invSlot];
     if (!slot || !slot.item.equipSlot) return;
@@ -2915,6 +2981,7 @@ export class Game {
     this.player.equipment[eqSlot] = slot.item.id;
     this.inventory.slots[invSlot] = null;
     this.contextMenu = null;
+    this._recalcMaxHp();
     this.notifications.add(`Equipped ${slot.item.name}.`, '#aaa');
     this._saveToServer();
     if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
@@ -2932,6 +2999,7 @@ export class Game {
       this.inventory.add(item, 1);
     }
     this.player.equipment[slot] = 'none';
+    this._recalcMaxHp();
     if (item) this.notifications.add(`Unequipped ${item.name}.`, '#aaa');
     this._saveToServer();
     if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);

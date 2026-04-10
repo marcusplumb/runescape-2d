@@ -18,15 +18,15 @@ function makeRng(seed) {
   };
 }
 
-// Ore rocks per biome, ascending rarity order
+// Surface ore pockets — low-tier only. Higher ores are underground-only.
 const BIOME_ORES = {
   [BIOMES.PLAINS]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.FOREST]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_IRON],
-  [BIOMES.TUNDRA]:   [TILES.ROCK_TIN,    TILES.ROCK_IRON, TILES.ROCK_COAL],
-  [BIOMES.SWAMP]:    [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_COAL],
-  [BIOMES.DESERT]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN,  TILES.ROCK_IRON],
-  [BIOMES.VOLCANIC]: [TILES.ROCK_COAL,   TILES.ROCK_IRON, TILES.ROCK_TIN],
-  [BIOMES.DANGER]:   [TILES.ROCK_IRON,   TILES.ROCK_COAL, TILES.ROCK_TIN],
+  [BIOMES.FOREST]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
+  [BIOMES.TUNDRA]:   [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
+  [BIOMES.SWAMP]:    [TILES.ROCK_COPPER, TILES.ROCK_TIN],
+  [BIOMES.DESERT]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
+  [BIOMES.VOLCANIC]: [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
+  [BIOMES.DANGER]:   [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
 };
 
 export class World {
@@ -131,6 +131,26 @@ export class World {
       }
     }
 
+    // ── Shore smoothing ──────────────────────────────────
+    // Convert any GRASS or DARK_GRASS tile that directly borders WATER or
+    // SWAMP_WATER to SAND.  This guarantees a non-green buffer at every water
+    // edge so neither bare terrain tiles nor prop-tile backgrounds ever render
+    // green inside what visually reads as the water body.
+    for (let r = 1; r < this.rows - 1; r++) {
+      for (let c = 1; c < this.cols - 1; c++) {
+        const t = map[r][c];
+        if (t !== TILES.GRASS && t !== TILES.DARK_GRASS) continue;
+        if (
+          map[r-1][c] === TILES.WATER || map[r+1][c] === TILES.WATER ||
+          map[r][c-1] === TILES.WATER || map[r][c+1] === TILES.WATER ||
+          map[r-1][c] === TILES.SWAMP_WATER || map[r+1][c] === TILES.SWAMP_WATER ||
+          map[r][c-1] === TILES.SWAMP_WATER || map[r][c+1] === TILES.SWAMP_WATER
+        ) {
+          map[r][c] = TILES.SAND;
+        }
+      }
+    }
+
     // propGroundMap records the tile underneath each prop so the renderer can
     // draw the biome ground first, then the prop sprite on top.
     this.propGroundMap = new Map();
@@ -148,23 +168,32 @@ export class World {
         const cn = clusterNoise[r][c];
         const biome = getBiome(c, r);
 
+        // Prevent any prop with a green/grass ground background from appearing
+        // adjacent to water — those green squares look like grass inside the water.
+        const adjWater = (
+          map[r-1]?.[c] === TILES.WATER || map[r+1]?.[c] === TILES.WATER ||
+          map[r]?.[c-1] === TILES.WATER || map[r]?.[c+1] === TILES.WATER ||
+          map[r-1]?.[c] === TILES.SWAMP_WATER || map[r+1]?.[c] === TILES.SWAMP_WATER ||
+          map[r]?.[c-1] === TILES.SWAMP_WATER || map[r]?.[c+1] === TILES.SWAMP_WATER
+        );
+
         if (biome === BIOMES.FOREST) {
           // Dense forest — trees fill high-cluster areas, but leave some clearings
-          if ((t === TILES.DARK_GRASS || t === TILES.GRASS) && cn > 0.52 && rng() < 0.75) {
+          if (!adjWater && (t === TILES.DARK_GRASS || t === TILES.GRASS) && cn > 0.52 && rng() < 0.75) {
             _setProp(r, c, TILES.TREE);
           }
         } else if (biome === BIOMES.TUNDRA) {
-          // Sparse snow trees in patches
+          // Sparse snow trees in patches (snow background — not green, no water check needed)
           if (t === TILES.SNOW && cn > 0.72 && rng() < 0.35) {
             _setProp(r, c, TILES.TREE);
           }
         } else if (biome === BIOMES.SWAMP) {
           // Dead stumps in swamp — loose clusters
-          if ((t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS) && cn > 0.62 && rng() < 0.25) {
+          if (!adjWater && (t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS) && cn > 0.62 && rng() < 0.25) {
             _setProp(r, c, TILES.STUMP);
           }
         } else if (biome === BIOMES.DESERT) {
-          // Cacti — sparse, only in small tight clusters
+          // Cacti — sparse, only in small tight clusters (sand background — not green)
           if ((t === TILES.SAND || t === TILES.SAND_DARK) && cn > 0.78 && rng() < 0.18) {
             _setProp(r, c, TILES.CACTUS);
           }
@@ -175,11 +204,11 @@ export class World {
           }
         } else {
           // Plains — moderate tree clusters with open clearings
-          if ((t === TILES.GRASS || t === TILES.DARK_GRASS) && cn > 0.65 && rng() < 0.55) {
+          if (!adjWater && (t === TILES.GRASS || t === TILES.DARK_GRASS) && cn > 0.65 && rng() < 0.55) {
             _setProp(r, c, TILES.TREE);
           }
-          // Flowers only in open grass, away from tree clusters
-          if (t === TILES.GRASS && cn < 0.35 && rng() < 0.12) {
+          // Flowers only in open grass, away from tree clusters and water
+          if (!adjWater && t === TILES.GRASS && cn < 0.35 && rng() < 0.12) {
             _setProp(r, c, TILES.FLOWERS);
           }
         }
@@ -235,6 +264,82 @@ export class World {
       }
     }
 
+    // ── Phase 2c: Forageable overworld resources ─────────
+    // Each resource is biome-specific and placed sparingly.
+    // "_setProp" records the original ground tile so the renderer draws it beneath the plant.
+    for (let r = 1; r < this.rows - 1; r++) {
+      for (let c = 1; c < this.cols - 1; c++) {
+        const t     = map[r][c];
+        const cn    = clusterNoise[r][c];
+        const biome = getBiome(c, r);
+
+        // Pre-compute water adjacency once — used to exclude non-reed forageables
+        // from shore tiles (their solid GRASS background reads as "grass in water").
+        const nearWater = (
+          map[r-1][c] === TILES.WATER || map[r+1][c] === TILES.WATER ||
+          map[r][c-1] === TILES.WATER || map[r][c+1] === TILES.WATER ||
+          map[r-1][c] === TILES.SWAMP_WATER || map[r+1][c] === TILES.SWAMP_WATER ||
+          map[r][c-1] === TILES.SWAMP_WATER || map[r][c+1] === TILES.SWAMP_WATER
+        );
+
+        // Berry bush — Forest clearings and open Plains only; away from tree clusters
+        if (!nearWater && (t === TILES.DARK_GRASS || t === TILES.GRASS) &&
+            (biome === BIOMES.FOREST || biome === BIOMES.PLAINS) &&
+            cn < 0.40 && rng() < 0.012) {
+          _setProp(r, c, TILES.BERRY_BUSH);
+          continue;
+        }
+
+        // Mushroom — shadowed spots in Swamp (uncommon) and deep Forest (rare)
+        if (!nearWater && (t === TILES.DARK_GRASS || t === TILES.DEAD_GRASS || t === TILES.DIRT) &&
+            (biome === BIOMES.SWAMP || biome === BIOMES.FOREST) &&
+            cn < 0.45 && rng() < (biome === BIOMES.SWAMP ? 0.020 : 0.006)) {
+          _setProp(r, c, TILES.MUSHROOM);
+          continue;
+        }
+
+        // Wild herb — only in very open meadow grass (low cluster, Plains + Forest edges)
+        if (!nearWater && t === TILES.GRASS &&
+            (biome === BIOMES.PLAINS || biome === BIOMES.FOREST) &&
+            cn < 0.28 && rng() < 0.014) {
+          _setProp(r, c, TILES.WILD_HERB);
+          continue;
+        }
+
+        // Flax plant — Plains only, open grass, small pockets
+        if (!nearWater && t === TILES.GRASS && biome === BIOMES.PLAINS &&
+            cn < 0.32 && rng() < 0.010) {
+          _setProp(r, c, TILES.FLAX_PLANT);
+          continue;
+        }
+
+        // Snowberry bush — Tundra only, on snow, sparse clusters
+        if (!nearWater && t === TILES.SNOW && biome === BIOMES.TUNDRA && rng() < 0.008) {
+          _setProp(r, c, TILES.SNOWBERRY);
+          continue;
+        }
+
+        // Sulfur deposit — Volcanic biome only, on volcanic rock
+        if (!nearWater && t === TILES.VOLCANIC_ROCK && biome === BIOMES.VOLCANIC && rng() < 0.010) {
+          _setProp(r, c, TILES.SULFUR_ROCK);
+          continue;
+        }
+
+        // Thorn bush — Danger zone only, on dead grass
+        if (!nearWater && t === TILES.DEAD_GRASS && biome === BIOMES.DANGER && rng() < 0.014) {
+          _setProp(r, c, TILES.THORN_BUSH);
+          continue;
+        }
+
+        // Desert flower — Desert only, on SAND_DARK (sheltered dune sides), very rare
+        if (!nearWater && t === TILES.SAND_DARK && biome === BIOMES.DESERT && rng() < 0.007) {
+          _setProp(r, c, TILES.DESERT_FLOWER);
+          continue;
+        }
+
+      }
+    }
+
     // ── Phase 3: Clustered ore rocks ─────────────────────
     // Rock clusters appear on stone/ground tiles where rockCluster is high.
     // A "vein roll" then picks the specific ore from the biome's ore list.
@@ -253,18 +358,22 @@ export class World {
           t === TILES.DARK_GRASS || t === TILES.DEAD_GRASS || t === TILES.SNOW
         );
 
-        // Ores are rare — only the peak of high-cluster areas on stone,
-        // and even rarer isolated veins on open ground.
-        const threshold = stoneBase ? 0.76 : 0.90;
-        const chance    = stoneBase ? 0.38 : 0.10;
+        // Surface ores are rare pockets — only at the very peak of stone clusters.
+        // Open ground outcrops are nearly non-existent.
+        const threshold = stoneBase ? 0.88 : 0.97;
+        const chance    = stoneBase ? 0.18 : 0.03;
 
+        const adjWaterOre = (
+          map[r-1]?.[c] === TILES.WATER || map[r+1]?.[c] === TILES.WATER ||
+          map[r]?.[c-1] === TILES.WATER || map[r]?.[c+1] === TILES.WATER ||
+          map[r-1]?.[c] === TILES.SWAMP_WATER || map[r+1]?.[c] === TILES.SWAMP_WATER ||
+          map[r]?.[c-1] === TILES.SWAMP_WATER || map[r]?.[c+1] === TILES.SWAMP_WATER
+        );
         if (rk > threshold && rng() < chance) {
-          // Pick ore: weight toward rarer ores at the high end of cluster density
-          const roll = (rk - threshold) / (1 - threshold); // 0..1 within cluster
-          const idx  = Math.min(ores.length - 1, Math.floor(Math.pow(roll, 1.6) * ores.length));
-          _setProp(r, c, ores[idx]);
-        } else if (groundBase && rk > 0.93 && rng() < 0.04 && ores.length > 0) {
-          // Very occasional isolated surface outcrop on open ground
+          // Always pick the lowest-tier ore for the biome — no escalation to rarer types
+          _setProp(r, c, ores[0]);
+        } else if (!adjWaterOre && groundBase && rk > 0.97 && rng() < 0.01 && ores.length > 0) {
+          // Extremely rare surface outcrop on open ground — always lowest tier
           _setProp(r, c, ores[0]);
         }
       }
@@ -597,8 +706,14 @@ export class World {
         const boundary = 1
           + 0.12 * Math.sin(angle * 2.8 + 0.6)
           + 0.07 * Math.sin(angle * 5.1 - 0.4);
-        if (dc2 * dc2 + dr2 * dr2 <= boundary)
+        if (dc2 * dc2 + dr2 * dr2 <= boundary) {
           map[r][c] = TILES.WATER;
+          // Remove any stale prop background from vegetation phases — the lake
+          // overwrites whatever was generated here, and the animated-water
+          // renderer uses propGroundMap as the background colour.  A leftover
+          // GRASS entry would render green under the blue water waves.
+          this.propGroundMap.delete(`${c},${r}`);
+        }
       }
     }
 

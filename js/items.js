@@ -1873,6 +1873,151 @@ ITEMS.MAGIC_HERB = {
   },
 };
 
+ITEMS.MUSHROOM = {
+  id: 'mushroom', name: 'Mushroom', stackable: true, heal: 4,
+  draw(ctx, x, y, s) {
+    // Two mushrooms side by side
+    for (let i = 0; i < 2; i++) {
+      const ox = x + s * (0.18 + i * 0.38);
+      // Stem
+      ctx.fillStyle = '#d4c8a0';
+      ctx.fillRect(ox + s * 0.08, y + s * 0.58, s * 0.14, s * 0.26);
+      // Cap shadow
+      ctx.fillStyle = '#7a3a10';
+      ctx.beginPath();
+      ctx.ellipse(ox + s * 0.15, y + s * 0.52, s * 0.18, s * 0.12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Cap
+      ctx.fillStyle = i === 0 ? '#c05a18' : '#a04010';
+      ctx.beginPath();
+      ctx.ellipse(ox + s * 0.15, y + s * 0.48, s * 0.17, s * 0.16, 0, Math.PI, Math.PI * 2);
+      ctx.fill();
+      // Spots
+      ctx.fillStyle = 'rgba(255,255,255,0.65)';
+      ctx.beginPath(); ctx.arc(ox + s * 0.10, y + s * 0.40, s * 0.03, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(ox + s * 0.20, y + s * 0.36, s * 0.025, 0, Math.PI * 2); ctx.fill();
+    }
+  },
+};
+
+ITEMS.REEDS = {
+  id: 'reeds', name: 'Reeds', stackable: true,
+  draw(ctx, x, y, s) {
+    const stalks = 6;
+    for (let i = 0; i < stalks; i++) {
+      const sx = x + s * (0.12 + i * 0.13);
+      const lean = (i % 2 === 0 ? 1 : -1) * s * 0.03;
+      // Stalk
+      ctx.strokeStyle = i < 3 ? '#7a9a40' : '#6a8a30';
+      ctx.lineWidth = s * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(sx, y + s * 0.88);
+      ctx.quadraticCurveTo(sx + lean, y + s * 0.5, sx + lean * 2, y + s * 0.18);
+      ctx.stroke();
+      // Seed head (brown oval at top)
+      ctx.fillStyle = i % 3 === 0 ? '#8b6030' : '#7a5025';
+      ctx.beginPath();
+      ctx.ellipse(sx + lean * 2, y + s * 0.14, s * 0.04, s * 0.09, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  },
+};
+
+ITEMS.SNOWBERRIES = {
+  id: 'snowberries', name: 'Snowberries', stackable: true, heal: 6,
+  draw(ctx, x, y, s) {
+    // Branch
+    ctx.strokeStyle = '#4a3a2a'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.85); ctx.lineTo(x+s*.5, y+s*.35); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.5); ctx.lineTo(x+s*.2, y+s*.3); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.45); ctx.lineTo(x+s*.78, y+s*.28); ctx.stroke();
+    // White berries
+    const pos = [[x+s*.18,y+s*.26],[x+s*.78,y+s*.24],[x+s*.55,y+s*.30],[x+s*.42,y+s*.22]];
+    for (const [bx,by] of pos) {
+      ctx.fillStyle = '#e8f0f8';
+      ctx.beginPath(); ctx.arc(bx, by, s*.055, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(200,220,255,0.6)';
+      ctx.beginPath(); ctx.arc(bx-s*.015, by-s*.015, s*.022, 0, Math.PI*2); ctx.fill();
+    }
+  },
+};
+
+ITEMS.SULFUR = {
+  id: 'sulfur', name: 'Sulfur', stackable: true,
+  draw(ctx, x, y, s) {
+    // Crystal cluster — jagged yellow chunks
+    ctx.fillStyle = '#c8a800';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.18); ctx.lineTo(x+s*.68, y+s*.48);
+    ctx.lineTo(x+s*.58, y+s*.72); ctx.lineTo(x+s*.38, y+s*.72);
+    ctx.lineTo(x+s*.28, y+s*.48); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#e8c800';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.2); ctx.lineTo(x+s*.62, y+s*.46);
+    ctx.lineTo(x+s*.5, y+s*.68); ctx.lineTo(x+s*.36, y+s*.46);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#f8e030';
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.24); ctx.lineTo(x+s*.56, y+s*.44);
+    ctx.lineTo(x+s*.5, y+s*.6); ctx.lineTo(x+s*.43, y+s*.44);
+    ctx.closePath(); ctx.fill();
+    // Highlight facet
+    ctx.fillStyle = 'rgba(255,255,200,0.4)';
+    ctx.beginPath(); ctx.ellipse(x+s*.46, y+s*.35, s*.04, s*.1, -0.4, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.THORN_VINE = {
+  id: 'thorn_vine', name: 'Thorn Vine', stackable: true,
+  draw(ctx, x, y, s) {
+    // Curved vine stem
+    ctx.strokeStyle = '#3a2a12'; ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(x+s*.15, y+s*.8);
+    ctx.bezierCurveTo(x+s*.3, y+s*.5, x+s*.65, y+s*.6, x+s*.82, y+s*.25);
+    ctx.stroke();
+    // Thorns along the vine
+    ctx.strokeStyle = '#5a4020'; ctx.lineWidth = 1;
+    const thorns = [[.22,.68,.15,.58],[.38,.56,.32,.44],[.55,.6,.62,.5],[.7,.42,.78,.35]];
+    for (const [x1,y1,x2,y2] of thorns) {
+      ctx.beginPath();
+      ctx.moveTo(x+s*x1, y+s*y1); ctx.lineTo(x+s*x2, y+s*y2);
+      ctx.stroke();
+    }
+    // Small dark leaves
+    ctx.fillStyle = '#2a3a10';
+    ctx.beginPath(); ctx.ellipse(x+s*.3, y+s*.55, s*.07, s*.04, 0.8, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x+s*.62, y+s*.48, s*.07, s*.04, -0.5, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.CACTUS_BLOOM = {
+  id: 'cactus_bloom', name: 'Cactus Bloom', stackable: true, heal: 8,
+  draw(ctx, x, y, s) {
+    // Succulent base leaves
+    ctx.fillStyle = '#4a7830';
+    for (let i = 0; i < 6; i++) {
+      const a = (i/6)*Math.PI*2;
+      ctx.beginPath();
+      ctx.ellipse(x+s*.5+Math.cos(a)*s*.18, y+s*.62+Math.sin(a)*s*.1, s*.1, s*.06, a, 0, Math.PI*2);
+      ctx.fill();
+    }
+    // Flower petals (pink/magenta)
+    ctx.fillStyle = '#e0407a';
+    for (let i = 0; i < 5; i++) {
+      const a = (i/5)*Math.PI*2;
+      ctx.beginPath();
+      ctx.ellipse(x+s*.5+Math.cos(a)*s*.16, y+s*.4+Math.sin(a)*s*.14, s*.1, s*.06, a, 0, Math.PI*2);
+      ctx.fill();
+    }
+    // Centre
+    ctx.fillStyle = '#f8e030';
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.4, s*.07, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#fffa80';
+    ctx.beginPath(); ctx.arc(x+s*.47, y+s*.37, s*.03, 0, Math.PI*2); ctx.fill();
+  },
+};
+
 ITEMS.ANCIENT_BONE = {
   id: 'ancient_bone', name: 'Ancient Bone', stackable: true,
   draw(ctx, x, y, s) {
@@ -2890,6 +3035,80 @@ Object.assign(ITEMS, {
     },
   },
 
+  /* ── Vitality items ────────────────────────────────── */
+  DRAGONHIDE_HELM: {
+    id: 'dragonhide_helm', name: 'Dragonhide Helm', stackable: false, equipSlot: 'helmet',
+    draw(ctx, x, y, s) {
+      // Dark crimson scale-plate helm
+      ctx.fillStyle = '#5a1010'; ctx.fillRect(x+s*.12, y+s*.2, s*.76, s*.6);
+      ctx.fillStyle = '#3a0808'; ctx.fillRect(x+s*.2,  y+s*.08, s*.6, s*.2);
+      ctx.fillStyle = '#7a2020';
+      for (let row = 0; row < 3; row++)
+        for (let col = 0; col < 4; col++) {
+          const sx2 = x + s*(.14 + col*.18 + (row%2)*.09);
+          const sy2 = y + s*(.26 + row*.16);
+          ctx.fillRect(sx2, sy2, s*.16, s*.14);
+        }
+      ctx.fillStyle = 'rgba(255,80,40,0.15)'; ctx.fillRect(x+s*.12, y+s*.2, s*.76, s*.6);
+      ctx.fillStyle = '#c04020'; ctx.fillRect(x+s*.3, y+s*.08, s*.4, s*.04);
+    },
+  },
+
+  TROLLHIDE_VEST: {
+    id: 'trollhide_vest', name: 'Trollhide Vest', stackable: false, equipSlot: 'chestplate',
+    draw(ctx, x, y, s) {
+      // Rough dark-green hide vest
+      ctx.fillStyle = '#2a3a1a'; ctx.fillRect(x+s*.08, y+s*.1, s*.84, s*.72);
+      ctx.fillStyle = '#1a2810'; ctx.fillRect(x+s*.0, y+s*.18, s*.14, s*.46);
+      ctx.fillStyle = '#1a2810'; ctx.fillRect(x+s*.86, y+s*.18, s*.14, s*.46);
+      // Hide texture — rough horizontal stripes
+      ctx.fillStyle = 'rgba(0,0,0,0.20)';
+      for (let i = 0; i < 4; i++) ctx.fillRect(x+s*.08, y+s*(.18+i*.16), s*.84, s*.05);
+      // Crude stitching
+      ctx.fillStyle = '#8b6914';
+      for (let i = 0; i < 5; i++) ctx.fillRect(x+s*.46, y+s*(.14+i*.13), s*.08, s*.06);
+      ctx.fillStyle = 'rgba(60,80,30,0.30)'; ctx.fillRect(x+s*.1, y+s*.12, s*.36, s*.2);
+    },
+  },
+
+  OBSIDIAN_PLATE: {
+    id: 'obsidian_plate', name: 'Obsidian Plate', stackable: false, equipSlot: 'chestplate',
+    draw(ctx, x, y, s) {
+      // Near-black with glowing lava cracks
+      ctx.fillStyle = '#0e0808'; ctx.fillRect(x+s*.08, y+s*.1, s*.84, s*.72);
+      ctx.fillStyle = '#060404'; ctx.fillRect(x+s*.0, y+s*.2, s*.14, s*.44);
+      ctx.fillStyle = '#060404'; ctx.fillRect(x+s*.86, y+s*.2, s*.14, s*.44);
+      // Lava crack veins
+      ctx.strokeStyle = '#c03000'; ctx.lineWidth = s*.025;
+      ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.15); ctx.lineTo(x+s*.5, y+s*.5); ctx.lineTo(x+s*.4, y+s*.78); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x+s*.6, y+s*.2);  ctx.lineTo(x+s*.5, y+s*.5); ctx.lineTo(x+s*.65,y+s*.75); ctx.stroke();
+      ctx.strokeStyle = '#ff6020'; ctx.lineWidth = s*.01;
+      ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.15); ctx.lineTo(x+s*.5, y+s*.5); ctx.lineTo(x+s*.4, y+s*.78); ctx.stroke();
+      ctx.fillStyle = 'rgba(200,60,0,0.10)'; ctx.fillRect(x+s*.08, y+s*.1, s*.84, s*.72);
+    },
+  },
+
+  VITALITY_CAPE: {
+    id: 'vitality_cape', name: 'Vitality Cape', stackable: false, equipSlot: 'cape',
+    draw(ctx, x, y, s) {
+      // Emerald green cape with heart motif
+      ctx.fillStyle = '#1a6e30'; ctx.fillRect(x+s*.1, y+s*.05, s*.8, s*.85);
+      ctx.fillStyle = '#14581f';
+      ctx.fillRect(x+s*.1,  y+s*.05, s*.06, s*.85);
+      ctx.fillRect(x+s*.84, y+s*.05, s*.06, s*.85);
+      // Shimmer highlight
+      ctx.fillStyle = 'rgba(80,255,120,0.12)'; ctx.fillRect(x+s*.14, y+s*.06, s*.3, s*.82);
+      // Small heart motif
+      ctx.fillStyle = '#e03030';
+      ctx.fillRect(x+s*.38, y+s*.34, s*.08, s*.06);
+      ctx.fillRect(x+s*.54, y+s*.34, s*.08, s*.06);
+      ctx.fillRect(x+s*.34, y+s*.38, s*.32, s*.08);
+      ctx.fillRect(x+s*.38, y+s*.44, s*.24, s*.06);
+      ctx.fillRect(x+s*.44, y+s*.48, s*.12, s*.06);
+      ctx.fillRect(x+s*.47, y+s*.52, s*.06, s*.04);
+    },
+  },
+
 });
 
 /** Maps equipment slot IDs → inventory item defs for equip/unequip */
@@ -2960,4 +3179,9 @@ export const EQUIP_ID_TO_ITEM = {
   voidguard_plate:      ITEMS.VOIDGUARD_PLATE,
   voidguard_legs:       ITEMS.VOIDGUARD_LEGS,
   voidguard_boots:      ITEMS.VOIDGUARD_BOOTS,
+  // ── Vitality items ────────────────────────────────────────────────
+  dragonhide_helm:      ITEMS.DRAGONHIDE_HELM,
+  trollhide_vest:       ITEMS.TROLLHIDE_VEST,
+  obsidian_plate:       ITEMS.OBSIDIAN_PLATE,
+  vitality_cape:        ITEMS.VITALITY_CAPE,
 };

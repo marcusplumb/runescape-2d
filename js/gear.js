@@ -41,9 +41,10 @@ export const STAT_META = {
   armour:     { label: 'Armour',     color: '#3498db', desc: 'Adds to defence roll — reduces incoming hits.'    },
   speed:      { label: 'Speed',      color: '#2ecc71', desc: 'Attack interval multiplier. Lower = faster.'      },
   critChance: { label: 'Crit',       color: '#f39c12', desc: 'Chance to deal 1.5× damage on a successful hit.' },
+  hp:         { label: 'HP Bonus',   color: '#e74c3c', desc: 'Increases maximum hitpoints while equipped.'      },
 };
 
-const DEFAULTS = { accuracy: 0, power: 0, armour: 0, speed: 1.0, critChance: 0 };
+const DEFAULTS = { accuracy: 0, power: 0, armour: 0, speed: 1.0, critChance: 0, hp: 0 };
 
 /**
  * Factory — builds a gear entry with defaults filled in.
@@ -291,19 +292,19 @@ export const GEAR = {
      ────────────────────────────────────────────────────── */
 
   RAIDERS_HELM:       g('raiders_helm',       "Raider's Helm",       'helmet',     'EPIC',
-    { defence: 55 }, { armour: 45, power: 8 },
+    { defence: 55 }, { armour: 45, power: 8, hp: 10 },
     "A purple-alloy helm worn by veteran dungeon runners."),
 
   RAIDERS_PLATE:      g('raiders_plate',      "Raider's Plate",      'chestplate', 'EPIC',
-    { defence: 55 }, { armour: 90, power: 12 },
+    { defence: 55 }, { armour: 90, power: 12, hp: 25 },
     "Heavy plate reinforced with raid-tempered alloy. Exceptional protection."),
 
   RAIDERS_LEGS:       g('raiders_legs',       "Raider's Legs",       'leggings',   'EPIC',
-    { defence: 55 }, { armour: 50 },
+    { defence: 55 }, { armour: 50, hp: 12 },
     "Sturdy greaves that let you move freely even in the deepest dungeon."),
 
   RAIDERS_GAUNTLETS:  g('raiders_gauntlets',  "Raider's Gauntlets",  'gloves',     'EPIC',
-    { defence: 55 }, { armour: 18, power: 10 },
+    { defence: 55 }, { armour: 18, power: 10, hp: 8 },
     "Power-infused gauntlets that add force to every punch and parry."),
 
   /* ──────────────────────────────────────────────────────
@@ -314,20 +315,40 @@ export const GEAR = {
      ────────────────────────────────────────────────────── */
 
   VOIDGUARD_HELM:     g('voidguard_helm',     'Voidguard Helm',      'helmet',     'LEGENDARY',
-    { defence: 70 }, { armour: 60, accuracy: 10 },
+    { defence: 70 }, { armour: 60, accuracy: 10, hp: 15 },
     "Void-forged metal. The teal runes pulse with dimensional energy."),
 
   VOIDGUARD_PLATE:    g('voidguard_plate',    'Voidguard Plate',     'chestplate', 'LEGENDARY',
-    { defence: 70 }, { armour: 120, accuracy: 15 },
+    { defence: 70 }, { armour: 120, accuracy: 15, hp: 35 },
     "The finest chest armour in existence. Void-hardened, nearly impenetrable."),
 
   VOIDGUARD_LEGS:     g('voidguard_legs',     'Voidguard Legs',      'leggings',   'LEGENDARY',
-    { defence: 70 }, { armour: 65 },
+    { defence: 70 }, { armour: 65, hp: 15 },
     "Legs forged from the same void-metal as the plate. Light despite its strength."),
 
   VOIDGUARD_BOOTS:    g('voidguard_boots',    'Voidguard Boots',     'boots',      'LEGENDARY',
-    { defence: 70 }, { armour: 20, speed: 0.97 },
+    { defence: 70 }, { armour: 20, speed: 0.97, hp: 8 },
     "Void-energy enhances footwork. You move just a touch faster wearing these."),
+
+  /* ──────────────────────────────────────────────────────
+     VITALITY ITEMS  — primary purpose is boosting max HP
+     ────────────────────────────────────────────────────── */
+
+  DRAGONHIDE_HELM:    g('dragonhide_helm',    'Dragonhide Helm',     'helmet',     'RARE',
+    { defence: 30 }, { armour: 28, hp: 20 },
+    'Helmet crafted from dragon scales. Tough hide grants impressive vitality.'),
+
+  TROLLHIDE_VEST:     g('trollhide_vest',     'Trollhide Vest',      'chestplate', 'RARE',
+    { defence: 18 }, { armour: 18, hp: 35 },
+    "Stitched from cave troll hide. Not pretty, but the thick skin soaks up damage."),
+
+  OBSIDIAN_PLATE:     g('obsidian_plate',     'Obsidian Plate',      'chestplate', 'EPIC',
+    { defence: 45 }, { armour: 65, hp: 55 },
+    'Forged from volcanic obsidian. Channels heat into raw constitution.'),
+
+  VITALITY_CAPE:      g('vitality_cape',      'Vitality Cape',       'cape',       'UNCOMMON',
+    {}, { armour: 3, hp: 20 },
+    'A cape woven with life-thread. Increases maximum HP while worn.'),
 };
 
 /* ════════════════════════════════════════════════════════
@@ -347,6 +368,7 @@ export function getTotalStats(playerEquipment) {
   let armour     = 0;
   let speed      = 1.0;    // weapon base
   let critChance = 0;
+  let hp         = 0;
   let weaponSpeedSet = false;
 
   for (const [slot, id] of Object.entries(playerEquipment)) {
@@ -358,12 +380,12 @@ export function getTotalStats(playerEquipment) {
     power      += entry.stats.power;
     armour     += entry.stats.armour;
     critChance += entry.stats.critChance;
+    hp         += entry.stats.hp ?? 0;
 
     if (slot === 'weapon') {
       speed = entry.stats.speed;
       weaponSpeedSet = true;
     } else if (entry.stats.speed !== 1.0) {
-      // Non-weapon items with a speed modifier multiply into the total
       speed *= entry.stats.speed;
     }
   }
@@ -371,7 +393,7 @@ export function getTotalStats(playerEquipment) {
   if (!weaponSpeedSet) speed = 1.0;          // bare-handed baseline
   critChance = Math.min(critChance, 0.60);   // hard cap
 
-  return { accuracy, power, armour, speed, critChance };
+  return { accuracy, power, armour, speed, critChance, hp };
 }
 
 /* ════════════════════════════════════════════════════════

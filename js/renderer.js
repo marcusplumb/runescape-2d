@@ -61,6 +61,19 @@ const PROP_TILES = new Set([
   TILES.FOUNTAIN,
   TILES.PLANTER_FLOWERS,
   TILES.PLANTER_BUSH,
+  // Cave props
+  TILES.SPIDER_WEB,
+  // Overworld forageable resources (drawn on top of biome ground tile)
+  TILES.BERRY_BUSH,
+  TILES.BERRY_BUSH_EMPTY,
+  TILES.MUSHROOM,
+  TILES.WILD_HERB,
+  TILES.REEDS,
+  TILES.FLAX_PLANT,
+  TILES.SNOWBERRY,
+  TILES.SULFUR_ROCK,
+  TILES.THORN_BUSH,
+  TILES.DESERT_FLOWER,
 ]);
 const CHUNK_TILES = 16;                        // tiles per chunk side
 const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
@@ -152,8 +165,16 @@ export class Renderer {
         const tile = world.getTile(c, r);
         if (ANIMATED_TILES.has(tile)) {
           const px = c * TILE_SIZE, py = r * TILE_SIZE;
-          ctx.fillStyle = TILE_COLORS[tile] || '#000';
-          ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+          const groundId = world.propGroundMap?.get(`${c},${r}`);
+          if (groundId !== undefined) {
+            ctx.fillStyle = TILE_COLORS[groundId] || '#000';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+            if (TILE_HAS_DETAIL.has(groundId))
+              this._drawTileDetail(ctx, groundId, px, py, c, r, world);
+          } else {
+            ctx.fillStyle = TILE_COLORS[tile] || '#000';
+            ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
+          }
           this._drawTileDetail(ctx, tile, px, py, c, r, world);
         }
       }
@@ -264,7 +285,7 @@ export class Renderer {
         const py   = dr * TILE_SIZE;
         if (PROP_TILES.has(tile)) {
           // Render the underlying ground tile first so the prop sits on top of it
-          const groundId = world.propGroundMap?.get(`${col},${row}`) ?? TILES.GRASS;
+          const groundId = world.propGroundMap?.get(`${col},${row}`) ?? TILES.DIRT;
           ctx.fillStyle = TILE_COLORS[groundId] || '#000';
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
           if (TILE_HAS_DETAIL.has(groundId) && !ANIMATED_TILES.has(groundId))
@@ -929,8 +950,6 @@ export class Renderer {
 
     if (tile === TILES.FIRE) {
       const t = this.time;
-      ctx.fillStyle = 'rgba(255,120,0,0.13)';
-      ctx.beginPath(); ctx.arc(px + 16, py + 20, 18, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#1e0e04'; ctx.fillRect(px + 8, py + 25, 16, 5);
       ctx.fillStyle = '#4e2a0e'; ctx.fillRect(px + 5, py + 22, 22, 5); ctx.fillRect(px + 10, py + 20, 5, 8);
       ctx.fillStyle = 'rgba(0,0,0,0.22)';
@@ -2918,6 +2937,477 @@ export class Renderer {
       ctx.restore();
       return;
     }
+
+    // ── CAVE_FLOOR — packed earth underground floor ───────────────────────
+    if (tile === TILES.CAVE_FLOOR) {
+      // Subtle strata bands (horizontal layers of compressed earth)
+      const bandY = ((r * 7) % 5);  // 0-4 — vary starting band per row
+      for (let b = 0; b < 3; b++) {
+        const by = py + ((bandY + b * 11) % 32);
+        const bh = 2 + (s2 % 2);
+        ctx.fillStyle = (b % 2 === 0) ? 'rgba(80,50,20,0.18)' : 'rgba(20,10,4,0.14)';
+        ctx.fillRect(px, by, 32, bh);
+      }
+      // Small pebbles / gravel
+      const pebblePositions = [
+        [3  + (s1 % 6),  5  + (s2 % 8)],
+        [18 + (s2 % 7),  12 + (s3 % 6)],
+        [8  + (s3 % 5),  22 + (s1 % 7)],
+        [24 + (s1 % 5),  26 + (s2 % 5)],
+        [14 + (s1 % 6),  3  + (s3 % 5)],
+      ];
+      pebblePositions.forEach(([bx, by], i) => {
+        if ((s1 + i) % 3 === 0) return;  // skip ~1/3 for variety
+        const shade = 30 + (s3 + i * 7) % 25;
+        ctx.fillStyle = `rgb(${shade + 15},${shade},${shade - 10})`;
+        ctx.fillRect(px + bx, py + by, 2, 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(px + bx, py + by, 1, 1);
+      });
+      // Thin root fragments (occasional)
+      if (s3 % 3 === 0) {
+        ctx.fillStyle = 'rgba(90,55,20,0.45)';
+        const rx = px + 5 + (s1 % 20);
+        const ry = py + 4 + (s2 % 22);
+        ctx.fillRect(rx, ry, 1, 5 + (s3 % 8));
+        if (s2 % 2 === 0) ctx.fillRect(rx, ry + 3, 4 + (s1 % 5), 1);
+      }
+      // Occasional crack line
+      if (s1 % 5 === 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        const crx = px + 8 + (s3 % 16);
+        const cry = py + 6 + (s1 % 18);
+        ctx.fillRect(crx, cry, 1, 4 + (s2 % 6));
+        ctx.fillRect(crx, cry + 2, 3, 1);
+      }
+      return;
+    }
+
+    // ── CAVE_WALL — rough natural dirt/rock underground wall ──────────────
+    if (tile === TILES.CAVE_WALL) {
+      const wS = world.getTile(c, r + 1) === TILES.CAVE_WALL;
+
+      if (wS) {
+        // Interior wall — full-tile rough dirt surface
+        // Layered earth strata
+        for (let b = 0; b < 4; b++) {
+          const by = py + b * 8 + (s2 % 4);
+          const br = 40 + (b * 6) + (s1 % 12);
+          const bg = 22 + (b * 3) + (s2 % 8);
+          const bb = 8  + (b * 2) + (s3 % 5);
+          ctx.fillStyle = `rgb(${br},${bg},${bb})`;
+          ctx.fillRect(px, by, 32, 8 + (s3 % 4));
+        }
+        // Embedded rocks (darker lumps)
+        [[4, 5, 7, 5], [18, 14, 5, 4], [8, 23, 6, 4], [25, 8, 5, 6]].forEach(([rx, ry, rw, rh], i) => {
+          if ((s2 + i) % 3 === 0) return;
+          ctx.fillStyle = `rgb(${28 + (s1 + i * 11) % 15},${16 + (s2 + i * 7) % 10},${8})`;
+          ctx.fillRect(px + rx + (s3 % 3), py + ry + (s1 % 4), rw, rh);
+          ctx.fillStyle = 'rgba(255,255,255,0.07)';
+          ctx.fillRect(px + rx + (s3 % 3), py + ry + (s1 % 4), rw, 1);
+        });
+        // Moisture drip streaks
+        if (s1 % 4 === 0) {
+          ctx.fillStyle = 'rgba(20,12,4,0.50)';
+          const dx = px + 6 + (s2 % 20);
+          ctx.fillRect(dx, py, 1, 12 + (s3 % 12));
+          ctx.fillStyle = 'rgba(20,12,4,0.22)';
+          ctx.fillRect(dx - 1, py, 1, 8 + (s1 % 10));
+        }
+        // Root tendrils across wall face
+        if (s3 % 3 === 0) {
+          ctx.fillStyle = 'rgba(80,50,18,0.55)';
+          const rtx = px + 10 + (s1 % 12);
+          const rty = py + 2 + (s2 % 10);
+          ctx.fillRect(rtx, rty, 12 + (s2 % 8), 1);
+          ctx.fillRect(rtx + 3, rty + 1, 1, 4 + (s3 % 5));
+        }
+      } else {
+        // South-exposed wall edge — shows a face + top surface
+        const TOP = 10;
+        // Top surface of wall (darker earth)
+        const tr = 38 + (s1 % 12); const tg = 22 + (s2 % 8);
+        ctx.fillStyle = `rgb(${tr},${tg},10)`;
+        ctx.fillRect(px, py, 32, TOP);
+        // Strata on top surface
+        for (let b = 0; b < 2; b++) {
+          ctx.fillStyle = `rgba(0,0,0,${0.12 + b * 0.08})`;
+          ctx.fillRect(px, py + b * 5 + (s3 % 4), 32, 2);
+        }
+        // Pebble on top
+        if (s2 % 2 === 0) {
+          ctx.fillStyle = `rgb(${50 + (s2 % 20)},${30 + (s1 % 12)},12)`;
+          ctx.fillRect(px + 4 + (s3 % 22), py + 3 + (s1 % 5), 3, 2);
+        }
+        // Ledge highlight
+        ctx.fillStyle = 'rgba(120,80,30,0.35)'; ctx.fillRect(px, py + TOP, 32, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.50)';     ctx.fillRect(px, py + TOP + 1, 32, 1);
+        // Wall face — darker rough earth
+        const fr = 28 + (s2 % 10); const fg = 15 + (s1 % 7);
+        ctx.fillStyle = `rgb(${fr},${fg},6)`;
+        ctx.fillRect(px, py + TOP + 2, 32, 32 - TOP - 2);
+        // Strata bands on face
+        for (let b = 0; b < 3; b++) {
+          const sby = py + TOP + 4 + b * 7 + (s3 % 5);
+          ctx.fillStyle = `rgba(0,0,0,${0.10 + b * 0.07})`;
+          ctx.fillRect(px, sby, 32, 2);
+          ctx.fillStyle = `rgba(255,200,100,${0.06 - b * 0.02})`;
+          ctx.fillRect(px, sby + 2, 32, 1);
+        }
+        // Embedded stone fragments on face
+        if (s1 % 3 !== 0) {
+          const sx2 = px + 5 + (s1 % 20);
+          const sy2 = py + TOP + 6 + (s2 % 12);
+          ctx.fillStyle = `rgb(${35 + (s3 % 15)},${20 + (s2 % 10)},8)`;
+          ctx.fillRect(sx2, sy2, 4 + (s3 % 3), 3);
+          ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(sx2, sy2, 4, 1);
+        }
+        // Bottom shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.44)'; ctx.fillRect(px, py + 28, 32, 4);
+      }
+      return;
+    }
+
+    // ── SPIDER_WEB — decorative web prop on cave floor ────────────────────
+    if (tile === TILES.SPIDER_WEB) {
+      // Center of tile
+      const cx2 = px + 16, cy2 = py + 16;
+      // Per-tile variation using seeds
+      const wobble = (s1 % 5) - 2;   // -2..+2 centre offset
+      const webCx  = cx2 + wobble;
+      const webCy  = cy2 + ((s2 % 5) - 2);
+      const maxR   = 13 + (s3 % 4);  // 13-16 — outer radius varies per tile
+
+      ctx.save();
+      ctx.globalAlpha = 0.55 + (s1 % 3) * 0.1;  // 0.55, 0.65, or 0.75
+
+      // ── Radial spokes (8 directions) ─────────────────────────────────
+      const SPOKES = 8;
+      const baseAngle = (s2 % 628) / 100;  // slight random rotation per tile
+      ctx.strokeStyle = 'rgba(220,210,190,0.80)';
+      ctx.lineWidth   = 0.6;
+      ctx.beginPath();
+      for (let i = 0; i < SPOKES; i++) {
+        const angle = baseAngle + (i / SPOKES) * Math.PI * 2;
+        ctx.moveTo(webCx, webCy);
+        ctx.lineTo(webCx + Math.cos(angle) * maxR, webCy + Math.sin(angle) * maxR);
+      }
+      ctx.stroke();
+
+      // ── Concentric polygon rings (3 rings) ───────────────────────────
+      ctx.strokeStyle = 'rgba(210,200,180,0.65)';
+      ctx.lineWidth   = 0.7;
+      for (let ring = 1; ring <= 3; ring++) {
+        const ringR = (maxR * ring) / 3.4;
+        // Slight per-ring warp using seeds
+        const warp = (s3 % 3) * 0.04;
+        ctx.beginPath();
+        for (let i = 0; i <= SPOKES; i++) {
+          const angle = baseAngle + (i / SPOKES) * Math.PI * 2;
+          const r2 = ringR * (1 + warp * ((i + ring) % 2 === 0 ? 1 : -1));
+          const vx = webCx + Math.cos(angle) * r2;
+          const vy = webCy + Math.sin(angle) * r2;
+          if (i === 0) ctx.moveTo(vx, vy); else ctx.lineTo(vx, vy);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      // ── Dew drops on a few strand intersections ────────────────────
+      if (s1 % 3 !== 0) {
+        ctx.fillStyle = 'rgba(180,200,220,0.7)';
+        for (let i = 0; i < 3; i++) {
+          const angle = baseAngle + ((s2 + i * 3) % SPOKES) / SPOKES * Math.PI * 2;
+          const ringR = (maxR * (1 + (i % 3))) / 3.4;
+          ctx.beginPath();
+          ctx.arc(webCx + Math.cos(angle) * ringR, webCy + Math.sin(angle) * ringR, 1, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      ctx.restore();
+      return;
+    }
+
+    // ── BERRY_BUSH — rounded leafy bush with berries ──────────────────────
+    if (tile === TILES.BERRY_BUSH) {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+26, 12, 5, 0, 0, Math.PI*2); ctx.fill();
+      // Main bush body — three overlapping lobes
+      const lobes = [
+        { x: px+11, y: py+18, r: 9 },
+        { x: px+21, y: py+17, r: 8 },
+        { x: px+16, y: py+12, r: 8 },
+      ];
+      for (const lobe of lobes) {
+        ctx.fillStyle = `rgb(${38+(s1%12)},${100+(s2%18)},${28+(s3%10)})`;
+        ctx.beginPath(); ctx.arc(lobe.x, lobe.y, lobe.r, 0, Math.PI*2); ctx.fill();
+      }
+      // Highlight on top lobe
+      ctx.fillStyle = 'rgba(120,200,60,0.30)';
+      ctx.beginPath(); ctx.arc(px+14, py+10, 5, 0, Math.PI*2); ctx.fill();
+      // Berries — small red/purple dots scattered on bush
+      const berryPositions = [
+        [px+10, py+19], [px+19, py+16], [px+16, py+22],
+        [px+22, py+21], [px+13, py+14], [px+20, py+12],
+      ];
+      for (let i = 0; i < berryPositions.length; i++) {
+        const [bx, by] = berryPositions[i];
+        ctx.fillStyle = (i + s1) % 3 === 0 ? '#c0203a' : '#8b1a3a';
+        ctx.beginPath(); ctx.arc(bx, by, 2.2, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(255,180,180,0.5)';
+        ctx.beginPath(); ctx.arc(bx-0.7, by-0.7, 0.9, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── BERRY_BUSH_EMPTY — same bush shape, no berries ────────────────────
+    if (tile === TILES.BERRY_BUSH_EMPTY) {
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+26, 12, 5, 0, 0, Math.PI*2); ctx.fill();
+      const lobes = [
+        { x: px+11, y: py+18, r: 9 },
+        { x: px+21, y: py+17, r: 8 },
+        { x: px+16, y: py+12, r: 8 },
+      ];
+      for (const lobe of lobes) {
+        // Slightly duller/darker green — no fruit, nutrients diverted
+        ctx.fillStyle = `rgb(${28+(s1%10)},${80+(s2%14)},${22+(s3%8)})`;
+        ctx.beginPath(); ctx.arc(lobe.x, lobe.y, lobe.r, 0, Math.PI*2); ctx.fill();
+      }
+      ctx.fillStyle = 'rgba(80,160,30,0.20)';
+      ctx.beginPath(); ctx.arc(px+14, py+10, 5, 0, Math.PI*2); ctx.fill();
+      return;
+    }
+
+    // ── MUSHROOM — cluster of 2-3 mushrooms ──────────────────────────────
+    if (tile === TILES.MUSHROOM) {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+27, 10, 4, 0, 0, Math.PI*2); ctx.fill();
+      // Draw 2-3 mushrooms based on seed
+      const count = 2 + (s1 % 2);
+      const positions = count === 3
+        ? [[px+9, py+20], [px+17, py+16], [px+23, py+21]]
+        : [[px+12, py+18], [px+21, py+17]];
+      for (let i = 0; i < positions.length; i++) {
+        const [mx, my] = positions[i];
+        // Stem
+        ctx.fillStyle = '#d8d0a8';
+        ctx.fillRect(mx-3, my+2, 6, 7);
+        // Gills underside
+        ctx.fillStyle = 'rgba(200,180,140,0.7)';
+        ctx.beginPath(); ctx.ellipse(mx, my+3, 7, 3, 0, 0, Math.PI*2); ctx.fill();
+        // Cap
+        const capR = (i + s3) % 2 === 0 ? '#b84818' : '#8a3510';
+        ctx.fillStyle = capR;
+        ctx.beginPath();
+        ctx.arc(mx, my, 8, Math.PI, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(mx, my, 8, 3, 0, 0, Math.PI*2); ctx.fill();
+        // White spots
+        ctx.fillStyle = 'rgba(255,255,255,0.70)';
+        ctx.beginPath(); ctx.arc(mx-3, my-4, 1.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(mx+2, my-6, 1.2, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── WILD_HERB — small leafy plant with delicate stems ─────────────────
+    if (tile === TILES.WILD_HERB) {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+26, 8, 3, 0, 0, Math.PI*2); ctx.fill();
+      // Stem cluster — 4-5 thin stems radiating from base
+      const stemCount = 4 + (s1 % 2);
+      for (let i = 0; i < stemCount; i++) {
+        const angle = (i / stemCount) * Math.PI - Math.PI * 0.1 + (s2 % 10) * 0.05;
+        const len   = 10 + (s3 % 5);
+        const ex    = px + 16 + Math.sin(angle) * len;
+        const ey    = py + 24 - Math.cos(angle) * len;
+        ctx.strokeStyle = `rgb(${28+(s1%10)},${90+(s2%20)},${22+(s3%8)})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(px+16, py+24); ctx.lineTo(ex, ey); ctx.stroke();
+        // Small leaf at tip
+        ctx.fillStyle = `rgb(${40+(s2%15)},${110+(s1%20)},${30+(s3%12)})`;
+        ctx.beginPath();
+        ctx.ellipse(ex, ey, 3.5, 2, angle, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Small flower buds on some stems (variation)
+      if (s3 % 3 !== 0) {
+        ctx.fillStyle = (s1 % 2 === 0) ? '#e8c030' : '#e060a0';
+        ctx.beginPath(); ctx.arc(px+16 + (s2%6)-3, py+14 + (s1%4), 2, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── REEDS — bundle of tall waterside stalks ───────────────────────────
+    if (tile === TILES.REEDS) {
+      // Shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.13)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+28, 9, 3, 0, 0, Math.PI*2); ctx.fill();
+      // 5-7 stalks of varying height
+      const stalkCount = 5 + (s1 % 3);
+      for (let i = 0; i < stalkCount; i++) {
+        const sx    = px + 6 + i * (20 / stalkCount) + (s2 % 3) - 1;
+        const lean  = ((i + s1) % 3 - 1) * 3;  // -3, 0, or +3 px lean
+        const height = 16 + (s3 % 8) + (i % 2) * 4;
+        const topY  = py + 28 - height;
+        // Stalk — golden-tan like dried cattail reeds, not grass green
+        ctx.strokeStyle = i % 3 === 0 ? '#b8a050' : '#9a8432';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(sx, py+28);
+        ctx.quadraticCurveTo(sx + lean * 0.5, py + 16, sx + lean, topY);
+        ctx.stroke();
+        // Seed head — dark brown cylindrical catkin
+        ctx.fillStyle = (i + s2) % 3 === 0 ? '#5a3010' : '#4a2808';
+        ctx.beginPath();
+        ctx.ellipse(sx + lean, topY + 4, 2.2, 5, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+      return;
+    }
+
+    // ── FLAX_PLANT — tall blue-purple flowering stalks ───────────────────
+    if (tile === TILES.FLAX_PLANT) {
+      ctx.fillStyle = 'rgba(0,0,0,0.13)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+27, 8, 3, 0, 0, Math.PI*2); ctx.fill();
+      const count = 3 + (s1 % 2);
+      for (let i = 0; i < count; i++) {
+        const sx   = px + 8 + i * (16 / (count - 1));
+        const lean = ((i + s2) % 3 - 1) * 2;
+        const h    = 18 + (s3 % 6);
+        ctx.strokeStyle = '#5a8a30'; ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.moveTo(sx, py + 28);
+        ctx.quadraticCurveTo(sx + lean, py + 18, sx + lean * 1.5, py + 28 - h);
+        ctx.stroke();
+        if (i % 2 === 0) {
+          ctx.fillStyle = '#4a7a28';
+          ctx.beginPath();
+          ctx.ellipse(sx + lean * 0.7, py + 28 - h * 0.55, 4, 2, 0.6, 0, Math.PI*2);
+          ctx.fill();
+        }
+        const fc = (i + s1) % 3;
+        ctx.fillStyle = fc === 0 ? '#6a60d0' : fc === 1 ? '#8060c8' : '#5050b8';
+        ctx.beginPath(); ctx.arc(sx + lean * 1.5, py + 28 - h, 3.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = 'rgba(200,180,255,0.5)';
+        ctx.beginPath(); ctx.arc(sx + lean * 1.5 - 1, py + 28 - h - 1, 1.2, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── SNOWBERRY — bare winter branches with white berry clusters ────────
+    if (tile === TILES.SNOWBERRY) {
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+27, 10, 3, 0, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#3a2a18'; ctx.lineWidth = 1.8;
+      const lean = (s1 % 5) - 2;
+      ctx.beginPath(); ctx.moveTo(px+16, py+28); ctx.lineTo(px+16+lean, py+14); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px+16+lean, py+18); ctx.lineTo(px+8+(s2%4), py+10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px+16+lean, py+16); ctx.lineTo(px+24-(s3%4), py+10); ctx.stroke();
+      ctx.fillStyle = 'rgba(230,240,255,0.75)';
+      ctx.beginPath(); ctx.ellipse(px+16+lean, py+14, 4, 2, 0, 0, Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(px+9+(s2%4), py+10, 3, 1.5, 0, 0, Math.PI*2); ctx.fill();
+      const clusters = [[px+8+(s2%4), py+9], [px+24-(s3%4), py+9], [px+16+lean, py+7]];
+      for (const [bx, by] of clusters) {
+        for (let b = 0; b < 2+(s1%2); b++) {
+          const ox = (b % 2) * 5 - 2, oy = (b / 2 | 0) * (-4);
+          ctx.fillStyle = '#e8f0fc';
+          ctx.beginPath(); ctx.arc(bx+ox, by+oy, 2.5, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.6)';
+          ctx.beginPath(); ctx.arc(bx+ox-0.8, by+oy-0.8, 1, 0, Math.PI*2); ctx.fill();
+        }
+      }
+      return;
+    }
+
+    // ── SULFUR_ROCK — bright yellow crystal cluster on volcanic rock ──────
+    if (tile === TILES.SULFUR_ROCK) {
+      ctx.fillStyle = '#2a1e1e';
+      ctx.beginPath(); ctx.ellipse(px+16, py+24, 11, 6, 0, 0, Math.PI*2); ctx.fill();
+      const spires = 3 + (s1 % 3);
+      for (let i = 0; i < spires; i++) {
+        const sx   = px + 7 + i * (18 / (spires - 1));
+        const h    = 10 + (s2 % 8) + (i % 2) * 5;
+        const w    = 3 + (s3 % 3);
+        const lean = ((i + s1) % 3 - 1) * 3;
+        ctx.fillStyle = '#b89000';
+        ctx.beginPath();
+        ctx.moveTo(sx, py+24); ctx.lineTo(sx-w+lean, py+24-h); ctx.lineTo(sx+w+lean, py+24-h);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#e8c800';
+        ctx.beginPath();
+        ctx.moveTo(sx+lean*0.6, py+24); ctx.lineTo(sx-w*0.4+lean, py+24-h*0.85); ctx.lineTo(sx+w*0.4+lean, py+24-h*0.85);
+        ctx.closePath(); ctx.fill();
+        ctx.fillStyle = '#fff8a0';
+        ctx.beginPath(); ctx.arc(sx+lean, py+24-h, 1.5, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── THORN_BUSH — gnarled dark spiky branches ─────────────────────────
+    if (tile === TILES.THORN_BUSH) {
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+26, 11, 4, 0, 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = '#3a2a0e'; ctx.lineWidth = 1.6;
+      const branches = [
+        [px+16,py+26, px+10,py+14], [px+16,py+26, px+22,py+13],
+        [px+16,py+26, px+16,py+11], [px+10,py+17, px+6, py+12],
+        [px+22,py+16, px+26,py+11],
+      ];
+      for (const [x1,y1,x2,y2] of branches) {
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
+      ctx.strokeStyle = '#5a3a15'; ctx.lineWidth = 1;
+      const thorns = [
+        [px+13,py+20, px+10,py+16], [px+19,py+19, px+22,py+15],
+        [px+10,py+14, px+7, py+11], [px+22,py+13, px+25,py+10],
+        [px+16,py+16, px+13,py+12], [px+16,py+16, px+19,py+12],
+      ];
+      for (const [x1,y1,x2,y2] of thorns) {
+        ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+      }
+      if (s1 % 3 !== 0) {
+        ctx.fillStyle = '#2a3a0a';
+        ctx.beginPath(); ctx.ellipse(px+9,  py+12, 3, 1.8, -0.5, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.ellipse(px+23, py+11, 3, 1.8,  0.4, 0, Math.PI*2); ctx.fill();
+      }
+      return;
+    }
+
+    // ── DESERT_FLOWER — succulent rosette with a bright bloom ─────────────
+    if (tile === TILES.DESERT_FLOWER) {
+      ctx.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx.beginPath(); ctx.ellipse(px+16, py+26, 9, 3, 0, 0, Math.PI*2); ctx.fill();
+      const leafColors = ['#3a6828', '#4a7830', '#386028'];
+      for (let i = 0; i < 6; i++) {
+        const a  = (i / 6) * Math.PI * 2;
+        ctx.fillStyle = leafColors[i % 3];
+        ctx.beginPath();
+        ctx.ellipse(px+16+Math.cos(a)*7, py+22+Math.sin(a)*4, 5, 3, a, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(120,200,80,0.25)';
+        ctx.beginPath();
+        ctx.ellipse(px+16+Math.cos(a)*5.5, py+22+Math.sin(a)*3, 2, 1, a, 0, Math.PI*2);
+        ctx.fill();
+      }
+      const petalColor = (s2 % 3) === 0 ? '#e03878' : (s2 % 3) === 1 ? '#e89020' : '#c030b0';
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2;
+        ctx.fillStyle = petalColor;
+        ctx.beginPath();
+        ctx.ellipse(px+16+Math.cos(a)*6, py+16+Math.sin(a)*5, 4.5, 3, a, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#f8e028';
+      ctx.beginPath(); ctx.arc(px+16, py+16, 3.5, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = '#fff07a';
+      ctx.beginPath(); ctx.arc(px+15, py+15, 1.5, 0, Math.PI*2); ctx.fill();
+      return;
+    }
   }
 
   /**
@@ -4342,13 +4832,13 @@ export class Renderer {
             }
 
             if (slot.qty > 1) {
-              const qStr = slot.qty >= 1000 ? `${(slot.qty / 1000).toFixed(0)}k` : slot.qty.toString();
+              const qStr = slot.qty > 9999 ? `${Math.floor(slot.qty / 1000)}k` : slot.qty.toString();
               ctx.font = 'bold 9px monospace';
               ctx.textAlign = 'left';
               ctx.strokeStyle = '#000';
               ctx.lineWidth = 2;
               ctx.strokeText(qStr, cx2 + 2, cy2 + 10);
-              ctx.fillStyle = slot.qty >= 100000 ? '#00ff00' : slot.qty >= 1000 ? '#a0ff80' : '#f1c40f';
+              ctx.fillStyle = slot.qty >= 100000 ? '#00ff00' : slot.qty > 9999 ? '#a0ff80' : '#f1c40f';
               ctx.fillText(qStr, cx2 + 2, cy2 + 10);
             }
 
