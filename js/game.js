@@ -173,6 +173,9 @@ export class Game {
     this._fadeCallback    = null;
     this.transitionCooldown = 0;
 
+    // Chest storage must exist before _restoreState populates it
+    this.chestStorage  = new Map(); // "col,row" → Array<{item,qty}|null>[28]
+
     // Restore saved state, or give default starting inventory for new players
     if (savedState) {
       this._restoreState(savedState);
@@ -278,7 +281,6 @@ export class Game {
     this.smithOpen     = false;  // smithing panel (Anvil)
     this.chestOpen     = false;  // chest storage panel
     this.chestPos      = null;   // { col, row } of the open chest tile
-    this.chestStorage  = new Map(); // "col,row" → Array<{item,qty}|null>[28]
     this.smithTab      = 'weapons'; // 'weapons' | 'tools' | 'armor'
     this.playerViewOpen  = false; // character stat popup (from Worn tab)
     this.skillInfoSkill  = null;  // index of skill whose info popup is open, or null
