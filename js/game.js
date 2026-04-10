@@ -98,6 +98,8 @@ const TILE_TOOLTIPS = {
   [TILES.DESERT_FLOWER]:'Desert Flower — click to pluck bloom',
   [TILES.FURNACE]:               'Furnace — smelt ores into bars',
   [TILES.ANVIL]:                 'Anvil — smith bars into equipment',
+  [TILES.FURN_CHEST]:            'Chest — click to open storage',
+  [TILES.FURN_BED]:              'Bed — click to rest and restore HP',
   [TILES.FARM_PATCH]:            'Empty soil patch — click to plant a seed',
   [TILES.FARM_PATCH_SEEDED]:     'Crop planted — growing...',
   [TILES.FARM_PATCH_GROWING]:    'Crop growing — almost ready...',
@@ -274,6 +276,9 @@ export class Game {
     this.makoverOpen   = false;
     this.forgeOpen     = false;  // smelting panel (Furnace)
     this.smithOpen     = false;  // smithing panel (Anvil)
+    this.chestOpen     = false;  // chest storage panel
+    this.chestPos      = null;   // { col, row } of the open chest tile
+    this.chestStorage  = new Map(); // "col,row" → Array<{item,qty}|null>[28]
     this.smithTab      = 'weapons'; // 'weapons' | 'tools' | 'armor'
     this.playerViewOpen  = false; // character stat popup (from Worn tab)
     this.skillInfoSkill  = null;  // index of skill whose info popup is open, or null
@@ -640,6 +645,9 @@ export class Game {
         this.forgeOpen = false;
       } else if (this.smithOpen) {
         this.smithOpen = false;
+      } else if (this.chestOpen) {
+        this.chestOpen = false;
+        this.chestPos  = null;
       } else if (this.houseShopOpen) {
         this.houseShopOpen = false;
       } else if (this.smithyShopOpen) {
@@ -721,6 +729,8 @@ export class Game {
         this._handleSmeltClick(click.screenX, click.screenY);
       } else if (this.smithOpen) {
         this._handleSmithClick(click.screenX, click.screenY);
+      } else if (this.chestOpen) {
+        this._handleChestClick(click.screenX, click.screenY);
       } else if (this.houseShopOpen) {
         this._handleHouseShopClick(click.screenX, click.screenY);
       } else if (this.smithyShopOpen) {
@@ -1036,13 +1046,25 @@ export class Game {
       } else if (pi.type === 'action') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) {
-          // Intercept furnace / anvil before regular action handler
-          const tileAtTarget = this.world.getTile(pi.col, pi.row);
+          // Intercept furnace / anvil / house furniture before regular action handler
+          const tileAtTarget = this.activeMap.getTile(pi.col, pi.row);
           if (tileAtTarget === TILES.FURNACE) {
             this.forgeOpen = true;
             return;
           } else if (tileAtTarget === TILES.ANVIL) {
             this.smithOpen = true;
+            return;
+          } else if (tileAtTarget === TILES.FURN_CHEST) {
+            this.chestOpen = true;
+            this.chestPos  = { col: pi.col, row: pi.row };
+            return;
+          } else if (tileAtTarget === TILES.FURN_BED) {
+            if (this.player.hp < this.player.maxHp) {
+              this.player.hp = this.player.maxHp;
+              this.notifications.add('You rest in the bed. HP fully restored!', '#27ae60');
+            } else {
+              this.notifications.add('You are already at full health.', '#aaa');
+            }
             return;
           }
           const triggered = this.actions.tryAction(pi.worldX, pi.worldY);
@@ -1432,6 +1454,10 @@ export class Game {
     if (this.smithOpen) {
       this.renderer.drawSmithPanel(SMITH_RECIPES, this.smithTab, this.inventory, this.skills);
     }
+    if (this.chestOpen && this.chestPos) {
+      const chestSlots = this._getChestSlots(this.chestPos.col, this.chestPos.row);
+      this.renderer.drawChestPanel(chestSlots, this.inventory);
+    }
     if (this.playerViewOpen) {
       const SLOTS2 = ['weapon','helmet','chestplate','leggings','gloves','boots','cape'];
       const equipData = SLOTS2.map(slot => {
@@ -1626,6 +1652,7 @@ export class Game {
     if (this.playerViewOpen) return true;
     if (this.forgeOpen)      return true;
     if (this.smithOpen)      return true;
+    if (this.chestOpen)      return true;
     if (this.shopOpen)       return true;
     if (this.smithyShopOpen) return true;
     if (this.houseShopOpen)  return true;
@@ -1833,6 +1860,91 @@ export class Game {
     const btnX = px + FORGE_PW - 70;
     if (sx < btnX) return;
     this._tryForgeRecipe(recipes[row]);
+  }
+
+  // ── Chest storage ────────────────────────────────────────────────────────
+
+  _getChestSlots(col, row) {
+    const key = `${col},${row}`;
+    if (!this.chestStorage.has(key)) {
+      this.chestStorage.set(key, new Array(28).fill(null));
+    }
+    return this.chestStorage.get(key);
+  }
+
+  _handleChestClick(sx, sy) {
+    const W = this.canvas.width, H = this.canvas.height;
+    const CHEST_PW = 390, CHEST_PH = 356, CHEST_HEADER = 58;
+    const CELL = 36, PAD = 4, COLS = 4, ROWS = 7;
+    const GRID_W = COLS * CELL + (COLS - 1) * PAD; // 156
+
+    const px = Math.floor((W - CHEST_PW) / 2);
+    const py = Math.floor((H - CHEST_PH) / 2);
+
+    // Close if outside panel
+    if (sx < px || sx > px + CHEST_PW || sy < py || sy > py + CHEST_PH) {
+      this.chestOpen = false;
+      this.chestPos  = null;
+      return;
+    }
+
+    const chestSlots = this._getChestSlots(this.chestPos.col, this.chestPos.row);
+    const leftX  = px + 14;
+    const rightX = px + CHEST_PW - 14 - GRID_W;
+    const gridY  = py + CHEST_HEADER;
+
+    // Check left grid (player inventory)
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        const cx = leftX  + c * (CELL + PAD);
+        const cy = gridY  + r * (CELL + PAD);
+        if (sx >= cx && sx < cx + CELL && sy >= cy && sy < cy + CELL) {
+          const slot = this.inventory.slots[idx];
+          if (!slot) return;
+          // Try to stack if stackable
+          if (slot.item.stackable) {
+            const si = chestSlots.findIndex(s => s && s.item.id === slot.item.id);
+            if (si !== -1) {
+              chestSlots[si].qty += slot.qty;
+              this.inventory.slots[idx] = null;
+              this._saveToServer();
+              return;
+            }
+          }
+          const emptyIdx = chestSlots.findIndex(s => s === null);
+          if (emptyIdx !== -1) {
+            chestSlots[emptyIdx] = { item: slot.item, qty: slot.qty };
+            this.inventory.slots[idx] = null;
+            this._saveToServer();
+          } else {
+            this.notifications.add('Chest is full.', '#e74c3c');
+          }
+          return;
+        }
+      }
+    }
+
+    // Check right grid (chest)
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const idx = r * COLS + c;
+        const cx = rightX + c * (CELL + PAD);
+        const cy = gridY  + r * (CELL + PAD);
+        if (sx >= cx && sx < cx + CELL && sy >= cy && sy < cy + CELL) {
+          const slot = chestSlots[idx];
+          if (!slot) return;
+          const added = this.inventory.add(slot.item, slot.qty);
+          if (added) {
+            chestSlots[idx] = null;
+            this._saveToServer();
+          } else {
+            this.notifications.add('Your inventory is full.', '#e74c3c');
+          }
+          return;
+        }
+      }
+    }
   }
 
   _placeFurniture(col, row) {
@@ -3182,6 +3294,13 @@ export class Game {
     };
     save.housing = this.housingState.toJSON();
     save.farming = this.farmingState.toJSON();
+    // Chest storage — serialize item objects back to id+qty
+    const chests = {};
+    for (const [k, slots] of this.chestStorage) {
+      const ser = slots.map(s => s ? { id: s.item.id, qty: s.qty } : null);
+      if (ser.some(s => s !== null)) chests[k] = ser;
+    }
+    if (Object.keys(chests).length > 0) save.chests = chests;
     return save;
   }
 
@@ -3224,6 +3343,18 @@ export class Game {
     }
     if (save.housing || save.farming) {
       this.interiors.set('player_house', buildPlayerHouse(this.housingState, this.farmingState));
+    }
+
+    // Chest storage
+    if (save.chests) {
+      for (const [k, slots] of Object.entries(save.chests)) {
+        const resolved = slots.map(s => {
+          if (!s) return null;
+          const item = ITEM_BY_ID.get(s.id);
+          return item ? { item, qty: s.qty } : null;
+        });
+        this.chestStorage.set(k, resolved);
+      }
     }
   }
 

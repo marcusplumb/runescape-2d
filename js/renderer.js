@@ -5632,6 +5632,134 @@ export class Renderer {
   }
 
   /* ═══════════════════════════════════════════════════════
+     CHEST STORAGE PANEL
+     ═══════════════════════════════════════════════════════ */
+
+  drawChestPanel(chestSlots, inventory) {
+    const ctx = this.ctx;
+    const W = this.canvas.width, H = this.canvas.height;
+
+    // Panel dimensions (must match _handleChestClick constants)
+    const CHEST_PW = 390, CHEST_PH = 356, CHEST_HEADER = 58;
+    const CELL = 36, PAD = 4, COLS = 4, ROWS = 7;
+    const GRID_W = COLS * CELL + (COLS - 1) * PAD; // 156
+
+    const px = Math.floor((W - CHEST_PW) / 2);
+    const py = Math.floor((H - CHEST_PH) / 2);
+    const leftX  = px + 14;
+    const rightX = px + CHEST_PW - 14 - GRID_W;
+    const gridY  = py + CHEST_HEADER;
+
+    // Dim overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Panel background
+    ctx.fillStyle = 'rgba(14,10,4,0.97)';
+    this._roundRect(ctx, px, py, CHEST_PW, CHEST_PH, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#a07828';
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, px, py, CHEST_PW, CHEST_PH, 8);
+    ctx.stroke();
+
+    // Amber gradient accent along top
+    const grad = ctx.createLinearGradient(px, py, px + CHEST_PW, py);
+    grad.addColorStop(0,   'rgba(100,60,5,0)');
+    grad.addColorStop(0.5, 'rgba(180,120,30,0.2)');
+    grad.addColorStop(1,   'rgba(100,60,5,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(px, py, CHEST_PW, CHEST_HEADER);
+
+    // Header — chest icon drawn by hand
+    const iconCX = px + 22, iconCY = py + 29;
+    // Chest body
+    ctx.fillStyle = '#8b6200';
+    ctx.fillRect(iconCX - 10, iconCY - 7, 20, 14);
+    // Lid (slightly lighter)
+    ctx.fillStyle = '#a07828';
+    ctx.fillRect(iconCX - 10, iconCY - 11, 20, 5);
+    // Brass latch
+    ctx.fillStyle = '#f1c40f';
+    ctx.fillRect(iconCX - 3, iconCY - 4, 6, 6);
+    // Lock keyhole
+    ctx.fillStyle = '#3a2a00';
+    ctx.beginPath();
+    ctx.arc(iconCX, iconCY - 1, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#e8c060';
+    ctx.font = 'bold 15px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText('Chest Storage', px + 38, py + 26);
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.fillText('Click an item to transfer it  •  ESC to close', px + 38, py + 42);
+
+    // Divider below header
+    ctx.strokeStyle = '#6a4a10';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(px + 10, py + CHEST_HEADER - 1);
+    ctx.lineTo(px + CHEST_PW - 10, py + CHEST_HEADER - 1);
+    ctx.stroke();
+
+    // Column labels
+    ctx.font = 'bold 11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#c8a850';
+    ctx.fillText('Your Inventory', leftX  + GRID_W / 2, gridY - 6);
+    ctx.fillText('Chest', rightX + GRID_W / 2, gridY - 6);
+
+    // Vertical divider between grids
+    const divX = px + CHEST_PW / 2;
+    ctx.strokeStyle = 'rgba(160,120,40,0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(divX, py + CHEST_HEADER + 10);
+    ctx.lineTo(divX, py + CHEST_PH - 10);
+    ctx.stroke();
+
+    // Draw a grid of slots
+    const drawGrid = (slots, startX) => {
+      for (let r = 0; r < ROWS; r++) {
+        for (let c = 0; c < COLS; c++) {
+          const idx = r * COLS + c;
+          const cx = startX + c * (CELL + PAD);
+          const cy = gridY   + r * (CELL + PAD);
+
+          // Slot background
+          ctx.fillStyle = 'rgba(55,42,20,0.75)';
+          this._roundRect(ctx, cx, cy, CELL, CELL, 4);
+          ctx.fill();
+          ctx.strokeStyle = 'rgba(130,95,30,0.45)';
+          ctx.lineWidth = 1;
+          this._roundRect(ctx, cx, cy, CELL, CELL, 4);
+          ctx.stroke();
+
+          // Item
+          const slot = slots[idx];
+          if (slot) {
+            slot.item.draw(ctx, cx + 2, cy + 2, CELL - 4);
+            if (slot.qty > 1) {
+              ctx.fillStyle = '#f1c40f';
+              ctx.font = 'bold 9px monospace';
+              ctx.textAlign = 'left';
+              ctx.strokeStyle = '#000';
+              ctx.lineWidth = 2;
+              ctx.strokeText(slot.qty.toString(), cx + 2, cy + 11);
+              ctx.fillText(slot.qty.toString(), cx + 2, cy + 11);
+            }
+          }
+        }
+      }
+    };
+
+    drawGrid(inventory.slots, leftX);
+    drawGrid(chestSlots,      rightX);
+  }
+
+  /* ═══════════════════════════════════════════════════════
      PLAYER VIEW PANEL
      ═══════════════════════════════════════════════════════ */
   /**
