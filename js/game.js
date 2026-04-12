@@ -36,6 +36,7 @@ import {
   cellInnerOrigin, CELL_INNER,
   GRID_COLS, GRID_ROWS,
   BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
+  LARGE_CHEST_CAPACITY,
 } from './housing.js';
 import { STRUCTURE_NODES } from './structures.js';
 import { ARMOR_OPTIONS, EQUIPMENT_SLOTS, SLOT_LABELS } from './equipment.js';
@@ -285,7 +286,17 @@ export class Game {
     this.playerViewOpen  = false; // character stat popup (from Worn tab)
     this.skillInfoSkill  = null;  // index of skill whose info popup is open, or null
     this.skillInfoScroll = 0;     // scroll offset in pixels for skill info popup
+
+    // New panel flags — Agent 5
+    this.skillsOpen    = false;  // full-screen Skills panel (K key)
+    this.dialogueOpen  = false;  // NPC dialogue box
+    this.dialogueData  = null;   // { npcName: string, text: string, options: Array<string> }
+
+    // HUD state
+    this.lastActiveSkill = null; // index of last skill that gained XP (for XP bar in HUD)
+    // TODO: update this.lastActiveSkill = skillIndex whenever skills.addXp(skillIndex, ...) is called
     this.smeltingAction = null;  // { recipe, progress, duration } — animated smelting
+    this.smithingAction = null;  // { recipe, progress, duration } — animated smithing
     this.showAdminTp   = false;
     this.adminEquipOpen  = false;
 
@@ -309,10 +320,10 @@ export class Game {
     this.contextMenu     = null;    // { x, y, invSlot, options:[{label,cb}] }
 
     // Chat system
-    this.chatMessages    = [];       // { name, text, time } — most-recent last
-    this.chatInputActive = false;
-    this._chatInput      = null;     // DOM <input> element, created on first open
-    this._chatCooldown   = 0;        // seconds until next message allowed
+    this.chatMessages     = [];       // { name, text, time } — most-recent last
+    this.chatInputActive  = false;
+    this._chatInput       = null;     // DOM <input> element, created on first open
+    this._chatScrollOffset = 0;       // lines scrolled up from newest (0 = see latest)
 
     // Mouse screen pos for tooltip + drag
     this.mouseScreen = { x: 0, y: 0 };
@@ -461,6 +472,16 @@ export class Game {
       } else if (this.capeShopOpen) {
         e.preventDefault();
         this.capeShopScroll = Math.max(0, this.capeShopScroll + e.deltaY);
+      } else {
+        // Scroll the chat log (no panel open)
+        const totalItems = this.notifications.messages.length + this.chatMessages.length;
+        const MAX_LINES  = 7;
+        const maxOffset  = Math.max(0, totalItems - MAX_LINES);
+        if (maxOffset > 0) {
+          e.preventDefault();
+          const delta = e.deltaY > 0 ? -1 : 1; // up = scroll toward older messages
+          this._chatScrollOffset = Math.max(0, Math.min(maxOffset, this._chatScrollOffset + delta));
+        }
       }
     }, { passive: false });
 
@@ -524,7 +545,14 @@ export class Game {
   }
 
   run() {
-    const loop = (now) => {
+    // rAF handle so we can cancel it when switching to hidden-tab mode
+    this._rafId = null;
+    // setInterval handle used while the tab is hidden
+    this._hiddenInterval = null;
+
+    const HIDDEN_TICK_MS = 50; // ~20 tps while hidden — enough for timers/autosave/logout
+
+    const tick = (now) => {
       const dt = Math.min((now - this.lastTime) / 1000, 0.1);
       this.lastTime = now;
       this.elapsed += dt;
@@ -538,12 +566,48 @@ export class Game {
       }
 
       this.update(dt);
-      this.draw();
-      this.input.endFrame();
-
-      requestAnimationFrame(loop);
+      if (!document.hidden) {
+        this.draw();
+        this.input.endFrame();
+      }
     };
-    requestAnimationFrame(loop);
+
+    const rafLoop = (now) => {
+      tick(now);
+      this._rafId = requestAnimationFrame(rafLoop);
+    };
+
+    const startRaf = () => {
+      this.lastTime = performance.now();
+      this._rafId = requestAnimationFrame(rafLoop);
+    };
+
+    const startHidden = () => {
+      this.lastTime = performance.now();
+      this._hiddenInterval = setInterval(() => {
+        tick(performance.now());
+      }, HIDDEN_TICK_MS);
+    };
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        // Switching away — move from rAF to interval so updates keep running
+        if (this._rafId !== null) {
+          cancelAnimationFrame(this._rafId);
+          this._rafId = null;
+        }
+        startHidden();
+      } else {
+        // Returning — cancel interval, resume rAF
+        if (this._hiddenInterval !== null) {
+          clearInterval(this._hiddenInterval);
+          this._hiddenInterval = null;
+        }
+        startRaf();
+      }
+    });
+
+    startRaf();
   }
 
   update(dt) {
@@ -582,6 +646,9 @@ export class Game {
     // Panel toggles
     if (this.input.wasJustPressed('KeyI')) {
       this.sidePanelTab = 'inventory';
+    }
+    if (this.input.wasJustPressed('KeyK')) {
+      this.skillsOpen = !this.skillsOpen;
     }
     if (this.input.wasJustPressed('Tab')) {
       const tabs = ['inventory', 'skills', 'equip'];
@@ -632,12 +699,10 @@ export class Game {
       } else if (this.buildModeFurnPlacing) {
         this.buildModeFurnPlacing = null;
         this.buildModeOpen = true;
-        this.notifications.add('Placement cancelled.', '#aaa');
       } else if (this.buildModeOpen) {
         this.buildModeOpen = false;
       } else if (this.placingFurniture) {
         this.placingFurniture = null;
-        this.notifications.add('Placement cancelled.', '#aaa');
       } else if (this.skillInfoSkill !== null) {
         this.skillInfoSkill  = null;
         this.skillInfoScroll = 0;
@@ -670,6 +735,11 @@ export class Game {
         this.fishermanOpen = false;
       } else if (this.raidMenuOpen) {
         this.raidMenuOpen = false;
+      } else if (this.skillsOpen) {
+        this.skillsOpen = false;
+      } else if (this.dialogueOpen) {
+        this.dialogueOpen = false;
+        this.dialogueData = null;
       } else if (this.inRaid && this.activeRaid && this.activeRaid.complete) {
         this._exitRaid();
       } else if (this.inRaid) {
@@ -678,12 +748,10 @@ export class Game {
       } else if (this.combat.isInCombat) {
         if (this.network) this.network.sendStopCombat(this.combat.targetMob.id);
         this.combat.clearTarget();
-        this.notifications.add('You stop fighting.', '#aaa');
       } else if (this.actions.isActive) {
         this.actions.cancel();
         this.player.actionLocked = false;
         this.pendingInteract = null;
-        this.notifications.add('Action cancelled.', '#aaa');
       }
     }
 
@@ -752,6 +820,12 @@ export class Game {
       } else if (this.fishermanOpen) {
         this._handleFishermanClick(click.screenX, click.screenY);
         return;
+      } else if (this.skillsOpen) {
+        this._handleSkillsPanelClick(click.screenX, click.screenY);
+        return;
+      } else if (this.dialogueOpen) {
+        this._handleDialogueClick(click.screenX, click.screenY);
+        return;
       } else if (this._clickOnSidePanel(click.screenX, click.screenY)) {
         // handled
       } else if (!this._clickOnUI(click.screenX, click.screenY)) {
@@ -759,7 +833,6 @@ export class Game {
         if (this.player.actionLocked) {
           this.actions.cancel();
           this.player.actionLocked = false;
-          this.notifications.add('Action cancelled.', '#aaa');
         }
         this.pendingInteract = null;
 
@@ -787,9 +860,9 @@ export class Game {
         } else if (!this.inInterior && !this.inRaid && this.dungeonMaster.containsWorld(worldPos.x, worldPos.y)) {
           const dmCol = Math.floor(this.dungeonMaster.cx / TILE_SIZE);
           const dmRow = Math.floor(this.dungeonMaster.cy / TILE_SIZE);
-          const adj   = nearestWalkableAdjacent(this.world, dmCol, dmRow, this.player.col, this.player.row);
+          const adj   = nearestWalkableAdjacent(this.activeMap, dmCol, dmRow, this.player.col, this.player.row);
           if (adj) {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
             this.pendingInteract = { type: 'dungeon_master', col: dmCol, row: dmRow };
             this.clickDest = { col: dmCol, row: dmRow };
           }
@@ -797,9 +870,9 @@ export class Game {
           // Walk to shopkeeper then open shop
           const skCol = Math.floor((this.shopKeeper.x + this.shopKeeper.w / 2) / TILE_SIZE);
           const skRow = Math.floor((this.shopKeeper.y + this.shopKeeper.h / 2) / TILE_SIZE);
-          const adj   = nearestWalkableAdjacent(this.world, skCol, skRow, this.player.col, this.player.row);
+          const adj   = nearestWalkableAdjacent(this.activeMap, skCol, skRow, this.player.col, this.player.row);
           if (adj) {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
             this.pendingInteract = { type: 'shop', col: skCol, row: skRow };
             this.clickDest = { col: skCol, row: skRow };
           }
@@ -807,9 +880,9 @@ export class Game {
           // Walk to smithy keeper then open smithy shop
           const smCol = Math.floor((this.smithyKeeper.x + this.smithyKeeper.w / 2) / TILE_SIZE);
           const smRow = Math.floor((this.smithyKeeper.y + this.smithyKeeper.h / 2) / TILE_SIZE);
-          const adj   = nearestWalkableAdjacent(this.world, smCol, smRow, this.player.col, this.player.row);
+          const adj   = nearestWalkableAdjacent(this.activeMap, smCol, smRow, this.player.col, this.player.row);
           if (adj) {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
             this.pendingInteract = { type: 'smithy', col: smCol, row: smRow };
             this.clickDest = { col: smCol, row: smRow };
           }
@@ -817,41 +890,41 @@ export class Game {
           // Walk to Makeover NPC
           const moCol = Math.floor(this.makoverNpc.cx / TILE_SIZE);
           const moRow = Math.floor(this.makoverNpc.cy / TILE_SIZE);
-          const adj   = nearestWalkableAdjacent(this.world, moCol, moRow, this.player.col, this.player.row);
+          const adj   = nearestWalkableAdjacent(this.activeMap, moCol, moRow, this.player.col, this.player.row);
           if (adj) {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
             this.pendingInteract = { type: 'makeover', col: moCol, row: moRow };
             this.clickDest = { col: moCol, row: moRow };
           }
         } else if (!this.inInterior && this.fishermanNpc.containsWorld(worldPos.x, worldPos.y)) {
           const fnCol = Math.floor((this.fishermanNpc.x + this.fishermanNpc.w / 2) / TILE_SIZE);
           const fnRow = Math.floor((this.fishermanNpc.y + this.fishermanNpc.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.world, fnCol, fnRow, this.player.col, this.player.row);
+          const adj = nearestWalkableAdjacent(this.activeMap, fnCol, fnRow, this.player.col, this.player.row);
           if (adj) {
-            this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row));
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
             this.pendingInteract = { type: 'fisherman', col: fnCol, row: fnRow };
             this.clickDest = { col: fnCol, row: fnRow };
           }
         } else if (!this.inInterior && this.butcherKeeper.containsWorld(worldPos.x, worldPos.y)) {
           const col = Math.floor((this.butcherKeeper.x + this.butcherKeeper.w / 2) / TILE_SIZE);
           const row = Math.floor((this.butcherKeeper.y + this.butcherKeeper.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
-          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'butcher', col, row }; this.clickDest = { col, row }; }
+          const adj = nearestWalkableAdjacent(this.activeMap, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'butcher', col, row }; this.clickDest = { col, row }; }
         } else if (!this.inInterior && this.weaponKeeper.containsWorld(worldPos.x, worldPos.y)) {
           const col = Math.floor((this.weaponKeeper.x + this.weaponKeeper.w / 2) / TILE_SIZE);
           const row = Math.floor((this.weaponKeeper.y + this.weaponKeeper.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
-          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'weapon_shop', col, row }; this.clickDest = { col, row }; }
+          const adj = nearestWalkableAdjacent(this.activeMap, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'weapon_shop', col, row }; this.clickDest = { col, row }; }
         } else if (!this.inInterior && this.varietyKeeper.containsWorld(worldPos.x, worldPos.y)) {
           const col = Math.floor((this.varietyKeeper.x + this.varietyKeeper.w / 2) / TILE_SIZE);
           const row = Math.floor((this.varietyKeeper.y + this.varietyKeeper.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
-          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'variety_shop', col, row }; this.clickDest = { col, row }; }
+          const adj = nearestWalkableAdjacent(this.activeMap, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'variety_shop', col, row }; this.clickDest = { col, row }; }
         } else if (!this.inInterior && this.capeKeeper.containsWorld(worldPos.x, worldPos.y)) {
           const col = Math.floor((this.capeKeeper.x + this.capeKeeper.w / 2) / TILE_SIZE);
           const row = Math.floor((this.capeKeeper.y + this.capeKeeper.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.world, col, row, this.player.col, this.player.row);
-          if (adj) { this.player.setPath(findPath(this.world, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'cape_shop', col, row }; this.clickDest = { col, row }; }
+          const adj = nearestWalkableAdjacent(this.activeMap, col, row, this.player.col, this.player.row);
+          if (adj) { this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row)); this.pendingInteract = { type: 'cape_shop', col, row }; this.clickDest = { col, row }; }
         } else if (!this.inInterior) {
           // ── World / raid / dungeon: mob clicks & interactable tiles ──
           const navMap    = this.activeMap; // always use active map for pathfinding
@@ -915,7 +988,7 @@ export class Game {
     }
 
     // Update player movement
-    const result = this.player.update(dt, dir);
+    const result = this.player.update(dt, dir, this.activeMap, this.input);
 
     // Broadcast position to other players (Network class throttles duplicate emissions)
     if (this.network && !this.inInterior) {
@@ -937,7 +1010,6 @@ export class Game {
     if (result === 'cancel_action') {
       this.actions.cancel();
       this.pendingInteract = null;
-      this.notifications.add('Action cancelled.', '#aaa');
     }
 
     // Keep local player's combat level and max HP up to date
@@ -1142,6 +1214,14 @@ export class Game {
       this._updateFarmingPatches();
     }
 
+    // Greenhouse timers (dt-based, run always so crops grow even when away)
+    this.farmingState.tick(dt);
+
+    // Animal pen produce timers (only meaningful when logged in)
+    if (this.inInterior) {
+      this.housingState.tickAnimals(dt);
+    }
+
     // Update systems
     this.actions.update(dt);
     this.combat.update(dt);
@@ -1159,22 +1239,58 @@ export class Game {
     }
     for (const s of this.remoteHitSplats) s.timer += dt;
     this.remoteHitSplats = this.remoteHitSplats.filter(s => s.timer < s.maxTimer);
-    if (this._chatCooldown > 0) this._chatCooldown -= dt;
 
     // Consume XP gain events from skills queue
     // Smelting action tick
     if (this.smeltingAction) {
       this.smeltingAction.progress += dt / this.smeltingAction.duration;
       if (this.smeltingAction.progress >= 1) {
-        const { recipe } = this.smeltingAction;
+        const { recipe, remaining, total, baseDuration } = this.smeltingAction;
         this.inventory.add(recipe.output(), 1);
         this.skills.addXp(SKILL_IDS.FORGERY, recipe.xp);
-        this.notifications.add(`Smelted ${recipe.name}! (+${recipe.xp} Forgery XP)`, '#ff8c42');
-        this.smeltingAction = null;
+        const newRemaining = remaining - 1;
+        if (newRemaining > 0) {
+          const hasIngredients = recipe.inputs.every(({ item, qty }) =>
+            this.inventory.count(item().id) >= qty
+          );
+          const hasSpace = !this.inventory.isFull() || this.inventory.has(recipe.output().id);
+          if (hasIngredients && hasSpace) {
+            for (const { item, qty } of recipe.inputs) {
+              this.inventory.remove(item().id, qty);
+            }
+            const barIndex = total - newRemaining + 1; // 1-indexed bar about to start
+            const nextDuration = baseDuration * (1 + 0.15 * (barIndex - 1));
+            this.smeltingAction = { recipe, progress: 0, duration: nextDuration, baseDuration, remaining: newRemaining, total };
+          } else {
+            const barsCompleted = total - newRemaining;
+            this.notifications.add(`Smelted ${barsCompleted}x ${recipe.name}! (+${recipe.xp * barsCompleted} Forgery XP)`, '#ff8c42');
+            this.smeltingAction = null;
+          }
+        } else {
+          if (total > 1) {
+            this.notifications.add(`Smelted ${total}x ${recipe.name}! (+${recipe.xp * total} Forgery XP)`, '#ff8c42');
+          } else {
+            this.notifications.add(`Smelted ${recipe.name}! (+${recipe.xp} Forgery XP)`, '#ff8c42');
+          }
+          this.smeltingAction = null;
+        }
+      }
+    }
+
+    // Smithing tick
+    if (this.smithingAction) {
+      this.smithingAction.progress += dt / this.smithingAction.duration;
+      if (this.smithingAction.progress >= 1) {
+        const { recipe } = this.smithingAction;
+        this.inventory.add(recipe.output(), 1);
+        this.skills.addXp(SKILL_IDS.FORGERY, recipe.xp);
+        this.notifications.add(`Forged ${recipe.name}! (+${recipe.xp} Forgery XP)`, '#4a90d9');
+        this.smithingAction = null;
       }
     }
 
     for (const ev of this.skills.xpGainQueue) {
+      this.lastActiveSkill = ev.skillId; // drives HUD XP bar (Agent 5)
       const existing = this.xpFlashes.find(f => f.skillId === ev.skillId);
       const level = this.skills.getLevel(ev.skillId);
       if (existing) {
@@ -1448,6 +1564,7 @@ export class Game {
       this.renderer.drawCircleMinimap(this.world, this.player);
     }
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
+    this.renderer.drawBottomHUD(ctx, this.player);
     const hoverSlot = this.dragSlot !== -1
       ? this._getInventorySlotAt(this.mouseScreen.x, this.mouseScreen.y)
       : -1;
@@ -1460,6 +1577,9 @@ export class Game {
     );
     if (this.smeltingAction) {
       this.renderer.drawSmeltingProgress(this.smeltingAction, this.elapsed);
+    }
+    if (this.smithingAction) {
+      this.renderer.drawSmithingProgress(this.smithingAction, this.elapsed);
     }
     if (this.forgeOpen) {
       this.renderer.drawSmeltPanel(SMELT_RECIPES, this.inventory, this.skills);
@@ -1523,6 +1643,12 @@ export class Game {
     if (this.inRaid && this.activeRaid && this.activeRaid.complete) this._drawRaidSummary(ctx);
     if (this.inRaid && this.activeRaid && !this.activeRaid.complete && !this.activeRaid.failed) {
       this._drawRaidFloorHUD(ctx);
+    }
+    if (this.skillsOpen) {
+      this.renderer.drawSkillsPanelFull(ctx, this.skills, this.canvas);
+    }
+    if (this.dialogueOpen && this.dialogueData) {
+      this.renderer.drawDialoguePanel(ctx, this.dialogueData, this.canvas);
     }
 
     // World map overlay (drawn last — covers everything)
@@ -1616,8 +1742,6 @@ export class Game {
     // Chat box (bottom-left)
     this._drawChat(ctx);
 
-    // Notifications
-    this.notifications.drawMessages(ctx, this.canvas.height);
     this.notifications.drawXpDrops(ctx);
 
     if (this.inInterior || this.inRaid || this.inDungeon) {
@@ -1658,6 +1782,72 @@ export class Game {
     return slot.qty > 1 ? `${slot.item.name} (${slot.qty})` : slot.item.name;
   }
 
+  // ── Skills panel (K key) ─────────────────────────────────────────────────
+
+  /**
+   * Open the full-screen Skills panel.
+   * TODO: Agent 2 — call game.openDialogue({npcName, text, options}) from NPC click handler
+   */
+  openDialogue(data) {
+    this.dialogueData = data;
+    this.dialogueOpen = true;
+  }
+
+  _handleSkillsPanelClick(sx, sy) {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const PW = 420, PH = 520;
+    const px = Math.floor((cw - PW) / 2);
+    const py = Math.floor((ch - PH) / 2);
+
+    // Close if click is outside the panel rect
+    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this.skillsOpen = false;
+      return;
+    }
+
+    // Detect which skill row was clicked (for future tooltip)
+    const ROW_H = 36;
+    const HEADER_H = 56;
+    const relY = sy - (py + HEADER_H);
+    if (relY >= 0) {
+      const rowIdx = Math.floor(relY / ROW_H);
+      if (rowIdx >= 0 && rowIdx < 13) {
+        // Future: open skill tooltip / info
+        console.log('[Skills panel] clicked skill row:', rowIdx, SKILL_NAMES[rowIdx]);
+      }
+    }
+  }
+
+  _handleDialogueClick(sx, sy) {
+    const cw = this.canvas.width;
+    const ch = this.canvas.height;
+    const PW = 600, PH = 160;
+    const px = Math.floor((cw - PW) / 2);
+    const py = ch - PH - 20;
+
+    // Close if click outside panel
+    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this.dialogueOpen  = false;
+      this.dialogueData  = null;
+      return;
+    }
+
+    if (!this.dialogueData || !this.dialogueData.options) return;
+
+    // Detect which option button was clicked
+    const OPTION_H = 22;
+    const OPTION_START_Y = py + 54;
+    for (let i = 0; i < this.dialogueData.options.length; i++) {
+      const oy = OPTION_START_Y + i * OPTION_H;
+      if (sy >= oy && sy < oy + OPTION_H && sx >= px + 8 && sx <= px + PW - 8) {
+        // TODO: Agent 2 — dispatch dialogue option callback (option index) to NPC interaction handler
+        console.log('[Dialogue] option clicked:', i, this.dialogueData.options[i]);
+        return;
+      }
+    }
+  }
+
   _clickOnUI(sx, sy) {
     if (this.contextMenu)    return true;
     if (this.adminEquipOpen) return true;
@@ -1665,12 +1855,15 @@ export class Game {
     if (this.playerViewOpen) return true;
     if (this.forgeOpen)      return true;
     if (this.smithOpen)      return true;
+    if (this.smithingAction) return true;
     if (this.chestOpen)      return true;
     if (this.shopOpen)       return true;
     if (this.smithyShopOpen) return true;
     if (this.houseShopOpen)  return true;
     if (this.makoverOpen)    return true;
     if (this.fishermanOpen)  return true;
+    if (this.skillsOpen)     return true;
+    if (this.dialogueOpen)   return true;
     // Side panel (always present)
     const W = this.canvas.width, H = this.canvas.height;
     const PW = 232, PH = 28 + 378 + 4;
@@ -1820,13 +2013,33 @@ export class Game {
     if (sy < contentY) return;
     const row = Math.floor((sy - contentY) / FORGE_ROW_H);
     if (row < 0 || row >= SMELT_RECIPE_COUNT) return;
-    const btnX = px + FORGE_PW - 70;
-    if (sx < btnX) return;
-    // Validate and start animated smelting (do NOT use _tryForgeRecipe)
+
+    // Detect which quantity button was clicked (1x / 5x / 15x)
+    const BTN_W = 38, BTN_GAP = 3;
+    const SMELT_QTYS = [
+      { qty: 1,  levelReq: 1  },
+      { qty: 5,  levelReq: 10 },
+      { qty: 15, levelReq: 25 },
+    ];
+    const btnY = contentY + row * FORGE_ROW_H + Math.floor((FORGE_ROW_H - 24) / 2);
+    let clickedQty = null;
+    for (let i = 0; i < SMELT_QTYS.length; i++) {
+      const bx = px + FORGE_PW - 8 - (SMELT_QTYS.length - i) * BTN_W - (SMELT_QTYS.length - i - 1) * BTN_GAP;
+      if (sx >= bx && sx <= bx + BTN_W && sy >= btnY && sy <= btnY + 24) {
+        clickedQty = SMELT_QTYS[i];
+        break;
+      }
+    }
+    if (!clickedQty) return;
+
     const recipe = SMELT_RECIPES[row];
     const forgeLevel = this.skills.getLevel(SKILL_IDS.FORGERY);
     if (forgeLevel < recipe.level) {
       this.notifications.add(`Need Forgery level ${recipe.level} to smelt ${recipe.name}.`, '#e74c3c');
+      return;
+    }
+    if (forgeLevel < clickedQty.levelReq) {
+      this.notifications.add(`Need Forgery level ${clickedQty.levelReq} to smelt ${clickedQty.qty}x at once.`, '#e74c3c');
       return;
     }
     for (const { item, qty } of recipe.inputs) {
@@ -1840,13 +2053,13 @@ export class Game {
       this.notifications.add('Inventory full!', '#e74c3c');
       return;
     }
-    // Consume ingredients immediately, then start action
+    // Consume ingredients for first bar, then start action
     for (const { item, qty } of recipe.inputs) {
       this.inventory.remove(item().id, qty);
     }
     this.forgeOpen = false;
-    const duration = 2.5 + recipe.level / 20;
-    this.smeltingAction = { recipe, progress: 0, duration };
+    const baseDuration = 2.5 + recipe.level / 20;
+    this.smeltingAction = { recipe, progress: 0, duration: baseDuration, baseDuration, remaining: clickedQty.qty, total: clickedQty.qty };
   }
 
   _handleSmithClick(sx, sy) {
@@ -1872,7 +2085,29 @@ export class Game {
     if (row < 0 || row >= recipes.length) return;
     const btnX = px + FORGE_PW - 70;
     if (sx < btnX) return;
-    this._tryForgeRecipe(recipes[row]);
+    const recipe = recipes[row];
+    const forgeLevel = this.skills.getLevel(SKILL_IDS.FORGERY);
+    if (forgeLevel < recipe.level) {
+      this.notifications.add(`Need Forgery level ${recipe.level} to forge ${recipe.name}.`, '#e74c3c');
+      return;
+    }
+    for (const { item, qty } of recipe.inputs) {
+      if (this.inventory.count(item().id) < qty) {
+        const needed = qty > 1 ? `${qty}x ` : '';
+        this.notifications.add(`Need ${needed}${item().name}.`, '#e74c3c');
+        return;
+      }
+    }
+    if (this.inventory.isFull() && !this.inventory.has(recipe.output().id)) {
+      this.notifications.add('Inventory full!', '#e74c3c');
+      return;
+    }
+    for (const { item, qty } of recipe.inputs) {
+      this.inventory.remove(item().id, qty);
+    }
+    this.smithOpen = false;
+    const duration = 2.0 + recipe.level / 25;
+    this.smithingAction = { recipe, progress: 0, duration };
   }
 
   // ── Chest storage ────────────────────────────────────────────────────────
@@ -1880,7 +2115,11 @@ export class Game {
   _getChestSlots(col, row) {
     const key = `${col},${row}`;
     if (!this.chestStorage.has(key)) {
-      this.chestStorage.set(key, new Array(28).fill(null));
+      // Large chest at interior (19,8) holds 4× normal capacity when unlocked
+      const isLargeChest = this.inInterior && col === 19 && row === 8
+        && this.housingState.hasLargeChest;
+      const capacity = isLargeChest ? LARGE_CHEST_CAPACITY : 28;
+      this.chestStorage.set(key, new Array(capacity).fill(null));
     }
     return this.chestStorage.get(key);
   }
@@ -2110,7 +2349,6 @@ export class Game {
           cb: () => {
             this.housingState.removeFurniture(gx, gy, found.index);
             this._rebuildPlayerHouse();
-            this.notifications.add(`Removed ${fd.name}.`, '#aaa');
             this._saveToServer();
             this.contextMenu = null;
           },
@@ -3036,7 +3274,6 @@ export class Game {
       }});
     }
     opts.push({ label: `Use ${item.name}`, cb: () => {
-      this.notifications.add(`You use the ${item.name}.`, '#aaa');
       this.contextMenu = null;
     }});
     opts.push({ label: `Drop ${item.name}`, cb: () => this._dropItem(invSlot) });
@@ -3048,7 +3285,6 @@ export class Game {
     const slot = this.inventory.slots[invSlot];
     if (!slot || !slot.item.heal) return;
     if (this.player.hp >= this.player.maxHp) {
-      this.notifications.add('You are already at full health.', '#aaa');
       this.contextMenu = null;
       return;
     }
@@ -3064,7 +3300,6 @@ export class Game {
     if (!slot) return;
     this.inventory.slots[invSlot] = null;
     this.combat.spawnGroundItem(slot.item, slot.qty, this.player.cx, this.player.cy);
-    this.notifications.add(`You drop the ${slot.item.name}.`, '#aaa');
     this.contextMenu = null;
   }
 
@@ -3107,7 +3342,6 @@ export class Game {
     this.inventory.slots[invSlot] = null;
     this.contextMenu = null;
     this._recalcMaxHp();
-    this.notifications.add(`Equipped ${slot.item.name}.`, '#aaa');
     this._saveToServer();
     if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
   }
@@ -3125,7 +3359,6 @@ export class Game {
     }
     this.player.equipment[slot] = 'none';
     this._recalcMaxHp();
-    if (item) this.notifications.add(`Unequipped ${item.name}.`, '#aaa');
     this._saveToServer();
     if (this.network) this.network.sendEquip(this.player.equipment, this.player.style, this.player.name, this.player.combatLevel);
   }
@@ -3469,15 +3702,16 @@ export class Game {
       input.placeholder = 'Press Enter to send, Esc to cancel';
       input.style.cssText = [
         'position:fixed',
-        'bottom:82px',
+        'bottom:10px',
         'left:12px',
-        'width:320px',
+        'width:324px',
+        'height:20px',
         'background:rgba(20,14,8,0.88)',
         'color:#f0e8d0',
         'border:1px solid #8b6914',
-        'border-radius:3px',
-        'padding:4px 8px',
-        'font:13px monospace',
+        'border-radius:2px',
+        'padding:1px 6px',
+        'font:12px monospace',
         'outline:none',
         'z-index:9999',
       ].join(';');
@@ -3506,78 +3740,101 @@ export class Game {
   _submitChat() {
     if (!this._chatInput || !this.network) { this._closeChat(); return; }
     const text = this._chatInput.value.trim();
-    if (text && this._chatCooldown <= 0) {
+    if (text) {
       this.network.sendChat(text);
-      this._chatCooldown = 1.0; // 1-second client-side cooldown
+      this._chatScrollOffset = 0; // snap to newest on send
     }
     this._closeChat();
   }
 
   _drawChat(ctx) {
-    const PAD    = 12;
-    const LINE_H = 18;
-    const MAX_VISIBLE = 8;
-    const BOX_W  = 320;
-    const now    = Date.now();
-    const FADE_START = 10_000; // messages start fading after 10 s
-    const FADE_END   = 15_000; // fully gone after 15 s
-
-    // Filter to messages visible (not yet faded out), most-recent last
-    const visible = this.chatMessages.filter(m => now - m.time < FADE_END);
-    const slice   = visible.slice(-MAX_VISIBLE);
-
-    if (slice.length === 0 && !this.chatInputActive) return;
-
-    const rows     = slice.length;
-    const BOX_H    = rows * LINE_H + (rows > 0 ? 8 : 0);
-    const bottomY  = this.canvas.height - (this.chatInputActive ? 96 : 72);
-    const topY     = bottomY - BOX_H;
-
-    // Background for message area
-    if (rows > 0) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(10,7,4,0.55)';
-      ctx.strokeStyle = 'rgba(139,105,20,0.4)';
-      ctx.lineWidth = 1;
-      const r = 3;
-      ctx.beginPath();
-      ctx.roundRect(PAD - 4, topY - 2, BOX_W + 8, BOX_H + 4, r);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore();
-    }
-
+    const PAD      = 8;
+    const LINE_H   = 16;
+    const MAX_LINES = 7;
+    const BOX_W    = 340;
+    const HINT_H   = 24;
+    const MSG_H    = MAX_LINES * LINE_H + PAD * 2; // 128
+    const BOX_H    = MSG_H + HINT_H;               // 152
+    const boxX     = 8;
+    const boxY     = this.canvas.height - 46 - BOX_H; // leave room for FPS/coords line below
+    // Panel background
     ctx.save();
-    ctx.font = '13px monospace';
-    ctx.textBaseline = 'top';
-    for (let i = 0; i < slice.length; i++) {
-      const msg  = slice[i];
-      const age  = now - msg.time;
-      const fade = age < FADE_START ? 1 : 1 - (age - FADE_START) / (FADE_END - FADE_START);
-      const alpha = Math.max(0, Math.min(1, fade));
-      const y = topY + i * LINE_H + 4;
-      // Name
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = '#f1c40f';
-      ctx.fillText(msg.name + ': ', PAD, y);
-      const nameW = ctx.measureText(msg.name + ': ').width;
-      ctx.fillStyle = '#f0e8d0';
-      // Clip message text to box width
-      const maxTextW = BOX_W - nameW - 4;
-      let text = msg.text;
-      while (ctx.measureText(text).width > maxTextW && text.length > 1) text = text.slice(0, -1);
-      ctx.fillText(text, PAD + nameW, y);
-    }
-    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(10,7,4,0.72)';
+    ctx.strokeStyle = 'rgba(139,105,20,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, BOX_W, BOX_H, 3);
+    ctx.fill();
+    ctx.stroke();
     ctx.restore();
 
-    // "Press Enter to chat" hint when no input active and there's multiplayer
+    // Merge notifications (game log) + player chat, sorted oldest→newest
+    const notifItems = this.notifications.messages.map(m => ({
+      text: m.text, color: m.color, time: m.time, isChat: false,
+    }));
+    const chatItems = this.chatMessages.map(m => ({
+      name: m.name, text: m.text, color: '#f0e8d0', time: m.time, isChat: true,
+    }));
+    const all   = [...notifItems, ...chatItems].sort((a, b) => a.time - b.time);
+    const total = all.length;
+    const maxOffset = Math.max(0, total - MAX_LINES);
+    // Clamp scroll in case messages expired
+    this._chatScrollOffset = Math.max(0, Math.min(maxOffset, this._chatScrollOffset));
+    const end   = total - this._chatScrollOffset;
+    const slice = all.slice(Math.max(0, end - MAX_LINES), end);
+    const hasMore = this._chatScrollOffset > 0; // older messages above current view
+
+    // Draw messages (oldest at top, newest at bottom)
+    ctx.save();
+    ctx.font = '12px monospace';
+    ctx.textBaseline = 'top';
+    const maxW = BOX_W - PAD * 2;
+    for (let i = 0; i < slice.length; i++) {
+      const msg = slice[i];
+      const y = boxY + PAD + i * LINE_H;
+      if (msg.isChat) {
+        const prefix = msg.name + ': ';
+        ctx.fillStyle = '#f1c40f';
+        ctx.fillText(prefix, boxX + PAD, y);
+        const prefixW = ctx.measureText(prefix).width;
+        ctx.fillStyle = '#f0e8d0';
+        let text = msg.text;
+        while (ctx.measureText(text).width > maxW - prefixW && text.length > 1) text = text.slice(0, -1);
+        ctx.fillText(text, boxX + PAD + prefixW, y);
+      } else {
+        ctx.fillStyle = msg.color;
+        let text = msg.text;
+        while (ctx.measureText(text).width > maxW && text.length > 1) text = text.slice(0, -1);
+        ctx.fillText(text, boxX + PAD, y);
+      }
+    }
+    // "Scroll up for more" indicator
+    if (hasMore) {
+      ctx.font = '10px monospace';
+      ctx.fillStyle = 'rgba(200,180,120,0.6)';
+      ctx.textAlign = 'right';
+      ctx.fillText(`▲ ${this._chatScrollOffset} more`, boxX + BOX_W - PAD, boxY + PAD);
+    }
+    ctx.restore();
+
+    // Separator between messages and hint/input row
+    const sepY = boxY + MSG_H;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(139,105,20,0.3)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(boxX + PAD, sepY);
+    ctx.lineTo(boxX + BOX_W - PAD, sepY);
+    ctx.stroke();
+    ctx.restore();
+
+    // Hint row (when input not active)
     if (!this.chatInputActive && this.network) {
       ctx.save();
       ctx.font = '11px monospace';
-      ctx.fillStyle = 'rgba(200,180,120,0.5)';
-      ctx.textBaseline = 'bottom';
-      ctx.fillText('Press Enter to chat', PAD, this.canvas.height - 56);
+      ctx.fillStyle = 'rgba(200,180,120,0.45)';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Press Enter to chat', boxX + PAD, sepY + HINT_H / 2);
       ctx.restore();
     }
   }
@@ -3750,6 +4007,8 @@ export class Game {
     net.on('chat_message', ({ name, message }) => {
       this.chatMessages.push({ name, text: message, time: Date.now() });
       if (this.chatMessages.length > 50) this.chatMessages.shift();
+      if (this._chatScrollOffset === 0) return; // already at bottom
+      // Keep scroll position so user doesn't lose their place (they can scroll back)
     });
   }
 

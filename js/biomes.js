@@ -130,3 +130,47 @@ export function isDangerZone(col, row) {
   return getBiome(col, row) === BIOMES.DANGER;
 }
 
+/**
+ * Returns biome blend information for a given tile coordinate.
+ * Within 8 tiles of a biome boundary, weight blends toward 0 (secondary biome
+ * has increasing influence). weight=1 means fully primary biome.
+ *
+ * Usage in tile assignment:
+ *   const blend = getBiomeBlend(c, r);
+ *   const usePrimary = rng() < blend.weight;
+ *   const biome = usePrimary ? blend.primary : blend.secondary;
+ *
+ * Returns { primary, secondary, weight }
+ *   primary   — biome name at (col, row)
+ *   secondary — biome name of the nearest neighbouring different biome
+ *               (falls back to primary if no boundary nearby)
+ *   weight    — 1.0 in the biome interior, blends to 0.0 at a boundary
+ */
+export function getBiomeBlend(col, row) {
+  const primary = getBiome(col, row);
+  const BLEND_RADIUS = 8;
+
+  let minDist = BLEND_RADIUS + 1;
+  let secondary = primary;
+
+  // Sample neighbours in a square BLEND_RADIUS window to find nearest boundary
+  for (let dr = -BLEND_RADIUS; dr <= BLEND_RADIUS; dr++) {
+    for (let dc = -BLEND_RADIUS; dc <= BLEND_RADIUS; dc++) {
+      const dist = Math.max(Math.abs(dc), Math.abs(dr)); // Chebyshev distance
+      if (dist === 0 || dist >= minDist) continue;
+      const nb = getBiome(col + dc, row + dr);
+      if (nb !== primary) {
+        minDist = dist;
+        secondary = nb;
+      }
+    }
+  }
+
+  // Weight is 1.0 in the interior; at the boundary (dist=1) it approaches 0
+  const weight = minDist > BLEND_RADIUS
+    ? 1.0
+    : minDist / BLEND_RADIUS;
+
+  return { primary, secondary, weight };
+}
+

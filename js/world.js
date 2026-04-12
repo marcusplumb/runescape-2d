@@ -3,6 +3,8 @@ import {
   TILES, SOLID_TILES, TREE_TILES,
 } from './constants.js';
 import { buildBiomeMap, getBiome, BIOMES } from './biomes.js';
+
+
 import { placeAllStructures } from './structures.js';
 
 // ── Seeded PRNG (mulberry32) ─────────────────────────
@@ -18,15 +20,16 @@ function makeRng(seed) {
   };
 }
 
-// Surface ore pockets — low-tier only. Higher ores are underground-only.
+// Biome ore tables — [common, rare]. Indexed by biome string key.
+// "common" spawns at most cluster seeds; "rare" appears at high rockCluster peaks.
 const BIOME_ORES = {
-  [BIOMES.PLAINS]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.FOREST]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.TUNDRA]:   [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
-  [BIOMES.SWAMP]:    [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.DESERT]:   [TILES.ROCK_COPPER, TILES.ROCK_TIN],
-  [BIOMES.VOLCANIC]: [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
-  [BIOMES.DANGER]:   [TILES.ROCK_TIN,    TILES.ROCK_COPPER],
+  [BIOMES.PLAINS]:   [TILES.ROCK_COPPER,  TILES.ROCK_TIN],
+  [BIOMES.FOREST]:   [TILES.ROCK_IRON,    TILES.ROCK_COPPER],
+  [BIOMES.TUNDRA]:   [TILES.ROCK_IRON,    TILES.ROCK_COAL],
+  [BIOMES.SWAMP]:    [TILES.ROCK_COAL,    TILES.ROCK_COPPER],
+  [BIOMES.DESERT]:   [TILES.ROCK_GOLD,    TILES.ROCK_COAL],
+  [BIOMES.VOLCANIC]: [TILES.ROCK_MITHRIL, TILES.ROCK_GOLD],
+  [BIOMES.DANGER]:   [TILES.ROCK_GOLD,    TILES.ROCK_MITHRIL],
 };
 
 export class World {
@@ -70,7 +73,16 @@ export class World {
         const v  = terrainNoise[r][c];
         const dv = detailNoise[r][c];
         // Blend terrain and detail for richer local variation
-        const t  = v * 0.75 + dv * 0.25;
+        let t  = v * 0.75 + dv * 0.25;
+
+        // ── Edge-water border ────────────────────────────────
+        // Fade terrain to minimum (water) within 40 tiles of any map border.
+        // Using nearest-edge distance (not center distance) ensures peripheral
+        // biomes like Tundra, Volcanic, and Danger are NOT crushed — their tiles
+        // are 100+ tiles from the actual map boundary and remain at full noise.
+        const edgeDist = Math.min(r, this.rows - 1 - r, c, this.cols - 1 - c);
+        t = t * Math.min(edgeDist / 40, 1.0);
+
         const biome = getBiome(c, r);
 
         switch (biome) {
@@ -151,6 +163,123 @@ export class World {
       }
     }
 
+    // ── Erosion pass (2 iterations) ───────────────────────
+    // Any GRASS/DIRT tile with 3+ adjacent WATER becomes SAND.
+    // Any SAND tile with 3+ adjacent WATER becomes WATER.
+    // Smooths beaches and creates gradual coastal transitions.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let r = 1; r < this.rows - 1; r++) {
+        for (let c = 1; c < this.cols - 1; c++) {
+          const t = map[r][c];
+          if (t !== TILES.GRASS && t !== TILES.DIRT && t !== TILES.SAND &&
+              t !== TILES.DARK_GRASS) continue;
+          const neighbors4 = [
+            map[r-1][c], map[r+1][c], map[r][c-1], map[r][c+1],
+          ];
+          const waterCount = neighbors4.filter(n => n === TILES.WATER).length;
+          if (waterCount >= 3) {
+            if (t === TILES.SAND) {
+              map[r][c] = TILES.WATER;
+            } else {
+              map[r][c] = TILES.SAND;
+            }
+          }
+        }
+      }
+    }
+
+    // ── Small island clusters ─────────────────────────────
+    // Scatter 6–12 island groups in open WATER areas, each at least
+    // 30 tiles from the main landmass.  Each island is a 5–9 tile
+    // circular patch with trees and a chance of a rare resource.
+    {
+      const islandCount = 6 + Math.floor(rng() * 7); // 6–12
+      const ISLAND_MIN_DIST = 30; // min tiles from nearest non-WATER tile
+      const candidates = [];
+
+      // Build candidate water tiles that are far enough from land
+      // Sample sparsely to keep generation fast
+      for (let r = 10; r < this.rows - 10; r += 3) {
+        for (let c = 10; c < this.cols - 10; c += 3) {
+          if (map[r][c] !== TILES.WATER) continue;
+          // Check a rough bounding box for land proximity
+          let farEnough = true;
+          outerCheck:
+          for (let dr = -ISLAND_MIN_DIST; dr <= ISLAND_MIN_DIST; dr += 4) {
+            for (let dc = -ISLAND_MIN_DIST; dc <= ISLAND_MIN_DIST; dc += 4) {
+              const nr = r + dr, nc = c + dc;
+              if (nr < 0 || nr >= this.rows || nc < 0 || nc >= this.cols) continue;
+              if (map[nr][nc] !== TILES.WATER) { farEnough = false; break outerCheck; }
+            }
+          }
+          if (farEnough) candidates.push({ r, c });
+        }
+      }
+
+      // Shuffle candidates and pick island centres
+      candidates.sort(() => rng() - 0.5);
+      const placed = [];
+      for (const cand of candidates) {
+        if (placed.length >= islandCount) break;
+        // Ensure islands are at least 20 tiles apart from each other
+        const tooClose = placed.some(p =>
+          Math.abs(p.r - cand.r) + Math.abs(p.c - cand.c) < 20
+        );
+        if (tooClose) continue;
+        placed.push(cand);
+
+        // Draw island using a circular brush (radius 2–4 tiles)
+        const radius = 2 + Math.floor(rng() * 3); // 2–4
+        for (let dr = -radius; dr <= radius; dr++) {
+          for (let dc = -radius; dc <= radius; dc++) {
+            const nr = cand.r + dr, nc = cand.c + dc;
+            if (nr < 0 || nr >= this.rows || nc < 0 || nc >= this.cols) continue;
+            if (dr * dr + dc * dc > radius * radius) continue; // circular shape
+            // Centre tiles are GRASS, ring tiles alternate GRASS/SAND
+            const distSq = dr * dr + dc * dc;
+            if (distSq <= (radius - 1) * (radius - 1)) {
+              map[nr][nc] = TILES.GRASS;
+            } else {
+              map[nr][nc] = TILES.SAND;
+            }
+          }
+        }
+
+        // Place 1–3 trees on the island
+        const treeCount = 1 + Math.floor(rng() * 3);
+        let treesPlaced = 0;
+        for (let attempt = 0; attempt < 20 && treesPlaced < treeCount; attempt++) {
+          const tr = cand.r + Math.floor((rng() * 2 - 1) * (radius - 1));
+          const tc = cand.c + Math.floor((rng() * 2 - 1) * (radius - 1));
+          if (tr >= 0 && tr < this.rows && tc >= 0 && tc < this.cols &&
+              map[tr][tc] === TILES.GRASS) {
+            map[tr][tc] = TILES.TREE;
+            treesPlaced++;
+          }
+        }
+
+        // 40% chance of a rare resource (ROCK_GOLD or FISH_SPOT)
+        if (rng() < 0.40) {
+          const rare = rng() < 0.5 ? TILES.ROCK_GOLD : TILES.FISH_SPOT;
+          // Place rare resource on a non-tree grass tile near centre
+          for (let attempt = 0; attempt < 10; attempt++) {
+            const rr = cand.r + Math.floor((rng() * 2 - 1) * Math.max(1, radius - 2));
+            const rc = cand.c + Math.floor((rng() * 2 - 1) * Math.max(1, radius - 2));
+            if (rr >= 0 && rr < this.rows && rc >= 0 && rc < this.cols &&
+                map[rr][rc] === TILES.GRASS) {
+              // FISH_SPOT must be in water — place it adjacent to shore instead
+              if (rare === TILES.FISH_SPOT) {
+                map[rr][rc] = TILES.FISH_SPOT;
+              } else {
+                map[rr][rc] = TILES.ROCK_GOLD;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
     // propGroundMap records the tile underneath each prop so the renderer can
     // draw the biome ground first, then the prop sprite on top.
     this.propGroundMap = new Map();
@@ -183,14 +312,16 @@ export class World {
             _setProp(r, c, TILES.TREE);
           }
         } else if (biome === BIOMES.TUNDRA) {
-          // Sparse snow trees in patches (snow background — not green, no water check needed)
-          if (t === TILES.SNOW && cn > 0.72 && rng() < 0.35) {
-            _setProp(r, c, TILES.TREE);
+          // Sparse trees on snow, ice, and frozen stone — radial gradient pushes most tundra to ICE
+          if ((t === TILES.SNOW || t === TILES.ICE || t === TILES.STONE) && cn > 0.68 && rng() < 0.30) {
+            _setProp(r, c, TILES.OAK_TREE);
           }
         } else if (biome === BIOMES.SWAMP) {
-          // Dead stumps in swamp — loose clusters
-          if (!adjWater && (t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS) && cn > 0.62 && rng() < 0.25) {
-            _setProp(r, c, TILES.STUMP);
+          // Willows grow in shallow swamp water; stumps on muddy ground
+          const onGround = (t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS || t === TILES.DIRT);
+          const inSwampWater = (t === TILES.SWAMP_WATER);
+          if ((onGround || inSwampWater) && cn > 0.58 && rng() < 0.18) {
+            _setProp(r, c, inSwampWater ? TILES.WILLOW_TREE : TILES.STUMP);
           }
         } else if (biome === BIOMES.DESERT) {
           // Cacti — sparse, only in small tight clusters (sand background — not green)
@@ -198,8 +329,9 @@ export class World {
             _setProp(r, c, TILES.CACTUS);
           }
         } else if (biome === BIOMES.DANGER || biome === BIOMES.VOLCANIC) {
-          // No trees, only dead stumps occasionally
-          if (t === TILES.DEAD_GRASS && cn > 0.76 && rng() < 0.10) {
+          // Charred stumps — radial gradient collapses peripheral tiles to LAVA/VOLCANIC_ROCK
+          if ((t === TILES.VOLCANIC_ROCK || t === TILES.DEAD_GRASS ||
+               t === TILES.DARK_GRASS   || t === TILES.LAVA) && cn > 0.76 && rng() < 0.10) {
             _setProp(r, c, TILES.STUMP);
           }
         } else {
@@ -313,20 +445,24 @@ export class World {
           continue;
         }
 
-        // Snowberry bush — Tundra only, on snow, sparse clusters
-        if (!nearWater && t === TILES.SNOW && biome === BIOMES.TUNDRA && rng() < 0.008) {
+        // Snowberry bush — Tundra only, on snow/ice/stone (radial gradient collapses most to ICE)
+        if (!nearWater && (t === TILES.SNOW || t === TILES.ICE || t === TILES.STONE) &&
+            biome === BIOMES.TUNDRA && rng() < 0.008) {
           _setProp(r, c, TILES.SNOWBERRY);
           continue;
         }
 
-        // Sulfur deposit — Volcanic biome only, on volcanic rock
-        if (!nearWater && t === TILES.VOLCANIC_ROCK && biome === BIOMES.VOLCANIC && rng() < 0.010) {
+        // Sulfur deposit — Volcanic biome only, on volcanic rock, lava, or dead grass
+        if (!nearWater && (t === TILES.VOLCANIC_ROCK || t === TILES.LAVA || t === TILES.DEAD_GRASS) &&
+            biome === BIOMES.VOLCANIC && rng() < 0.010) {
           _setProp(r, c, TILES.SULFUR_ROCK);
           continue;
         }
 
-        // Thorn bush — Danger zone only, on dead grass
-        if (!nearWater && t === TILES.DEAD_GRASS && biome === BIOMES.DANGER && rng() < 0.014) {
+        // Thorn bush — Danger zone only; peripheral tiles collapse to LAVA so include it
+        if (!nearWater && (t === TILES.DEAD_GRASS || t === TILES.DARK_GRASS ||
+            t === TILES.VOLCANIC_ROCK || t === TILES.LAVA) &&
+            biome === BIOMES.DANGER && rng() < 0.014) {
           _setProp(r, c, TILES.THORN_BUSH);
           continue;
         }
@@ -352,10 +488,12 @@ export class World {
         if (!ores) continue;
 
         // Ores spawn on stone-like or open ground tiles
-        const stoneBase = (t === TILES.STONE || t === TILES.VOLCANIC_ROCK);
+        // LAVA added to stoneBase: Volcanic/Danger tiles collapse to LAVA via radial gradient
+        // ICE added to groundBase: Tundra tiles collapse to ICE via radial gradient
+        const stoneBase = (t === TILES.STONE || t === TILES.VOLCANIC_ROCK || t === TILES.LAVA);
         const groundBase = (
           t === TILES.DIRT || t === TILES.GRASS ||
-          t === TILES.DARK_GRASS || t === TILES.DEAD_GRASS || t === TILES.SNOW
+          t === TILES.DARK_GRASS || t === TILES.DEAD_GRASS || t === TILES.SNOW || t === TILES.ICE
         );
 
         // Surface ores are rare pockets — only at the very peak of stone clusters.
@@ -383,7 +521,10 @@ export class World {
     for (let r = 1; r < this.rows - 1; r++) {
       for (let c = 1; c < this.cols - 1; c++) {
         const t = map[r][c];
-        const isWater = (t === TILES.WATER || t === TILES.SWAMP_WATER);
+        // Include LAVA for Volcanic biome (lava eel / magma carp fishing)
+        const biomeHere = getBiome(c, r);
+        const isLava  = (t === TILES.LAVA && biomeHere === BIOMES.VOLCANIC);
+        const isWater = (t === TILES.WATER || t === TILES.SWAMP_WATER || isLava);
         if (!isWater) continue;
 
         const neighbors = [
@@ -391,10 +532,14 @@ export class World {
           map[r]?.[c - 1], map[r]?.[c + 1],
         ];
         const hasLand = neighbors.some(n =>
-          n !== undefined && n !== TILES.WATER && n !== TILES.SWAMP_WATER &&
+          n !== undefined && n !== TILES.WATER && n !== TILES.SWAMP_WATER && n !== TILES.LAVA &&
           !SOLID_TILES.has(n)
         );
-        if (!hasLand || rng() > 0.055) continue;
+        // For lava spots, also accept volcanic rock / stone as a "bank"
+        const hasLavaEdge = isLava && neighbors.some(n =>
+          n === TILES.VOLCANIC_ROCK || n === TILES.STONE || n === TILES.DEAD_GRASS
+        );
+        if ((!hasLand && !hasLavaEdge) || rng() > 0.055) continue;
 
         map[r][c] = TILES.FISH_SPOT;
       }
@@ -459,6 +604,58 @@ export class World {
 
     // ── Phase 10: Dungeon entrances ──────────────────────
     this._placeDungeons(map, spawnC, spawnR);
+
+    // ── Phase 11: World entry road stubs ─────────────────────────────────
+    // Short stone roads extending from the kingdom toward each map edge,
+    // implying the world continues beyond the visible area.
+    {
+      const kingdomC = Math.floor(this.cols / 2);
+      const kingdomR = 208; // matches STRUCTURE_NODES kingdom node r:208
+      const STUB_LEN = 20;
+      const STUB_W   = 2;
+      const roadTile = TILES.STONE; // kingdom roads are stone
+
+      // North stub
+      for (let i = 0; i < STUB_LEN; i++) {
+        for (let w = 0; w < STUB_W; w++) {
+          const r = kingdomR - i, c = kingdomC + w;
+          if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+            const t = map[r][c];
+            if (t !== TILES.WALL && t !== TILES.WATER && t !== TILES.LAVA) map[r][c] = roadTile;
+          }
+        }
+      }
+      // South stub
+      for (let i = 0; i < STUB_LEN; i++) {
+        for (let w = 0; w < STUB_W; w++) {
+          const r = kingdomR + 60 + i, c = kingdomC + w;
+          if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+            const t = map[r][c];
+            if (t !== TILES.WALL && t !== TILES.WATER && t !== TILES.LAVA) map[r][c] = roadTile;
+          }
+        }
+      }
+      // East stub
+      for (let i = 0; i < STUB_LEN; i++) {
+        for (let w = 0; w < STUB_W; w++) {
+          const c = kingdomC + 38 + i, r = kingdomR + 30 + w;
+          if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+            const t = map[r][c];
+            if (t !== TILES.WALL && t !== TILES.WATER && t !== TILES.LAVA) map[r][c] = roadTile;
+          }
+        }
+      }
+      // West stub
+      for (let i = 0; i < STUB_LEN; i++) {
+        for (let w = 0; w < STUB_W; w++) {
+          const c = kingdomC - 38 - i, r = kingdomR + 30 + w;
+          if (r >= 0 && r < this.rows && c >= 0 && c < this.cols) {
+            const t = map[r][c];
+            if (t !== TILES.WALL && t !== TILES.WATER && t !== TILES.LAVA) map[r][c] = roadTile;
+          }
+        }
+      }
+    }
 
     return map;
   }

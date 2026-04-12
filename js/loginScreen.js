@@ -265,6 +265,13 @@ export function showLoginScreen() {
           return;
         }
 
+        // Offline / dev bypass — skips all server calls
+        if (username === 'Admin' && password === '1234') {
+          overlay.remove();
+          resolve({ username: 'Admin' });
+          return;
+        }
+
         btn.disabled = true;
         btn.textContent = 'Logging in…';
 

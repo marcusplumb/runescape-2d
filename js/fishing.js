@@ -248,6 +248,33 @@ export const FISH_SPECIES = [
     color: '#c03010', biomes: ['volcanic'],
   },
 
+  // ── Swamp additions ───────────────────────────────────
+  {
+    id: 'bog_eel',      name: 'Bog Eel',
+    get item() { return ITEMS.RAW_BOG_EEL; },
+    minLevel: 22, xp: 55,  baseValue: 18,
+    wMin: 0.20, wMax: 1.80, rarity: 'Uncommon',  rarityWeight: 25,
+    color: '#4a6838', biomes: ['swamp'],
+  },
+
+  // ── Desert additions ──────────────────────────────────
+  {
+    id: 'sand_goby',    name: 'Sand Goby',
+    get item() { return ITEMS.RAW_SAND_GOBY; },
+    minLevel: 8,  xp: 45,  baseValue: 14,
+    wMin: 0.04, wMax: 0.25, rarity: 'Common',    rarityWeight: 55,
+    color: '#d8b870', biomes: ['desert'],
+  },
+
+  // ── Danger Zone (dark deep water) ────────────────────
+  {
+    id: 'shadowfin',    name: 'Shadowfin',
+    get item() { return ITEMS.RAW_SHADOWFIN; },
+    minLevel: 55, xp: 80,  baseValue: 70,
+    wMin: 1.00, wMax: 8.00, rarity: 'Rare',       rarityWeight: 10,
+    color: '#1e1e30', biomes: ['danger'],
+  },
+
   // ── Underground (caves / dungeons) ───────────────────
   {
     id: 'cave_fish',    name: 'Cave Fish',

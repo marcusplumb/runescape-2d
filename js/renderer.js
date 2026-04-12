@@ -78,6 +78,98 @@ const PROP_TILES = new Set([
 const CHUNK_TILES = 16;                        // tiles per chunk side
 const CHUNK_PX    = CHUNK_TILES * TILE_SIZE;   // pixels per chunk side (512)
 
+// ── Biome-aware colour palettes for structure tiles ──────────────────────────
+// Palettes are applied during _renderChunk() (baked into the OffscreenCanvas).
+// Chunk cache is per-world-object — a new world always rebuilds all chunks from scratch.
+const BIOME_TILE_PALETTES = {
+  forest: {
+    wall:    '#4a3728',
+    floor:   '#5c4a2a',
+    stone:   '#6b7c5a',
+    path:    '#7a6040',
+    door:    '#7a5c3a',
+    roof:    '#826428',      // dark mossy thatch
+    roofRgb: [130, 100, 40],
+  },
+  plains: {
+    wall:    '#c8a878',
+    floor:   '#a08050',
+    stone:   '#9a9a8a',
+    path:    '#b09060',
+    door:    '#a06030',
+    roof:    '#c29838',      // golden straw thatch
+    roofRgb: [194, 152, 56],
+  },
+  desert: {
+    wall:    '#d4a855',
+    floor:   '#c8983a',
+    stone:   '#b89060',
+    path:    '#d4b870',
+    door:    '#e4c870',
+    roof:    '#a8702a',      // terracotta flat roof
+    roofRgb: [168, 112, 42],
+  },
+  tundra: {
+    wall:    '#8090a0',
+    floor:   '#909cac',
+    stone:   '#7a8898',
+    path:    '#a0b0c0',
+    door:    '#b0c4d4',
+    roof:    '#607890',      // icy grey-blue stone slab
+    roofRgb: [96, 120, 144],
+  },
+  swamp: {
+    wall:    '#4a5a38',
+    floor:   '#506040',
+    stone:   '#5a6848',
+    path:    '#606840',
+    door:    '#6a7a50',
+    roof:    '#485830',      // dark wet moss thatch
+    roofRgb: [72, 88, 48],
+  },
+  volcanic: {
+    wall:    '#6a2218',
+    floor:   '#3a2828',
+    stone:   '#585040',
+    path:    '#504040',
+    door:    '#8a3828',
+    roof:    '#6e230c',      // scorched dark red stone
+    roofRgb: [110, 35, 12],
+  },
+  royal: {
+    wall:    '#b8a060',
+    floor:   '#d0b880',
+    stone:   '#c0a870',
+    path:    '#c8b078',
+    door:    '#d8c888',
+    roof:    '#283c8c',      // royal blue
+    roofRgb: [40, 60, 140],
+  },
+};
+
+// Structure tile categories — only these get biome-palette colour overrides.
+// Terrain tiles (GRASS, WATER, SAND, SNOW, LAVA, etc.) are never remapped.
+const STRUCTURE_WALL_TILES  = new Set([TILES.WALL, TILES.PLASTER_WALL]);
+const STRUCTURE_FLOOR_TILES = new Set([TILES.DIRT, TILES.STONE, TILES.WET_STONE, TILES.STONE_TILE]);
+const STRUCTURE_PATH_TILES  = new Set([TILES.PATH]);
+const STRUCTURE_DOOR_TILES  = new Set([TILES.DOOR]);
+
+/**
+ * Returns true when (col, row) is within 2 tiles of any wall tile.
+ * Used to decide if a floor tile is inside a structure (and should use the
+ * biome palette floor colour rather than the generic terrain colour).
+ * Defined at module level so it isn't re-created on every _renderChunk call.
+ */
+function _hasAdjacentWall(world, col, row) {
+  for (let dr = -2; dr <= 2; dr++) {
+    for (let dc = -2; dc <= 2; dc++) {
+      const t = world.getTile(col + dc, row + dr);
+      if (t === TILES.WALL || t === TILES.PLASTER_WALL) return true;
+    }
+  }
+  return false;
+}
+
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
@@ -241,16 +333,29 @@ export class Renderer {
     const OVER_TOP = TILE_SIZE, OVER_BOT = TILE_SIZE >> 2, OVER_SIDE = TILE_SIZE;
 
     if (world.roofBounds) {
-      for (const { c, r, rW, rH, bC, bR, bW, bH } of world.roofBounds) {
+      for (const { c, r, rW, rH, bC, bR, bW, bH, roofTile } of world.roofBounds) {
         if (c + rW < startCol - 2 || c > endCol + 2) continue;
         if (r + rH < startRow - 2 || r > endRow + 2) continue;
         if (playerCol >= bC && playerCol < bC + bW &&
             playerRow >= bR && playerRow < bR + bH) continue;
-        ctx.drawImage(
-          this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT),
-          c * TILE_SIZE - OVER_SIDE,
-          r * TILE_SIZE - OVER_TOP,
-        );
+        const palette = BIOME_TILE_PALETTES[getBiome(c, r)] ?? BIOME_TILE_PALETTES.plains;
+        if (roofTile === TILES.THATCH_ROOF || roofTile === undefined) {
+          const [rr0, rg0, rb0] = palette.roofRgb;
+          ctx.drawImage(
+            this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT, rr0, rg0, rb0),
+            c * TILE_SIZE - OVER_SIDE,
+            r * TILE_SIZE - OVER_TOP,
+          );
+        } else {
+          // Flat roof — draw a solid colour rectangle covering the building footprint
+          ctx.fillStyle = palette.roof;
+          ctx.fillRect(
+            bC * TILE_SIZE,
+            bR * TILE_SIZE,
+            bW * TILE_SIZE,
+            bH * TILE_SIZE,
+          );
+        }
       }
     } else {
       for (let r = startRow - 1; r <= endRow; r++) {
@@ -260,8 +365,9 @@ export class Renderer {
           if (world.getTile(c, r - 1) === TILES.THATCH_ROOF) continue;
           let rW = 0; while (world.getTile(c + rW, r) === TILES.THATCH_ROOF) rW++;
           let rH = 0; while (world.getTile(c, r + rH) === TILES.THATCH_ROOF) rH++;
+          const [rr0, rg0, rb0] = (BIOME_TILE_PALETTES[getBiome(c, r)] ?? BIOME_TILE_PALETTES.plains).roofRgb;
           ctx.drawImage(
-            this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT),
+            this._getOrBuildRoofTexture(rW * TILE_SIZE + OVER_SIDE * 2, rH * TILE_SIZE + OVER_TOP + OVER_BOT, rr0, rg0, rb0),
             c * TILE_SIZE - OVER_SIDE,
             r * TILE_SIZE - OVER_TOP,
           );
@@ -283,15 +389,43 @@ export class Renderer {
         const tile = world.getTile(col, row);
         const px   = dc * TILE_SIZE;
         const py   = dr * TILE_SIZE;
+        // Resolve the biome palette for this tile position once, used below.
+        const _biome   = getBiome(col, row);
+        const _palette = BIOME_TILE_PALETTES[_biome] ?? BIOME_TILE_PALETTES.plains;
+
         if (PROP_TILES.has(tile)) {
           // Render the underlying ground tile first so the prop sits on top of it
           const groundId = world.propGroundMap?.get(`${col},${row}`) ?? TILES.DIRT;
-          ctx.fillStyle = TILE_COLORS[groundId] || '#000';
+          // Apply biome palette to structure floor tiles under props
+          let groundColor = TILE_COLORS[groundId] || '#000';
+          if (STRUCTURE_FLOOR_TILES.has(groundId) && _hasAdjacentWall(world, col, row)) {
+            groundColor = _palette.floor;
+          } else if (STRUCTURE_WALL_TILES.has(groundId)) {
+            groundColor = _palette.wall;
+          } else if (STRUCTURE_PATH_TILES.has(groundId)) {
+            groundColor = _palette.path;
+          } else if (STRUCTURE_DOOR_TILES.has(groundId)) {
+            groundColor = _palette.door;
+          }
+          ctx.fillStyle = groundColor;
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
           if (TILE_HAS_DETAIL.has(groundId) && !ANIMATED_TILES.has(groundId))
             this._drawTileDetail(ctx, groundId, px, py, col, row, world);
         } else {
-          ctx.fillStyle = TILE_COLORS[tile] || '#000';
+          // Apply biome palette override for structure tiles only
+          let tileColor = TILE_COLORS[tile] || '#000';
+          if (STRUCTURE_WALL_TILES.has(tile)) {
+            tileColor = _palette.wall;
+          } else if (STRUCTURE_DOOR_TILES.has(tile)) {
+            tileColor = _palette.door;
+          } else if (STRUCTURE_PATH_TILES.has(tile)) {
+            tileColor = _palette.path;
+          } else if (tile === TILES.ROOF || tile === TILES.THATCH_ROOF) {
+            tileColor = _palette.roof;  // base color; THATCH_ROOF overlay drawn on top
+          } else if (STRUCTURE_FLOOR_TILES.has(tile) && _hasAdjacentWall(world, col, row)) {
+            tileColor = _palette.floor;
+          }
+          ctx.fillStyle = tileColor;
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
         // THATCH_ROOF and ROOF detail are replaced by the multi-tile overlay pass in drawWorld
@@ -310,14 +444,14 @@ export class Renderer {
    *  tighter at the top (far), wider at the bottom (near). A visible eave fascia at the bottom
    *  gives depth, as if you're looking slightly upward at the front overhang.
    */
-  _getOrBuildRoofTexture(pw, ph) {
-    const key = `${pw}x${ph}`;
+  _getOrBuildRoofTexture(pw, ph, r0 = 194, g0 = 152, b0 = 58) {
+    const key = `${pw}x${ph}:${r0},${g0},${b0}`;
     if (this._roofCache.has(key)) return this._roofCache.get(key);
 
     const oc  = new OffscreenCanvas(pw, ph);
     const ctx = oc.getContext('2d');
     const w = pw, h = ph;
-    const R0 = 194, G0 = 152, B0 = 58;   // golden straw base
+    const R0 = r0, G0 = g0, B0 = b0;   // biome-specific base colour
 
     // ── Main surface gradient: dark at top (ridge/far) → bright at bottom (eave/near) ──
     const gMain = ctx.createLinearGradient(0, 0, 0, h);
@@ -5078,28 +5212,67 @@ export class Renderer {
     const row = Math.floor(player.cy / TILE_SIZE);
     ctx.fillText(`Tile: (${col}, ${row})  FPS: ${fps}`, 14, this.canvas.height - 16);
 
-    // Top-left: HP bar
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    ctx.fillRect(8, 8, 140, 28);
-    ctx.fillStyle = '#333';
-    ctx.fillRect(12, 12, 132, 20);
-    const hpRatio = player.hp / player.maxHp;
-    ctx.fillStyle = hpRatio > 0.5 ? '#27ae60' : hpRatio > 0.25 ? '#f39c12' : '#c0392b';
-    ctx.fillRect(12, 12, 132 * hpRatio, 20);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(`HP: ${player.hp}/${player.maxHp}`, 78, 27);
+    // Top-left: HP bar (styled)
+    const hpRatio  = Math.max(0, Math.min(1, player.hp / player.maxHp));
+    const critical = hpRatio <= 0.25;
+    const HP_PW = 164, HP_PH = 34;
+    const HP_PX = 8,   HP_PY = 8;
+    const BAR_X = HP_PX + 26, BAR_Y = HP_PY + 9;
+    const BAR_W = HP_PW - 34, BAR_H = 16;
 
-    // Bottom-centre hint
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
-    const hintW = 440;
-    const hintX = (this.canvas.width - hintW) / 2;
-    ctx.fillRect(hintX, this.canvas.height - 34, hintW, 26);
-    ctx.fillStyle = '#aaa';
-    ctx.font = '11px monospace';
+    ctx.save();
+
+    // Panel background
+    ctx.fillStyle = 'rgba(12,8,4,0.82)';
+    ctx.strokeStyle = critical ? '#c0392b' : '#7a5c1e';
+    ctx.lineWidth   = critical ? 2 : 1;
+    ctx.beginPath();
+    ctx.roundRect(HP_PX, HP_PY, HP_PW, HP_PH, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // Bar track
+    ctx.fillStyle = '#1a0808';
+    ctx.beginPath();
+    ctx.roundRect(BAR_X, BAR_Y, BAR_W, BAR_H, 3);
+    ctx.fill();
+
+    // Bar fill — gradient shifts green→orange→red
+    if (hpRatio > 0) {
+      const grad = ctx.createLinearGradient(BAR_X, 0, BAR_X + BAR_W * hpRatio, 0);
+      if (hpRatio > 0.5) {
+        grad.addColorStop(0, '#145c22'); grad.addColorStop(1, '#27ae60');
+      } else if (hpRatio > 0.25) {
+        grad.addColorStop(0, '#8b3a00'); grad.addColorStop(1, '#e67e22');
+      } else {
+        grad.addColorStop(0, '#5c0000'); grad.addColorStop(1, '#e74c3c');
+      }
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.roundRect(BAR_X, BAR_Y, BAR_W * hpRatio, BAR_H, 3);
+      ctx.fill();
+      // Shine
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.fillRect(BAR_X, BAR_Y, BAR_W * hpRatio, BAR_H / 2);
+    }
+
+    // Heart icon — pulses red when critical
+    if (critical) ctx.globalAlpha = 0.65 + 0.35 * Math.abs(Math.sin(Date.now() / 350));
+    ctx.font = '15px serif';
     ctx.textAlign = 'center';
-    ctx.fillText('WASD/click to move • Click mobs to fight • [I]/[TAB]/[E] Panel tabs • [ESC] Cancel', this.canvas.width / 2, this.canvas.height - 16);
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = critical ? '#e74c3c' : '#c0392b';
+    ctx.fillText('♥', HP_PX + 13, HP_PY + HP_PH / 2);
+    ctx.globalAlpha = 1;
+
+    // HP text
+    ctx.font = 'bold 10px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(`${player.hp} / ${player.maxHp}`, BAR_X + BAR_W / 2, BAR_Y + BAR_H / 2);
+
+    ctx.restore();
 
     // XP progress cards (top centre, stacked)
     if (xpFlashes && xpFlashes.length > 0) {
@@ -5417,7 +5590,7 @@ export class Renderer {
      ═══════════════════════════════════════════════════════ */
 
   /** Draw one crafting recipe row: icon, name/level, ingredients, Craft button. */
-  _drawForgeRow(ctx, px, rowY, pw, rowH, recipe, canCraft, skillLevel) {
+  _drawForgeRow(ctx, px, rowY, pw, rowH, recipe, canCraft, skillLevel, smithMode = false) {
     // Row separator
     ctx.strokeStyle = 'rgba(90,50,10,0.35)';
     ctx.lineWidth = 1;
@@ -5461,21 +5634,59 @@ export class Renderer {
       ingX += ctx.measureText(label).width + 14;
     }
 
-    // Craft button
-    const btnW = 62;
-    const btnX = px + pw - btnW - 8;
-    const btnY = rowY + Math.floor((rowH - 24) / 2);
-    ctx.fillStyle = (!locked && canCraft) ? '#7a3a00' : '#333';
-    this._roundRect(ctx, btnX, btnY, btnW, 24, 4);
-    ctx.fill();
-    ctx.strokeStyle = (!locked && canCraft) ? '#b7410e' : '#555';
-    ctx.lineWidth = 1;
-    this._roundRect(ctx, btnX, btnY, btnW, 24, 4);
-    ctx.stroke();
-    ctx.fillStyle = (!locked && canCraft) ? '#ff8c42' : '#555';
-    ctx.font = 'bold 11px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Forge', btnX + btnW / 2, btnY + 16);
+    const btnRowY = rowY + Math.floor((rowH - 24) / 2);
+
+    if (smithMode) {
+      // Single "Smith" button
+      const bx = px + pw - 70;
+      const enabled = !locked && canCraft;
+      ctx.fillStyle = enabled ? '#1a3a5a' : '#141414';
+      this._roundRect(ctx, bx, btnRowY, 62, 24, 4);
+      ctx.fill();
+      ctx.strokeStyle = enabled ? '#4a7ab7' : '#2a2a2a';
+      ctx.lineWidth = 1;
+      this._roundRect(ctx, bx, btnRowY, 62, 24, 4);
+      ctx.stroke();
+      ctx.fillStyle = enabled ? '#78b4ff' : '#445566';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Smith', bx + 31, btnRowY + 16);
+    } else {
+      // Quantity buttons: 1× | 5× | 15×
+      const BTN_W = 38, BTN_GAP = 3;
+      const SMELT_QTYS = [
+        { qty: 1,  label: '1×',  levelReq: 1  },
+        { qty: 5,  label: '5×',  levelReq: 10 },
+        { qty: 15, label: '15×', levelReq: 25 },
+      ];
+      for (let i = 0; i < SMELT_QTYS.length; i++) {
+        const q = SMELT_QTYS[i];
+        const bx = px + pw - 8 - (SMELT_QTYS.length - i) * BTN_W - (SMELT_QTYS.length - i - 1) * BTN_GAP;
+        const qLocked = skillLevel < q.levelReq;
+        const enabled  = !locked && !qLocked && canCraft;
+        ctx.fillStyle = enabled ? '#7a3a00' : (qLocked ? '#141414' : '#2a2020');
+        this._roundRect(ctx, bx, btnRowY, BTN_W, 24, 4);
+        ctx.fill();
+        ctx.strokeStyle = enabled ? '#b7410e' : (qLocked ? '#2a2a2a' : '#443030');
+        ctx.lineWidth = 1;
+        this._roundRect(ctx, bx, btnRowY, BTN_W, 24, 4);
+        ctx.stroke();
+        if (qLocked) {
+          ctx.fillStyle = '#444';
+          ctx.font = 'bold 9px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(q.label, bx + BTN_W / 2, btnRowY + 10);
+          ctx.fillStyle = '#553333';
+          ctx.font = '8px monospace';
+          ctx.fillText(`lv${q.levelReq}`, bx + BTN_W / 2, btnRowY + 20);
+        } else {
+          ctx.fillStyle = enabled ? '#ff8c42' : '#665544';
+          ctx.font = 'bold 11px monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(q.label, bx + BTN_W / 2, btnRowY + 16);
+        }
+      }
+    }
   }
 
   drawSmeltPanel(recipes, inventory, skills) {
@@ -5627,7 +5838,7 @@ export class Renderer {
         inventory.count(item().id) >= qty
       );
       this._drawForgeRow(ctx, px, contentY + i * FORGE_ROW_H, FORGE_PW, FORGE_ROW_H,
-        recipe, canCraft, forgeLevel);
+        recipe, canCraft, forgeLevel, true);
     }
   }
 
@@ -6104,14 +6315,19 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.fillText('Smelting...', px + PW / 2, py + 34);
 
-    // Recipe name
+    // Recipe name + bar count
     ctx.fillStyle = '#ddd';
     ctx.font = '13px monospace';
-    ctx.fillText(recipe.name, px + PW / 2, py + 56);
+    if (action.total > 1) {
+      const curBar = action.total - action.remaining + 1;
+      ctx.fillText(`${recipe.name}  —  Bar ${curBar} of ${action.total}`, px + PW / 2, py + 56);
+    } else {
+      ctx.fillText(recipe.name, px + PW / 2, py + 56);
+    }
 
     // ── Furnace illustration ──
     const fx = px + PW / 2;
-    const fy = py + 80;
+    const fy = py + 120;
 
     // Stone body
     ctx.fillStyle = '#484848'; ctx.fillRect(fx - 40, fy, 80, 55);
@@ -6237,10 +6453,186 @@ export class Renderer {
     ctx.textAlign = 'center';
     ctx.fillText(`${Math.floor(prog * 100)}%`, pbX + pbW / 2, pbY + 21);
 
-    // Bottom label
+    // Bottom labels
     ctx.fillStyle = '#666';
     ctx.font = '10px monospace';
-    ctx.fillText(`Forgery xp on completion: +${recipe.xp}`, pbX + pbW / 2, py + PH - 14);
+    ctx.textAlign = 'center';
+    if (action.total > 1) {
+      const slowPct = Math.round((action.duration / action.baseDuration - 1) * 100);
+      const slowStr = slowPct > 0 ? `  •  +${slowPct}% slower per bar` : '';
+      ctx.fillText(`${action.remaining} bar(s) remaining${slowStr}`, pbX + pbW / 2, py + PH - 30);
+    }
+    ctx.fillText(`Forgery xp per bar: +${recipe.xp}`, pbX + pbW / 2, py + PH - 14);
+
+    ctx.textAlign = 'left';
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     SMITHING PROGRESS OVERLAY
+     ═══════════════════════════════════════════════════════ */
+  drawSmithingProgress(action, elapsed) {
+    const ctx = this.ctx;
+    const W = this.canvas.width, H = this.canvas.height;
+    const prog = Math.min(action.progress, 1);
+    const recipe = action.recipe;
+
+    // Dark overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(0, 0, W, H);
+
+    // Central panel
+    const PW = 400, PH = 300;
+    const px = Math.floor((W - PW) / 2);
+    const py = Math.floor((H - PH) / 2);
+
+    ctx.fillStyle = 'rgba(4,8,16,0.97)';
+    this._roundRect(ctx, px, py, PW, PH, 12);
+    ctx.fill();
+
+    // Animated steel-blue border
+    const borderGlow = 0.55 + 0.35 * Math.sin(elapsed * 5);
+    ctx.strokeStyle = `rgba(80,160,255,${borderGlow})`;
+    ctx.lineWidth = 2;
+    this._roundRect(ctx, px, py, PW, PH, 12);
+    ctx.stroke();
+
+    // Inner top accent
+    const topGrad = ctx.createLinearGradient(px, py, px + PW, py);
+    topGrad.addColorStop(0,   'rgba(0,80,200,0)');
+    topGrad.addColorStop(0.5, 'rgba(80,160,255,0.2)');
+    topGrad.addColorStop(1,   'rgba(0,80,200,0)');
+    ctx.fillStyle = topGrad;
+    ctx.fillRect(px, py, PW, 3);
+
+    // Title
+    ctx.fillStyle = '#6ab0ff';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Smithing...', px + PW / 2, py + 34);
+
+    // Recipe name
+    ctx.fillStyle = '#ddd';
+    ctx.font = '13px monospace';
+    ctx.fillText(recipe.name, px + PW / 2, py + 56);
+
+    // ── Anvil illustration ──
+    const ax = px + PW / 2 - 20;
+    const ay = py + 105;
+
+    // Anvil base
+    ctx.fillStyle = '#3a3a3a';
+    ctx.fillRect(ax - 28, ay + 42, 76, 12);
+    // Anvil body
+    ctx.fillStyle = '#484848';
+    ctx.fillRect(ax - 18, ay + 22, 56, 20);
+    // Anvil horn
+    ctx.fillStyle = '#404040';
+    ctx.beginPath();
+    ctx.moveTo(ax - 18, ay + 22);
+    ctx.lineTo(ax - 18, ay + 36);
+    ctx.lineTo(ax - 42, ay + 36);
+    ctx.closePath();
+    ctx.fill();
+    // Anvil top face
+    ctx.fillStyle = '#606060';
+    ctx.fillRect(ax - 18, ay + 18, 56, 6);
+    ctx.fillStyle = '#707070';
+    ctx.fillRect(ax - 18, ay + 18, 56, 2);
+
+    // Hot metal piece on anvil
+    const metalGlow = 0.6 + 0.4 * Math.sin(elapsed * 6.2);
+    ctx.fillStyle = `rgba(255,${Math.floor(100 + 80 * metalGlow)},0,0.9)`;
+    ctx.fillRect(ax, ay + 10, 30, 10);
+    ctx.fillStyle = `rgba(255,${Math.floor(200 + 55 * metalGlow)},50,0.7)`;
+    ctx.fillRect(ax + 4, ay + 11, 22, 6);
+
+    // ── Hammer (swings on elapsed cycle) ──
+    const hammerCycle = (elapsed * 2.0) % 1.0;
+    const hammerAngle = Math.sin(hammerCycle * Math.PI * 2) * 0.45;
+    const hammerPivotX = ax + 52;
+    const hammerPivotY = ay + 8;
+    ctx.save();
+    ctx.translate(hammerPivotX, hammerPivotY);
+    ctx.rotate(hammerAngle);
+    ctx.fillStyle = '#6b3a1a';
+    ctx.fillRect(-3, 0, 6, 38);
+    ctx.fillStyle = '#787878';
+    ctx.fillRect(-10, -12, 20, 16);
+    ctx.fillStyle = '#999';
+    ctx.fillRect(-10, -12, 20, 4);
+    ctx.restore();
+
+    // Sparks near impact
+    const nearImpact = Math.abs(Math.sin(hammerCycle * Math.PI)) > 0.92;
+    if (nearImpact) {
+      for (let i = 0; i < 8; i++) {
+        const sa = (i / 8) * Math.PI + Math.PI * 0.5;
+        const sr = 8 + (i % 3) * 5;
+        const spX = ax + 15 + Math.cos(sa) * sr;
+        const spY = ay + 16 + Math.sin(sa) * sr * 0.4;
+        ctx.fillStyle = `rgba(255,${180 + i * 9},0,${0.8 - i * 0.08})`;
+        ctx.fillRect(Math.round(spX), Math.round(spY), 2, 2);
+      }
+    }
+
+    // ── Output item preview ──
+    const barPX = px + PW - 105;
+    const barPY = ay + 10;
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Result:', barPX + 40, barPY - 4);
+    ctx.fillStyle = 'rgba(10,20,40,0.8)';
+    this._roundRect(ctx, barPX + 10, barPY, 60, 60, 4);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(80,160,255,0.6)';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, barPX + 10, barPY, 60, 60, 4);
+    ctx.stroke();
+    if (recipe.output) {
+      const outItem = recipe.output();
+      if (outItem && outItem.draw) outItem.draw(ctx, barPX + 10, barPY, 60);
+    }
+
+    // ── Progress bar ──
+    const pbX = px + 24, pbY = py + PH - 70;
+    const pbW = PW - 48, pbH = 30;
+
+    ctx.fillStyle = '#020810';
+    this._roundRect(ctx, pbX, pbY, pbW, pbH, 8);
+    ctx.fill();
+    ctx.strokeStyle = '#0a2040';
+    ctx.lineWidth = 1;
+    this._roundRect(ctx, pbX, pbY, pbW, pbH, 8);
+    ctx.stroke();
+
+    const fillW = Math.max(4, pbW * prog);
+    const steelG = ctx.createLinearGradient(pbX, pbY, pbX + pbW, pbY);
+    steelG.addColorStop(0,   '#003080');
+    steelG.addColorStop(0.4, '#1a6acc');
+    steelG.addColorStop(0.8, '#3a9aee');
+    steelG.addColorStop(1,   '#7acfff');
+    ctx.fillStyle = steelG;
+    this._roundRect(ctx, pbX, pbY, fillW, pbH, 8);
+    ctx.fill();
+
+    if (prog > 0.02) {
+      const edgeX = pbX + fillW - 6;
+      const edgeGlow = ctx.createLinearGradient(edgeX, pbY, edgeX + 10, pbY);
+      edgeGlow.addColorStop(0, 'rgba(180,220,255,0.6)');
+      edgeGlow.addColorStop(1, 'rgba(180,220,255,0)');
+      ctx.fillStyle = edgeGlow;
+      ctx.fillRect(edgeX, pbY, 10, pbH);
+    }
+
+    ctx.fillStyle = prog > 0.45 ? '#020810' : '#88ccff';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${Math.floor(prog * 100)}%`, pbX + pbW / 2, pbY + 21);
+
+    ctx.fillStyle = '#666';
+    ctx.font = '10px monospace';
+    ctx.fillText(`Forgery xp: +${recipe.xp}`, pbX + pbW / 2, py + PH - 14);
 
     ctx.textAlign = 'left';
   }
@@ -7052,6 +7444,232 @@ export class Renderer {
       ctx.textAlign = 'left';
       ctx.fillText(opt.label, px + 10, oy + 17);
     });
+    ctx.textAlign = 'left';
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     BOTTOM HUD (always-visible overlay)
+     ═══════════════════════════════════════════════════════ */
+  /**
+   * Draws the always-visible bottom-left HUD elements:
+   *   1. Stamina bar (bottom-left, guarded)
+   *
+   * TODO: Agent 4 — player.stamina and player.isRunning() used in stamina bar
+   */
+  drawBottomHUD(ctx, player) {
+    const ch = this.canvas.height;
+
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+
+    // Anchor for stamina bar position
+    const HP_H = 18;
+    const hpX = 8, hpY = ch - 8 - HP_H;
+
+    // ── 2. Stamina bar (only when stamina exists and is not full) ──
+    // TODO: Agent 4 — player.stamina and player.isRunning() used in stamina bar
+    if (typeof player.stamina !== 'undefined' &&
+        (player.stamina < player.maxStamina || player.exhausted)) {
+      const STM_W = 120, STM_H = 10;
+      const stmX = hpX;
+      const stmY = hpY - 4 - STM_H;
+
+      ctx.save();
+      ctx.globalAlpha = 0.85;
+
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(stmX, stmY, STM_W, STM_H);
+
+      const stmRatio = Math.max(0, Math.min(1,
+        player.maxStamina > 0 ? player.stamina / player.maxStamina : 0));
+      ctx.fillStyle = player.exhausted ? '#888' : '#e67e22';
+      ctx.fillRect(stmX, stmY, STM_W * stmRatio, STM_H);
+
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '8px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('STM', stmX + 2, stmY + STM_H - 2);
+
+      ctx.restore();
+    }
+
+
+    ctx.restore();
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     SKILLS PANEL — FULL-SCREEN OVERLAY (K key)
+     ═══════════════════════════════════════════════════════ */
+  drawSkillsPanelFull(ctx, skills, canvas) {
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const PW = 420, PH = 520;
+    const px = Math.floor((cw - PW) / 2);
+    const py = Math.floor((ch - PH) / 2);
+
+    // Dim backdrop
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(0, 0, cw, ch);
+
+    // Panel background
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(px, py, PW, PH);
+
+    // Gold border (2px)
+    ctx.strokeStyle = '#c9a84c';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, PW, PH);
+
+    // ── Header ──────────────────────────────────────────
+    ctx.fillStyle = '#c9a84c';
+    ctx.font = 'bold 20px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Skills', px + PW / 2, py + 32);
+
+    ctx.fillStyle = '#888';
+    ctx.font = '10px monospace';
+    ctx.fillText(`Total Level: ${skills.totalLevel}`, px + PW / 2, py + 48);
+
+    // Close "X" button (top-right)
+    const X_SZ = 20;
+    const xbX = px + PW - X_SZ - 6;
+    const xbY = py + 6;
+    ctx.fillStyle = 'rgba(180,40,40,0.85)';
+    ctx.fillRect(xbX, xbY, X_SZ, X_SZ);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('X', xbX + X_SZ / 2, xbY + X_SZ - 5);
+
+    // ── Skill rows ──────────────────────────────────────
+    const ROW_H = 36;
+    const ICON_SZ = 28;
+    const HEADER_H = 56;
+    const BAR_W = 80;
+
+    for (let i = 0; i < SKILL_NAMES.length; i++) {
+      const ry = py + HEADER_H + i * ROW_H;
+
+      // Alternating row background
+      ctx.fillStyle = i % 2 === 0
+        ? 'rgba(255,255,255,0.03)'
+        : 'rgba(0,0,0,0.15)';
+      ctx.fillRect(px + 2, ry, PW - 4, ROW_H);
+
+      const level = skills.getLevel(i);
+      const progress = skills.progressToNext(i);
+
+      // Icon box with skill initial
+      const iconX = px + 8;
+      const iconY = ry + Math.floor((ROW_H - ICON_SZ) / 2);
+      ctx.fillStyle = '#0d1020';
+      ctx.fillRect(iconX, iconY, ICON_SZ, ICON_SZ);
+      ctx.strokeStyle = '#3a3a5e';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(iconX, iconY, ICON_SZ, ICON_SZ);
+      ctx.fillStyle = SKILL_COLORS[i] || '#888';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(SKILL_NAMES[i][0], iconX + ICON_SZ / 2, iconY + ICON_SZ - 8);
+
+      // Skill name (white)
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '12px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(SKILL_NAMES[i], px + 44, ry + ROW_H / 2 + 4);
+
+      // Level (gold, bold, right-aligned)
+      ctx.fillStyle = '#c9a84c';
+      ctx.font = 'bold 13px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(String(level), px + PW - BAR_W - 16, ry + ROW_H / 2 + 4);
+
+      // XP progress bar (thin, 80px wide, blue fill)
+      const barX = px + PW - BAR_W - 8;
+      const barY = ry + Math.floor((ROW_H - 6) / 2);
+      ctx.fillStyle = '#0d1020';
+      ctx.fillRect(barX, barY, BAR_W, 6);
+      if (progress > 0) {
+        ctx.fillStyle = '#2980b9';
+        ctx.fillRect(barX, barY, Math.floor(BAR_W * progress), 6);
+      }
+    }
+
+    ctx.textAlign = 'left';
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     DIALOGUE BOX (bottom-centre)
+     ═══════════════════════════════════════════════════════ */
+  /**
+   * Draw the NPC dialogue panel.
+   * @param {CanvasRenderingContext2D} ctx
+   * @param {{ npcName: string, text: string, options: string[] }} dialogueData
+   * @param {HTMLCanvasElement} canvas
+   */
+  drawDialoguePanel(ctx, dialogueData, canvas) {
+    const cw = canvas.width;
+    const ch = canvas.height;
+    const PW = 600, PH = 160;
+    const px = Math.floor((cw - PW) / 2);
+    const py = ch - PH - 20;
+
+    // Slightly dimmed backdrop strip
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(0, py - 10, cw, PH + 30);
+
+    // Panel background
+    ctx.fillStyle = 'rgba(26,26,46,0.93)';
+    ctx.fillRect(px, py, PW, PH);
+
+    // Gold border
+    ctx.strokeStyle = '#c9a84c';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(px, py, PW, PH);
+
+    // NPC name (gold, top-left)
+    ctx.fillStyle = '#c9a84c';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(dialogueData.npcName || 'NPC', px + 12, py + 20);
+
+    // Body text (white)
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '12px monospace';
+    ctx.fillText(dialogueData.text || '', px + 12, py + 40);
+
+    // Option rows
+    const OPTION_H = 22;
+    const OPTION_START_Y = py + 56;
+    const opts = dialogueData.options || [];
+    for (let i = 0; i < opts.length; i++) {
+      const oy = OPTION_START_Y + i * OPTION_H;
+
+      // Option button background
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillRect(px + 8, oy, PW - 16, OPTION_H - 2);
+      ctx.strokeStyle = '#3a3a5e';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(px + 8, oy, PW - 16, OPTION_H - 2);
+
+      // Number prefix + option text
+      ctx.fillStyle = '#c9a84c';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(`[${i + 1}]`, px + 14, oy + OPTION_H - 7);
+
+      ctx.fillStyle = '#dddddd';
+      ctx.font = '11px monospace';
+      ctx.fillText(opts[i], px + 42, oy + OPTION_H - 7);
+    }
+
+    // "ESC to close" hint (small grey, bottom-right)
+    ctx.fillStyle = '#666';
+    ctx.font = '9px monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('ESC to close', px + PW - 8, py + PH - 6);
+
     ctx.textAlign = 'left';
   }
 }

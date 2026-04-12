@@ -9,6 +9,27 @@
 
 import { TILES, SKILL_IDS } from './constants.js';
 
+// ── Large Storage Chest ───────────────────────────────────────────────────
+/** Slot capacity of the large chest when unlocked (Architect level 5 required).
+ *  TODO: game.js — check skills[9] >= 5 before calling housingState.unlockLargeChest()
+ */
+export const LARGE_CHEST_CAPACITY = 112;
+
+// ── Produce timers (seconds) per animal type ──────────────────────────────
+const ANIMAL_PRODUCE_TIMERS = {
+  chicken: 600,
+  cow:     1200,
+  sheep:   900,
+};
+
+// ── Produce item IDs per animal type ─────────────────────────────────────
+// TODO: Agent 3 — egg/milk/wool_ball item IDs must exist in items.js
+const ANIMAL_PRODUCE_IDS = {
+  chicken: 'egg',
+  cow:     'milk',
+  sheep:   'wool_ball',
+};
+
 // ── Grid constants ────────────────────────────────────────────────────────
 export const CELL_SIZE     = 13;   // tile size per cell including outer walls
 export const CELL_INNER    = 11;   // inner walkable floor width/height
@@ -316,6 +337,23 @@ export class HousingState {
 
     // Starter room is always present
     this.cells.set(`${START_GX},${START_GY}`, { typeId: 'starter' });
+
+    // ── Large Storage Chest ──────────────────────────────
+    /** True once the large chest upgrade is unlocked (Architect level 5 required).
+     *  TODO: game.js — check skills[9] >= 5 before setting hasLargeChest via unlockLargeChest()
+     */
+    this.hasLargeChest = false;
+
+    // ── Animal Pen ───────────────────────────────────────
+    /**
+     * animals: max 4, each: { type: 'chicken'|'cow'|'sheep', produceTimer: 0, produceReady: false }
+     * TODO: Agent 2 — passive mob types chicken/cow/sheep — implement capture mechanic
+     *   so the player can call housingState.addAnimal(type) after catching one in the world
+     */
+    this.animalPen = {
+      animals:  [],  // max 4
+      capacity: 4,
+    };
   }
 
   // ── Cell queries ────────────────────────────────────────
@@ -466,6 +504,84 @@ export class HousingState {
     return null;
   }
 
+  // ── Large Chest ──────────────────────────────────────────
+
+  /** Unlock the large storage chest upgrade. Caller must verify Architect level >= 5.
+   *  TODO: game.js — check skills[9] >= 5 before calling this; then rebuild the house interior
+   *    so the new FURN_CHEST tile at interior position (10,3) becomes active.
+   *  TODO: game.js — when player opens chest at interior position (10,3),
+   *    use LARGE_CHEST_CAPACITY slots if housingState.hasLargeChest, else standard 28 slots.
+   */
+  unlockLargeChest() {
+    this.hasLargeChest = true;
+  }
+
+  // ── Animal Pen ───────────────────────────────────────────
+
+  /**
+   * Add an animal to the pen. Returns true if added, false if pen is full.
+   * @param {'chicken'|'cow'|'sheep'} type
+   */
+  addAnimal(type) {
+    if (this.animalPen.animals.length >= this.animalPen.capacity) return false;
+    this.animalPen.animals.push({ type, produceTimer: 0, produceReady: false });
+    return true;
+  }
+
+  /**
+   * Remove an animal at a given index from the pen.
+   * @param {number} index
+   */
+  removeAnimal(index) {
+    this.animalPen.animals.splice(index, 1);
+  }
+
+  /**
+   * Advance all animal produce timers by dt seconds.
+   * Call this from game.js each update tick.
+   * TODO: game.js — call housingState.tickAnimals(dt) inside the update loop when inInterior
+   * @param {number} dt  Elapsed seconds since last tick
+   */
+  tickAnimals(dt) {
+    for (const animal of this.animalPen.animals) {
+      if (animal.produceReady) continue;
+      animal.produceTimer += dt;
+      const threshold = ANIMAL_PRODUCE_TIMERS[animal.type] ?? 600;
+      if (animal.produceTimer >= threshold) {
+        animal.produceReady = true;
+      }
+    }
+  }
+
+  /**
+   * Collect produce from an animal that is ready.
+   * Resets the timer and returns the yield object, or null if not ready.
+   * @param {number} animalIndex
+   * @returns {{ id: string, qty: number }|null}
+   */
+  collectProduce(animalIndex) {
+    const animal = this.animalPen.animals[animalIndex];
+    if (!animal || !animal.produceReady) return null;
+    animal.produceTimer = 0;
+    animal.produceReady = false;
+    const produceId = ANIMAL_PRODUCE_IDS[animal.type] ?? 'egg';
+    return { id: produceId, qty: 1 };
+  }
+
+  /**
+   * Returns a shallow copy of the animalPen state (safe for reading in renderer).
+   * TODO: renderer.js — call housingState.getAnimalPenState() to draw the animal pen panel;
+   *   add animalPenOpen panel flag in game.js; clicking a pen tile at interior positions
+   *   (2,9), (4,9), (2,11), (4,11) opens animal management panel.
+   * @returns {{ animals: Array, capacity: number }}
+   */
+  getAnimalPenState() {
+    return {
+      animals:  this.animalPen.animals.slice(),
+      capacity: this.animalPen.capacity,
+    };
+  }
+
   // ── Serialisation ────────────────────────────────────────
 
   toJSON() {
@@ -473,7 +589,22 @@ export class HousingState {
     for (const [k, v] of this.cells) cells[k] = v;
     const furniture = {};
     for (const [k, v] of this.furniture) if (v.length > 0) furniture[k] = v;
-    return { cells, furniture };
+
+    // Serialize animalPen — round timers to avoid float bloat in save file
+    const animalPenOut = {
+      animals: this.animalPen.animals.map(a => ({
+        type:         a.type,
+        produceTimer: Math.round(a.produceTimer),
+        produceReady: a.produceReady,
+      })),
+    };
+
+    return {
+      cells,
+      furniture,
+      hasLargeChest: this.hasLargeChest,
+      animalPen: animalPenOut,
+    };
   }
 
   fromJSON(data) {
@@ -491,6 +622,18 @@ export class HousingState {
     // Always keep starter cell
     if (!this.cells.has(`${START_GX},${START_GY}`))
       this.cells.set(`${START_GX},${START_GY}`, { typeId: 'starter' });
+
+    // Restore hasLargeChest flag
+    this.hasLargeChest = data.hasLargeChest === true;
+
+    // Restore animalPen
+    if (data.animalPen && Array.isArray(data.animalPen.animals)) {
+      this.animalPen.animals = data.animalPen.animals.map(a => ({
+        type:         a.type ?? 'chicken',
+        produceTimer: typeof a.produceTimer === 'number' ? a.produceTimer : 0,
+        produceReady: a.produceReady === true,
+      }));
+    }
   }
 }
 

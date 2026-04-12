@@ -40,6 +40,11 @@ export class Input {
     return { x, y };
   }
 
+  /** Returns true if either Shift key is currently held. */
+  isShiftHeld() {
+    return !!(this.keys['ShiftLeft'] || this.keys['ShiftRight']);
+  }
+
   consumeClick() {
     const c = this.click;
     this.click = null;

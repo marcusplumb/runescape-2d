@@ -1,20 +1,42 @@
 /**
  * Manages chat-style notifications and XP drop popups.
  */
+
+const CATEGORY_COLORS = {
+  combat:  '#e74c3c',
+  xp:      '#27ae60',
+  loot:    '#f1c40f',
+  system:  '#ffffff',
+  warning: '#e67e22',
+};
+
 export class Notifications {
   constructor() {
-    this.messages = [];     // { text, color, timer }
+    this.messages = [];     // { text, color, timer, time } — oldest first
     this.xpDrops = [];      // { text, color, x, y, timer }
-    this.maxMessages = 8;
-    this.msgLifetime = 6;   // seconds
+    this.maxMessages = 30;
+    this.msgLifetime = 20;  // seconds
     this.dropLifetime = 2;
   }
 
-  /** Add a chat-log style message */
-  add(text, color = '#fff') {
-    this.messages.unshift({ text, color, timer: this.msgLifetime });
+  /**
+   * Add a chat-log style message.
+   * @param {string} text
+   * @param {string|null} [color]    - hex color string (backwards compatible)
+   * @param {string|null} [category] - key from CATEGORY_COLORS; used when color is omitted
+   */
+  add(text, color, category) {
+    let resolvedColor;
+    if (color) {
+      resolvedColor = color;
+    } else if (category && CATEGORY_COLORS[category]) {
+      resolvedColor = CATEGORY_COLORS[category];
+    } else {
+      resolvedColor = '#fff';
+    }
+    this.messages.push({ text, color: resolvedColor, timer: this.msgLifetime, time: Date.now() });
     if (this.messages.length > this.maxMessages) {
-      this.messages.pop();
+      this.messages.shift();
     }
   }
 
@@ -37,26 +59,8 @@ export class Notifications {
     }
   }
 
-  /** Draw chat log (bottom-left, above coords) */
-  drawMessages(ctx, canvasH) {
-    const baseY = canvasH - 50;
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'left';
-
-    for (let i = 0; i < this.messages.length; i++) {
-      const msg = this.messages[i];
-      const alpha = Math.min(1, msg.timer / 1.5); // fade out
-      const y = baseY - i * 16;
-
-      ctx.fillStyle = `rgba(0,0,0,${0.5 * alpha})`;
-      ctx.fillRect(8, y - 12, ctx.measureText(msg.text).width + 12, 16);
-
-      ctx.globalAlpha = alpha;
-      ctx.fillStyle = msg.color;
-      ctx.fillText(msg.text, 14, y);
-      ctx.globalAlpha = 1;
-    }
-  }
+  /** @deprecated Rendering is now handled by game._drawChat (unified box). */
+  drawMessages() {}
 
   /** Draw floating XP drops */
   drawXpDrops(ctx) {

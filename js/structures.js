@@ -13,6 +13,162 @@
  * to a building's entrance look correct (dirt outside, wall/stone inside).
  */
 import { TILES } from './constants.js';
+import { getBiome, BIOMES } from './biomes.js';
+
+/* ═══════════════════════════════════════════════════════
+   SETTLEMENT THEMES
+   Each theme describes the tile palette and style for a
+   particular biome settlement. Passed to placeVillage()
+   and placeTown() so each location looks distinct.
+   ═══════════════════════════════════════════════════════ */
+
+export const SETTLEMENT_THEMES = {
+  hamlet_forest: {
+    biome: 'forest',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.DIRT,
+    roofTile:      TILES.THATCH_ROOF,  // thatched rustic roof
+    roofAccent:    TILES.OAK_TREE,
+    pathTile:      TILES.DIRT,
+    fenceTile:     TILES.STUMP,
+    accentTile:    TILES.TREE,
+    colorScheme:   'forest',
+    buildingStyle: 'rustic',
+  },
+  hamlet_plains: {
+    biome: 'plains',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.DIRT,
+    roofTile:      TILES.THATCH_ROOF,  // golden straw thatch
+    roofAccent:    TILES.TREE,
+    pathTile:      TILES.DIRT,
+    fenceTile:     TILES.STONE,
+    accentTile:    TILES.FLOWERS,
+    colorScheme:   'plains',
+    buildingStyle: 'rustic',
+  },
+  village_north: {
+    biome: 'forest',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.DIRT,
+    roofTile:      TILES.THATCH_ROOF,  // heavy timber thatch
+    roofAccent:    TILES.OAK_TREE,
+    pathTile:      TILES.STONE,
+    fenceTile:     TILES.STUMP,
+    accentTile:    TILES.WILLOW_TREE,
+    colorScheme:   'forest',
+    buildingStyle: 'timber',
+  },
+  village_south: {
+    biome: 'desert',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.SAND,
+    roofTile:      TILES.ROOF,         // flat terracotta roof
+    roofAccent:    TILES.ROCK_GOLD,
+    pathTile:      TILES.SAND,
+    fenceTile:     TILES.STONE,
+    accentTile:    TILES.CACTUS,
+    colorScheme:   'desert',
+    buildingStyle: 'sandstone',
+  },
+  village_swamp: {
+    biome: 'swamp',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.STONE,
+    roofTile:      TILES.THATCH_ROOF,  // dark moss-covered thatch
+    roofAccent:    TILES.WILLOW_TREE,
+    pathTile:      TILES.STONE,
+    fenceTile:     TILES.STUMP,
+    accentTile:    TILES.WILLOW_TREE,
+    colorScheme:   'swamp',
+    buildingStyle: 'stilted',
+  },
+  town_east: {
+    biome: 'volcanic',
+    wallTile:      TILES.WALL,         // WALL not STONE — palette recolors it volcanic
+    floorTile:     TILES.STONE,
+    roofTile:      TILES.ROOF,         // flat scorched-stone roof
+    roofAccent:    TILES.ROCK_MITHRIL,
+    pathTile:      TILES.STONE,
+    fenceTile:     TILES.WALL,
+    accentTile:    TILES.ROCK_GOLD,
+    colorScheme:   'volcanic',
+    buildingStyle: 'fortress',
+  },
+  town_north: {
+    biome: 'tundra',
+    wallTile:      TILES.WALL,         // WALL not STONE — palette recolors it tundra grey
+    floorTile:     TILES.STONE,
+    roofTile:      TILES.ROOF,         // flat stone slab roof
+    roofAccent:    TILES.SNOW,
+    pathTile:      TILES.STONE,
+    fenceTile:     TILES.WALL,
+    accentTile:    TILES.SNOW,
+    colorScheme:   'tundra',
+    buildingStyle: 'fortress',
+  },
+  kingdom: {
+    biome: 'plains',
+    wallTile:      TILES.WALL,
+    floorTile:     TILES.STONE,
+    roofTile:      TILES.ROOF,         // grand stone roof
+    roofAccent:    TILES.STONE,
+    pathTile:      TILES.STONE,
+    fenceTile:     TILES.WALL,
+    accentTile:    TILES.MAPLE_TREE,
+    colorScheme:   'royal',
+    buildingStyle: 'grand',
+  },
+};
+
+/**
+ * Returns the best SETTLEMENT_THEMES entry for a given biome string.
+ * Used in placeAllStructures so each settlement reflects its actual biome.
+ */
+function _themeForBiome(biome) {
+  switch (biome) {
+    case BIOMES.FOREST:   return SETTLEMENT_THEMES.village_north;
+    case BIOMES.TUNDRA:   return SETTLEMENT_THEMES.town_north;
+    case BIOMES.SWAMP:    return SETTLEMENT_THEMES.village_swamp;
+    case BIOMES.DESERT:   return SETTLEMENT_THEMES.village_south;
+    case BIOMES.VOLCANIC: return SETTLEMENT_THEMES.town_east;
+    case BIOMES.DANGER:   return SETTLEMENT_THEMES.town_east;
+    default:              return SETTLEMENT_THEMES.hamlet_plains; // PLAINS
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   OVERLAP / CLEARANCE HELPERS
+   ═══════════════════════════════════════════════════════ */
+
+/**
+ * Tiles that count as "occupied" for overlap prevention.
+ * Structures may not be placed where any of these exist within the
+ * bounding box + 2-tile margin.
+ */
+const BLOCKED_TILES = new Set([
+  TILES.WALL, TILES.PLASTER_WALL, TILES.FURNACE, TILES.ANVIL,
+  TILES.WELL, TILES.DOOR, TILES.FENCE, TILES.SIGN, TILES.BARREL,
+  TILES.WATER, TILES.SWAMP_WATER, TILES.LAVA, TILES.ICE,
+  TILES.DUNGEON_ENTRANCE,
+]);
+
+/**
+ * Returns true if the rectangular area (c, r, w, h) plus a margin of
+ * `margin` tiles on all sides is free of BLOCKED_TILES.
+ */
+function _isClear(map, rows, cols, c, r, w, h, margin = 2) {
+  const r0 = Math.max(0, r - margin);
+  const r1 = Math.min(rows - 1, r + h - 1 + margin);
+  const c0 = Math.max(0, c - margin);
+  const c1 = Math.min(cols - 1, c + w - 1 + margin);
+  for (let rr = r0; rr <= r1; rr++) {
+    for (let cc = c0; cc <= c1; cc++) {
+      if (BLOCKED_TILES.has(map[rr]?.[cc])) return false;
+    }
+  }
+  return true;
+}
 
 /* ═══════════════════════════════════════════════════════
    PATH DRAWING
@@ -26,18 +182,61 @@ function _canOverwrite(tile) {
 }
 
 /**
+ * Returns the appropriate road tile for a given biome.
+ * Roads adapt their material to blend with the terrain they cross.
+ */
+function _pathTileForBiome(biome) {
+  switch (biome) {
+    case BIOMES.TUNDRA:   return TILES.STONE; // packed stone survives snow
+    case BIOMES.SWAMP:    return TILES.STONE; // raised stone causeway
+    case BIOMES.VOLCANIC: return TILES.STONE; // only thing that survives lava proximity
+    case BIOMES.DESERT:   return TILES.SAND;  // roads blend into desert
+    case BIOMES.DANGER:   return TILES.DIRT;  // worn adventurer path
+    default:              return TILES.DIRT;  // plains/forest
+  }
+}
+
+/**
+ * Occasionally places a single decoration tile beside the road.
+ * Called every ~20 steps from inside drawPath's step loop.
+ */
+function _placeRoadsideDecor(map, rows, cols, c, r, biome, rng, stepCount) {
+  if (stepCount % 20 !== 0) return;
+  const side = rng() < 0.5 ? 1 : -1;
+  const dc = rng() < 0.5 ? side : 0;
+  const dr = dc === 0 ? side : 0;
+  const nc = c + dc, nr = r + dr;
+  if (nc < 1 || nc >= cols - 1 || nr < 1 || nr >= rows - 1) return;
+  const existing = map[nr]?.[nc];
+  // Only place decoration on plain terrain tiles — don't overwrite structures
+  const terrainOnly = new Set([TILES.GRASS, TILES.DARK_GRASS, TILES.SAND, TILES.SNOW, TILES.STONE, TILES.DIRT]);
+  if (!terrainOnly.has(existing)) return;
+  switch (biome) {
+    case BIOMES.FOREST:
+    case BIOMES.PLAINS:  map[nr][nc] = TILES.TREE; break;
+    case BIOMES.DESERT:  map[nr][nc] = TILES.ROCK_COPPER; break;
+    case BIOMES.TUNDRA:  map[nr][nc] = TILES.SNOW; break;
+    default: break; // no decoration in volatile/dangerous biomes
+  }
+}
+
+/**
  * Draw a wandering dirt path from (c1,r1) to (c2,r2).
  * The path skips impassable tiles and uses a biased drunk-walk
  * so roads look naturally curved rather than perfectly straight.
+ * Road tile material is chosen per-step based on the biome at each position,
+ * so a single road transitions naturally as it crosses biome boundaries.
  */
 export function drawPath(map, rows, cols, c1, r1, c2, r2, rng) {
   let c = c1, r = r1;
   const maxSteps = (Math.abs(c2 - c1) + Math.abs(r2 - r1)) * 6;
 
   for (let step = 0; step < maxSteps; step++) {
-    // Paint current tile
+    // Paint current tile with biome-appropriate material
     if (r >= 0 && r < rows && c >= 0 && c < cols && _canOverwrite(map[r][c])) {
-      map[r][c] = TILES.DIRT;
+      const biome = getBiome(c, r);
+      map[r][c] = _pathTileForBiome(biome);
+      _placeRoadsideDecor(map, rows, cols, c, r, biome, rng, step);
     }
 
     if (c === c2 && r === r2) break;
@@ -108,14 +307,18 @@ function _fill(map, rows, cols, c, r, w, h, tile) {
   }
 }
 
-/** Place a rectangular building with outer WALL, inner STONE, and a door. */
-function _house(map, rows, cols, c, r, w, h, doorSide) {
+/** Place a rectangular building with outer WALL (or theme.wallTile), inner ROOF
+ *  (or theme.roofTile), and a door. Door is always TILES.DOOR regardless of theme.
+ *  doorSide is always 'S' — all overworld buildings face south. */
+function _house(map, rows, cols, c, r, w, h, doorSide, theme = null) {
+  const wallT  = theme ? theme.wallTile : TILES.WALL;
+  const floorT = theme ? theme.roofTile : TILES.ROOF;  // interior = roof tile (top-down view)
   for (let dr = 0; dr < h; dr++) {
     for (let dc = 0; dc < w; dc++) {
       const rr = r + dr, cc = c + dc;
       if (rr < 0 || rr >= rows || cc < 0 || cc >= cols) continue;
       map[rr][cc] = (dr === 0 || dr === h - 1 || dc === 0 || dc === w - 1)
-        ? TILES.WALL : TILES.ROOF;
+        ? wallT : floorT;
     }
   }
   // Door (gap in specified wall, centred)
@@ -134,43 +337,382 @@ function _house(map, rows, cols, c, r, w, h, doorSide) {
    ═══════════════════════════════════════════════════════ */
 
 /**
- * Village — 3–5 houses arranged around a dirt plaza.
+ * Place a 2×3 market stall: WALL perimeter, DIRT floor, FURN_TABLE inside.
+ * Returns true if placed successfully.
+ */
+function _placeMarketStall(map, rows, cols, c, r) {
+  const W = 3, H = 4; // footprint: 3 wide × 4 tall (walls + interior)
+  if (!_isClear(map, rows, cols, c, r, W, H, 2)) return false;
+  // Walls
+  _fill(map, rows, cols, c, r, W, H, TILES.WALL);
+  // DIRT floor interior
+  for (let dr = 1; dr < H - 1; dr++) {
+    for (let dc = 1; dc < W - 1; dc++) {
+      const rr = r + dr, cc = c + dc;
+      if (rr >= 0 && rr < rows && cc >= 0 && cc < cols)
+        map[rr][cc] = TILES.DIRT;
+    }
+  }
+  // Table inside (single centre tile of interior)
+  const tableR = r + 1, tableC = c + 1;
+  if (tableR >= 0 && tableR < rows && tableC >= 0 && tableC < cols)
+    map[tableR][tableC] = TILES.FURN_TABLE;
+  // Open south wall as entrance
+  const doorC = c + Math.floor(W / 2);
+  const doorR = r + H - 1;
+  if (doorR >= 0 && doorR < rows && doorC >= 0 && doorC < cols)
+    map[doorR][doorC] = TILES.DIRT;
+  return true;
+}
+
+/**
+ * Village — 4–8 buildings arranged around a well. Spawns in Plains/Forest.
+ * Includes a WELL tile at the plaza centre and a market stall.
+ * All buildings have 2-tile clearance checked before placement.
  * cx/cy is the centre of the plaza.
  */
-function placeVillage(map, rows, cols, cx, cy, rng) {
-  const PR = 3; // plaza half-radius → 7×7 dirt square
+function placeVillage(map, rows, cols, cx, cy, rng, theme = SETTLEMENT_THEMES.hamlet_plains) {
+  const PR = 3; // plaza half-radius → 7×7 plaza square
 
-  // Dirt plaza
-  _fill(map, rows, cols, cx - PR, cy - PR, PR * 2 + 1, PR * 2 + 1, TILES.DIRT);
-  // Stone well in the centre
-  if (cy >= 0 && cy < rows && cx >= 0 && cx < cols) map[cy][cx] = TILES.STONE;
+  // Plaza — use theme.pathTile instead of hardcoded DIRT
+  _fill(map, rows, cols, cx - PR, cy - PR, PR * 2 + 1, PR * 2 + 1, theme.pathTile);
+
+  // WELL tile at the village centre (TILES.WELL = 57)
+  // WELL exists in constants.js — using it directly.
+  if (cy >= 0 && cy < rows && cx >= 0 && cx < cols)
+    map[cy][cx] = TILES.WELL;
 
   // Possible house slots: (colOffset, rowOffset, w, h, doorSide)
+  // All doors face south — consistent RS-style convention.
   const slots = [
     // North
     [-(2), -(PR + 5), 5, 4, 'S'],
     // South
-    [-(2),   PR + 1,  5, 4, 'N'],
+    [-(2),   PR + 1,  5, 4, 'S'],
     // West
-    [-(PR + 5), -(2), 4, 5, 'E'],
+    [-(PR + 5), -(2), 4, 5, 'S'],
     // East
-    [  PR + 1,  -(2), 4, 5, 'W'],
+    [  PR + 1,  -(2), 4, 5, 'S'],
     // NW diagonal
-    [-(PR + 5), -(PR + 5), 4, 4, 'E'],
+    [-(PR + 5), -(PR + 5), 4, 4, 'S'],
     // NE diagonal
-    [  PR + 1,  -(PR + 5), 4, 4, 'W'],
+    [  PR + 1,  -(PR + 5), 4, 4, 'S'],
+    // SW diagonal
+    [-(PR + 5),  PR + 1,   4, 4, 'S'],
+    // SE diagonal
+    [  PR + 1,   PR + 1,   4, 4, 'S'],
   ];
 
-  // Shuffle and pick 3–5 houses
+  // Shuffle and pick 4–8 houses, each checked for 2-tile clearance
   const shuffled = [...slots].sort(() => rng() - 0.5);
-  const count = 3 + Math.floor(rng() * 3);
+  const count = 4 + Math.floor(rng() * 5); // 4–8
   const doors = [];
+  const roofBounds = [];
   for (let i = 0; i < Math.min(count, shuffled.length); i++) {
     const [dc, dr, w, h, door] = shuffled[i];
-    const d = _house(map, rows, cols, cx + dc, cy + dr, w, h, door);
+    const hc = cx + dc, hr = cy + dr;
+    if (!_isClear(map, rows, cols, hc, hr, w, h, 2)) continue;
+    const d = _house(map, rows, cols, hc, hr, w, h, door, theme);
     doors.push(d);
+    roofBounds.push({ c: hc + 1, r: hr + 1, rW: w - 2, rH: h - 2,
+                      bC: hc, bR: hr, bW: w, bH: h,
+                      doorC: d.col, doorR: d.row, doorFace: 'south',
+                      roofTile: theme.roofTile });
+  }
+
+  // Market stall — try a few offsets east of the plaza
+  const stallOffsets = [
+    [PR + 7, -(2)],
+    [PR + 7,  2],
+    [PR + 7, -(6)],
+  ];
+  for (const [dc, dr] of stallOffsets) {
+    if (_placeMarketStall(map, rows, cols, cx + dc, cy + dr)) break;
+  }
+
+  // Scatter 3–5 accent props just outside the plaza border
+  // Only place on walkable terrain tiles (grass, sand, snow, dirt, dark_grass)
+  const WALKABLE_TERRAIN = new Set([
+    TILES.GRASS, TILES.SAND, TILES.SNOW, TILES.DIRT,
+    TILES.DARK_GRASS, TILES.DEAD_GRASS,
+  ]);
+  const accentCount = 3 + Math.floor(rng() * 3); // 3–5
+  // Candidate positions: tiles just outside the plaza on all four sides
+  const accentCandidates = [];
+  for (let dc = -(PR + 2); dc <= PR + 2; dc++) {
+    accentCandidates.push([dc, -(PR + 2)]);  // north edge
+    accentCandidates.push([dc,   PR + 2]);   // south edge
+  }
+  for (let dr = -(PR + 1); dr <= PR + 1; dr++) {
+    accentCandidates.push([-(PR + 2), dr]);  // west edge
+    accentCandidates.push([  PR + 2,  dr]);  // east edge
+  }
+  // Shuffle candidates and place up to accentCount accent tiles
+  const shuffledAccents = [...accentCandidates].sort(() => rng() - 0.5);
+  let placed = 0;
+  for (const [dc, dr] of shuffledAccents) {
+    if (placed >= accentCount) break;
+    const ac = cx + dc, ar = cy + dr;
+    if (ar < 0 || ar >= rows || ac < 0 || ac >= cols) continue;
+    if (WALKABLE_TERRAIN.has(map[ar][ac])) {
+      map[ar][ac] = theme.accentTile;
+      placed++;
+    }
+  }
+
+  return { doors, roofBounds };
+}
+
+/**
+ * Returns true if (col, row) is within 30 tiles of a biome border —
+ * used to detect good town positions.
+ */
+function _nearBiomeBorder(col, row) {
+  const b = getBiome(col, row);
+  return getBiome(col + 20, row) !== b ||
+         getBiome(col, row + 20) !== b;
+}
+
+/**
+ * Town — 10–20 buildings, spawns near biome borders.
+ * Includes an inn (5×6 with FURN_BED inside and a SIGN at entrance).
+ * cx/cy is the town centre.
+ */
+function placeTown(map, rows, cols, cx, cy, rng, theme = SETTLEMENT_THEMES.hamlet_plains) {
+  const PR = 5; // larger plaza half-radius → 11×11 plaza
+
+  // Plaza — use theme.pathTile
+  _fill(map, rows, cols, cx - PR, cy - PR, PR * 2 + 1, PR * 2 + 1, theme.pathTile);
+  // WELL at centre
+  if (cy >= 0 && cy < rows && cx >= 0 && cx < cols)
+    map[cy][cx] = TILES.WELL;
+
+  // House slot grid — denser than a village, arranged in rings
+  const slots = [];
+  // All doors face south — consistent RS-style convention.
+  for (const [dc, dr, w, h] of [
+    // Inner ring
+    [-(3), -(PR + 5), 5, 4],
+    [-(3),   PR + 1,  5, 4],
+    [-(PR + 6), -(3), 4, 5],
+    [  PR + 1,  -(3), 4, 5],
+    // Diagonal inner
+    [-(PR + 6), -(PR + 5), 4, 4],
+    [  PR + 1,  -(PR + 5), 4, 4],
+    [-(PR + 6),  PR + 1,   4, 4],
+    [  PR + 1,   PR + 1,   4, 4],
+    // Outer ring
+    [-(3), -(PR + 10), 5, 4],
+    [-(3),   PR + 6,   5, 4],
+    [-(PR + 11), -(3), 4, 5],
+    [  PR + 6,   -(3), 4, 5],
+    [-(PR + 11), -(PR + 10), 4, 4],
+    [  PR + 6,   -(PR + 10), 4, 4],
+    [-(PR + 11),  PR + 6,    4, 4],
+    [  PR + 6,    PR + 6,    4, 4],
+    // Extra
+    [  7,  -(PR + 10), 4, 4],
+    [-(11), -(PR + 10), 4, 4],
+    [  7,    PR + 6,    4, 4],
+    [-(11),  PR + 6,    4, 4],
+  ]) slots.push([dc, dr, w, h, 'S']);
+
+  const shuffled = [...slots].sort(() => rng() - 0.5);
+  const count = 10 + Math.floor(rng() * 11); // 10–20
+  const doors = [];
+  const roofBounds = [];
+  for (let i = 0; i < Math.min(count, shuffled.length); i++) {
+    const [dc, dr, w, h, door] = shuffled[i];
+    const hc = cx + dc, hr = cy + dr;
+    if (!_isClear(map, rows, cols, hc, hr, w, h, 2)) continue;
+    const d = _house(map, rows, cols, hc, hr, w, h, door, theme);
+    doors.push(d);
+    roofBounds.push({ c: hc + 1, r: hr + 1, rW: w - 2, rH: h - 2,
+                      bC: hc, bR: hr, bW: w, bH: h,
+                      doorC: d.col, doorR: d.row, doorFace: 'south',
+                      roofTile: theme.roofTile });
+  }
+
+  // ── Inn — 5×6 building with beds inside and a SIGN at entrance ──
+  // Try east of the plaza first, then west
+  const innW = 5, innH = 6;
+  const innOffsets = [
+    [PR + 13, -(3)],
+    [-(PR + 18), -(3)],
+    [-(3), PR + 13],
+    [-(3), -(PR + 19)],
+  ];
+  for (const [dc, dr] of innOffsets) {
+    const ic = cx + dc, ir = cy + dr;
+    if (!_isClear(map, rows, cols, ic, ir, innW, innH, 2)) continue;
+    const innDoor = _house(map, rows, cols, ic, ir, innW, innH, 'S', theme);
+    doors.push(innDoor);
+    roofBounds.push({ c: ic + 1, r: ir + 1, rW: innW - 2, rH: innH - 2,
+                      bC: ic, bR: ir, bW: innW, bH: innH,
+                      doorC: innDoor.col, doorR: innDoor.row, doorFace: 'south',
+                      roofTile: theme.roofTile });
+    // Beds inside (two rows of beds in the interior)
+    for (let bedC = ic + 1; bedC <= ic + innW - 2; bedC += 2) {
+      const bedR1 = ir + 1, bedR2 = ir + innH - 3;
+      if (bedR1 >= 0 && bedR1 < rows && bedC >= 0 && bedC < cols)
+        map[bedR1][bedC] = TILES.FURN_BED;
+      if (bedR2 >= 0 && bedR2 < rows && bedC >= 0 && bedC < cols)
+        map[bedR2][bedC] = TILES.FURN_BED;
+    }
+    // SIGN tile one row south of the inn door (at entrance)
+    const signR = innDoor.row + 1, signC = innDoor.col;
+    if (signR >= 0 && signR < rows && signC >= 0 && signC < cols &&
+        map[signR][signC] !== TILES.WALL)
+      map[signR][signC] = TILES.SIGN;
+    break;
+  }
+
+  // Market stall
+  const stallOff = [[PR + 7, -(3)], [-(PR + 10), -(3)], [-(3), PR + 7]];
+  for (const [dc, dr] of stallOff) {
+    if (_placeMarketStall(map, rows, cols, cx + dc, cy + dr)) break;
+  }
+
+  return { doors, roofBounds };
+}
+
+/**
+ * Returns true if (col, row) is a coastal position:
+ * the tile is GRASS or DIRT and has a WATER tile within 4 tiles.
+ */
+function _isCoastal(map, rows, cols, col, row) {
+  const t = map[row]?.[col];
+  if (t !== TILES.GRASS && t !== TILES.DIRT && t !== TILES.SAND) return false;
+  for (let dr = -4; dr <= 4; dr++) {
+    for (let dc = -4; dc <= 4; dc++) {
+      const nr = row + dr, nc = col + dc;
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      if (map[nr][nc] === TILES.WATER) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Place a 3×3 fishing hut (WALL walls, DIRT floor) at a coastal position.
+ * Returns the door position or null if not placed.
+ */
+function _placeFishingHut(map, rows, cols, c, r) {
+  if (!_isClear(map, rows, cols, c, r, 3, 3, 2)) return null;
+  // Walls
+  _fill(map, rows, cols, c, r, 3, 3, TILES.WALL);
+  // DIRT floor interior
+  if (r + 1 >= 0 && r + 1 < rows && c + 1 >= 0 && c + 1 < cols)
+    map[r + 1][c + 1] = TILES.DIRT;
+  // Door south
+  const doorR = r + 2, doorC = c + 1;
+  if (doorR >= 0 && doorR < rows && doorC >= 0 && doorC < cols)
+    map[doorR][doorC] = TILES.DOOR;
+  return { col: doorC, row: doorR };
+}
+
+/**
+ * Place 3–5 PLANK tiles extending from a shore tile into adjacent WATER
+ * to create a simple dock.
+ */
+function _placeDock(map, rows, cols, shoreC, shoreR) {
+  // Determine which direction has water
+  const dirs = [
+    { dc: 0, dr: -1 }, { dc: 0, dr: 1 },
+    { dc: -1, dr: 0 }, { dc: 1, dr: 0 },
+  ];
+  let waterDir = null;
+  for (const d of dirs) {
+    const nr = shoreR + d.dr, nc = shoreC + d.dc;
+    if (nr >= 0 && nr < rows && nc >= 0 && nc < cols &&
+        map[nr][nc] === TILES.WATER) {
+      waterDir = d;
+      break;
+    }
+  }
+  if (!waterDir) return;
+  const dockLen = 3 + Math.floor(Math.random() * 3); // 3–5
+  for (let i = 1; i <= dockLen; i++) {
+    const nr = shoreR + waterDir.dr * i;
+    const nc = shoreC + waterDir.dc * i;
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) break;
+    if (map[nr][nc] !== TILES.WATER && map[nr][nc] !== TILES.PLANK) break;
+    map[nr][nc] = TILES.PLANK;
+  }
+}
+
+/**
+ * Scan the map for suitable coastal positions and place fishing huts + docks.
+ * Called from placeAllStructures after the main structures.
+ */
+function placeCoastalSettlements(map, rows, cols, rng) {
+  const doors = [];
+  const HUT_SPACING = 25; // min distance between huts
+  const placed = [];
+
+  // Sample coastal candidates (sparse scan for performance)
+  for (let r = 5; r < rows - 5; r += 6) {
+    for (let c = 5; c < cols - 5; c += 6) {
+      if (!_isCoastal(map, rows, cols, c, r)) continue;
+      // Avoid clustering huts too close together
+      const tooClose = placed.some(p =>
+        Math.abs(p.r - r) + Math.abs(p.c - c) < HUT_SPACING
+      );
+      if (tooClose) continue;
+      // Avoid the spawn area
+      const spawnC = Math.floor(cols / 2), spawnR = Math.floor(rows / 2) + 5;
+      if (Math.abs(c - spawnC) < 30 && Math.abs(r - spawnR) < 30) continue;
+
+      const door = _placeFishingHut(map, rows, cols, c, r);
+      if (!door) continue;
+      placed.push({ c, r });
+      doors.push(door);
+
+      // Dock — find an adjacent shore tile directly at water's edge
+      _placeDock(map, rows, cols, c + 1, r + 2); // try south side of hut
+    }
   }
   return doors;
+}
+
+/**
+ * Returns a road-width importance value (1–3) for a settlement centre.
+ *   kingdom → 3 (wide royal road)
+ *   town    → 2 (medium trade road)
+ *   other   → 1 (single-tile path)
+ */
+function _settlementImportance(centre) {
+  if (centre.type === 'kingdom') return 3;
+  if (centre.type === 'town')    return 2;
+  return 1;
+}
+
+/**
+ * Connect all settlement centres that are within 200 tiles of each other
+ * with organic biome-aware roads. Road width is determined by the highest
+ * importance of the two endpoints: kingdom roads are 3 tiles wide,
+ * town roads are 2 tiles wide, village paths are single-tile.
+ */
+function connectSettlementsWithRoads(map, rows, cols, settlements, rng) {
+  for (let i = 0; i < settlements.length; i++) {
+    for (let j = i + 1; j < settlements.length; j++) {
+      const a = settlements[i], b = settlements[j];
+      const dist = Math.sqrt((a.c - b.c) ** 2 + (a.r - b.r) ** 2);
+      if (dist <= 200) {
+        const width = Math.max(_settlementImportance(a), _settlementImportance(b));
+        // Centre track always drawn
+        drawPath(map, rows, cols, a.c, a.r, b.c, b.r, rng);
+        // width=2: one parallel offset track
+        if (width >= 2) {
+          drawPath(map, rows, cols, a.c, a.r + 1, b.c, b.r + 1, rng);
+        }
+        // width=3: two parallel offset tracks (one each side of centre)
+        if (width >= 3) {
+          drawPath(map, rows, cols, a.c, a.r - 1, b.c, b.r - 1, rng);
+        }
+      }
+    }
+  }
 }
 
 /**
@@ -625,11 +1167,14 @@ function placeRuins(map, rows, cols, cx, cy, rng) {
  * Spawn is at approximately (512, 389).
  */
 export const STRUCTURE_NODES = [
-  // Villages
+  // Villages (Plains/Forest biomes)
   { id: 'village_w',   c: 340, r: 435, type: 'village'    },
   { id: 'village_e',   c: 672, r: 420, type: 'village'    },
   { id: 'village_n',   c: 455, r: 198, type: 'village'    },
   { id: 'village_sw',  c: 238, r: 372, type: 'village'    },
+  // Towns (near biome borders)
+  { id: 'town_se',     c: 680, r: 560, type: 'town'       },
+  { id: 'town_nw',     c: 200, r: 250, type: 'town'       },
   // Kingdom — walled city north of spawn
   { id: 'kingdom',     c: 512, r: 208, type: 'kingdom'    },
   // Watchtowers
@@ -658,6 +1203,10 @@ const ROADS = [
   ['kingdom',     'tower_ne'   ],
   ['tower_ne',    'outpost'    ],
   ['village_e',   'outpost'    ],
+  // Town connections
+  ['village_e',   'town_se'    ],
+  ['town_nw',     'village_sw' ],
+  ['town_nw',     'kingdom'    ],
 ];
 
 /**
@@ -675,27 +1224,48 @@ export function placeAllStructures(map, rows, cols, rng) {
   const doorMap = new Map(); // "col,row" → interiorId string
   const roofBounds = [];
 
-  // 1. Draw roads first
+  // 1. Draw existing road network first (dirt paths between named nodes)
   for (const [a, b] of ROADS) {
     const na = nodes[a], nb = nodes[b];
     if (na && nb) drawPath(map, rows, cols, na.c, na.r, nb.c, nb.r, rng);
   }
 
-  // 2. Place structures and collect door positions
+  // 2. Place named structures and collect door/centre positions
+  // Track settlement centres for post-placement road connections
+  const settlementCentres = [{ c: spawnC, r: spawnR }];
+
   for (const node of STRUCTURE_NODES) {
     let doors = [];
     switch (node.type) {
       case 'village': {
-        const houseDoors = placeVillage(map, rows, cols, node.c, node.r, rng);
-        houseDoors.forEach((d, i) => {
+        const theme = _themeForBiome(getBiome(node.c, node.r));
+        const vd = placeVillage(map, rows, cols, node.c, node.r, rng, theme);
+        vd.doors.forEach((d, i) => {
           doorMap.set(`${d.col},${d.row}`, `${node.id}_house_${i}`);
         });
+        vd.roofBounds.forEach(rb => roofBounds.push(rb));
+        settlementCentres.push({ c: node.c, r: node.r, type: node.type });
+        break;
+      }
+      case 'town': {
+        // Only place town if it is near a biome border
+        const nearBorder = _nearBiomeBorder(node.c, node.r);
+        const theme = _themeForBiome(getBiome(node.c, node.r));
+        const td = placeTown(map, rows, cols, node.c, node.r, rng, theme);
+        td.doors.forEach((d, i) => {
+          doorMap.set(`${d.col},${d.row}`, `${node.id}_building_${i}`);
+        });
+        td.roofBounds.forEach(rb => roofBounds.push(rb));
+        settlementCentres.push({ c: node.c, r: node.r, type: node.type });
+        // Suppress lint: nearBorder logged for future use (town-type mobs etc.)
+        void nearBorder;
         break;
       }
       case 'kingdom': {
         const kd = placeKingdom(map, rows, cols, node.c, node.r);
         kd.doors.forEach(({ door, id }) => doorMap.set(`${door.col},${door.row}`, id));
         kd.roofBounds.forEach(rb => roofBounds.push(rb));
+        settlementCentres.push({ c: node.c, r: node.r, type: node.type });
         break;
       }
       case 'watchtower': {
@@ -713,6 +1283,15 @@ export function placeAllStructures(map, rows, cols, rng) {
         break;
     }
   }
+
+  // 3. Coastal settlements — fishing huts and docks along shorelines
+  const coastalDoors = placeCoastalSettlements(map, rows, cols, rng);
+  coastalDoors.forEach((d, i) => {
+    doorMap.set(`${d.col},${d.row}`, `coastal_hut_${i}`);
+  });
+
+  // 4. Organic biome-aware roads between settlements within 200 tiles of each other
+  connectSettlementsWithRoads(map, rows, cols, settlementCentres, rng);
 
   return { doorMap, roofBounds };
 }

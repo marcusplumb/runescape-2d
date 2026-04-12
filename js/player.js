@@ -7,6 +7,23 @@ import {
   drawChestplate, drawGloves, drawHelmet, drawWeapon,
 } from './equipment.js';
 
+/**
+ * Returns a speed multiplier for the given tile ID.
+ * Values < 1 slow the player; values > 1 speed them up.
+ */
+export function getTerrainSpeedMod(tileId) {
+  switch (tileId) {
+    case 1:  return 1.3;  // DIRT (roads)
+    case 2:  return 0.5;  // WATER
+    case 3:  return 0.85; // SAND
+    case 13: return 0.75; // SNOW
+    case 14: return 0.9;  // ICE
+    case 15: return 0.6;  // SWAMP_WATER
+    case 17: return 0.5;  // LAVA
+    default: return 1.0;
+  }
+}
+
 const MOVE_TIME  = TILE_SIZE / PLAYER_SPEED; // seconds to cross one tile
 const X_OFFSET   = (TILE_SIZE - PLAYER_WIDTH) / 2; // centers sprite horizontally in tile
 
@@ -207,6 +224,17 @@ export class Player {
     this.currentAction = 'idle'; // 'idle' | 'chop' | 'mine' | 'fish' | 'cook' | 'fight'
     this.actionTarget  = null;   // { col, row } tile the current action is targeting
     this.combatLevel   = 1;      // updated each frame by Game from Skills
+
+    // ── Stamina system ──────────────────────────────────────
+    this.stamina         = 100;
+    this.maxStamina      = 100;
+    this.staminaRegenRate = 8;   // per second, when not running
+    this.staminaDrainRate = 20;  // per second, when running
+    this.exhausted       = false;
+    this.exhaustTimer    = 0;
+    this._wasRunning     = false;
+    // TODO: Agent 5 — render stamina bar using player.stamina / player.maxStamina in HUD
+    // TODO: Agent 3 — stamina_brew item calls player.restoreStamina(40)
   }
 
   /** Replace the queued path. The player finishes the current tile, then follows. */
@@ -221,7 +249,33 @@ export class Player {
     return null;
   }
 
-  update(dt, inputDir) {
+  /**
+   * Returns true when the player is actively running.
+   * Requires: Shift held (from input.isShiftHeld()), stamina available, not exhausted, currently moving.
+   * @param {Input} input - the Input instance
+   */
+  isRunning(input) {
+    if (!input || !input.isShiftHeld()) return false;
+    if (this.exhausted) return false;
+    if (this.stamina <= 0) return false;
+    if (!this.moving) return false;
+    return true;
+  }
+
+  /**
+   * Restore stamina by the given amount (clamped to maxStamina).
+   * Called by stamina_brew consumable.
+   * @param {number} amount
+   */
+  restoreStamina(amount) {
+    this.stamina = Math.min(this.maxStamina, this.stamina + amount);
+  }
+
+  update(dt, inputDir, activeMap, input) {
+    // Use activeMap when provided, fall back to this.world for backward compatibility
+    // TODO: game.js — pass activeMap to player.update(dt, inputDir, activeMap, input) so terrain mod and collision use the correct map
+    const map = activeMap || this.world;
+
     /* ── Passive HP regen (1 HP every 12s) ─────────────── */
     if (this.hp < this.maxHp) {
       this._regenTimer += dt;
@@ -256,11 +310,44 @@ export class Player {
       this.path = [];
     }
 
+    /* ── Stamina tick ───────────────────────────────────── */
+    const running = this.isRunning(input);
+    if (running) {
+      // Drain stamina while running
+      this.stamina = Math.max(0, this.stamina - this.staminaDrainRate * dt);
+      if (this.stamina <= 0) {
+        this.stamina    = 0;
+        this.exhausted  = true;
+        this.exhaustTimer = 3;
+      }
+    } else {
+      // Regen stamina when not running
+      this.stamina = Math.min(this.maxStamina, this.stamina + this.staminaRegenRate * dt);
+    }
+    // Tick exhaustion recovery
+    if (this.exhausted) {
+      this.exhaustTimer -= dt;
+      if (this.exhaustTimer <= 0) {
+        this.exhausted = false;
+        this.exhaustTimer = 0;
+      }
+    }
+    this._wasRunning = running;
+
+    /* ── Terrain speed modifier for current tile ────────── */
+    // Get the tile the player is currently standing on (for speed mod)
+    const currentTileId = map && map.getTile ? map.getTile(this.col, this.row) : 0;
+    const terrainMod = getTerrainSpeedMod(currentTileId);
+    // Running multiplier: base * terrainMod * 1.5; walking: base * terrainMod
+    const speedMult = running ? terrainMod * 1.5 : terrainMod;
+    // Effective time to cross one tile (lower = faster)
+    const effectiveMoveTime = MOVE_TIME / speedMult;
+
     /* ── Advance current tile movement ─────────────────── */
     let excessDt = 0;
     if (this.moving) {
       this.moveT += dt;
-      const p = Math.min(this.moveT / MOVE_TIME, 1);
+      const p = Math.min(this.moveT / effectiveMoveTime, 1);
       const fromX = this.col * TILE_SIZE + X_OFFSET;
       const fromY = this.row * TILE_SIZE;
       this.x = fromX + (this.targetCol * TILE_SIZE + X_OFFSET - fromX) * p;
@@ -268,7 +355,7 @@ export class Player {
 
       if (p >= 1) {
         // Carry leftover time into the next tile so no time is wasted at boundaries
-        excessDt    = this.moveT - MOVE_TIME;
+        excessDt    = this.moveT - effectiveMoveTime;
         this.col    = this.targetCol;
         this.row    = this.targetRow;
         this.x      = this.col * TILE_SIZE + X_OFFSET;
@@ -295,9 +382,9 @@ export class Player {
       }
 
       if (nc !== null) {
-        if (nc >= 0 && nc < this.world.cols &&
-            nr >= 0 && nr < this.world.rows &&
-            !this.world.isSolid(nc, nr)) {
+        if (nc >= 0 && nc < map.cols &&
+            nr >= 0 && nr < map.rows &&
+            !map.isSolid(nc, nr)) {
           this._startMovingTo(nc, nr, excessDt);
         } else {
           // Blocked mid-path — abort remaining path
@@ -349,8 +436,7 @@ export class Player {
       switch (this.currentAction) {
         case 'chop':
         case 'mine':
-          // Gentle arm travel — the axe/pick head does the big arc, not the arm
-          skillBob = Math.sin(this.skillAnim * 4) * 5;
+          skillBob = 0; // arm rotation handles the swing (see chopAngle below)
           break;
         case 'fish':
           skillBob = Math.sin(this.skillAnim * 2.5) * 4;
@@ -370,7 +456,7 @@ export class Player {
     ctx.fill();
 
     const legSpread = this.moving ? Math.abs(Math.sin(animPhase)) * 4 : 0;
-    const armSwing  = this.moving ? Math.sin(animPhase) * 5 : skillBob;
+    const armSwing  = this.moving ? Math.sin(animPhase) * 2 : skillBob;
     const eq = this.equipment;
 
     // Bare-fist punch: half-sine over 0.6 s, then held at 0
@@ -389,13 +475,32 @@ export class Player {
       else                             { punchAngle =  swing * 0.5; punchSide = 'right'; }
     }
 
-    // Tools drawn BEHIND the player when facing up (player faces away = tool is in front of them)
-    if (this.actionLocked && this.dir === DIR.UP) {
-      if (this.currentAction === 'fish') {
-        this._drawFishingRod(ctx, cx, cy, bob, armSwing);
-      } else if (this.currentAction === 'chop' || this.currentAction === 'mine') {
-        this._drawActionTool(ctx, cx, cy, bob, armSwing);
+    // For chop/mine, rotate the player's actual arm via drawBodyStyle.
+    // _drawActionTool then draws only the handle + head at the same pivot — no extra arm.
+    let bodyAngle = punchAngle;
+    let bodySide  = punchSide;
+    if (this.actionLocked && (this.currentAction === 'chop' || this.currentAction === 'mine')) {
+      const _cp = Math.PI / 2;
+      const _ct = (this.skillAnim % _cp) / _cp;
+      const _ph = _ct < 0.25 ? Math.sqrt(_ct / 0.25) : 1 - Math.pow((_ct - 0.25) / 0.75, 2);
+      // Direction-aware swing arc: raised → impact toward the tree.
+      // Canvas maps local y-axis to world (-sin θ, cos θ), so:
+      //   arm goes RIGHT when sin(θ) < 0 (negative angles)
+      //   arm goes LEFT  when sin(θ) > 0 (positive angles)
+      let ra, ia;
+      switch (this.dir) {
+        case DIR.LEFT:  ra =  5*Math.PI/6; ia =  Math.PI/3;   break; // up-left → down-left
+        case DIR.DOWN:  ra = -5*Math.PI/6; ia = -Math.PI/6;   break; // up-right → down (toward tile below)
+        case DIR.UP:    ra = -Math.PI/6;   ia = -5*Math.PI/6; break; // down-right → up-right (toward tile above)
+        default:        ra = -5*Math.PI/6; ia = -Math.PI/3;   break; // up-right → down-right (RIGHT)
       }
+      bodyAngle = ra + _ph * (ia - ra);
+      bodySide  = this.dir === DIR.RIGHT ? 'left' : 'right';
+    }
+
+    // Fishing rod drawn BEHIND player when facing up (rod extends above/in front)
+    if (this.actionLocked && this.dir === DIR.UP && this.currentAction === 'fish') {
+      this._drawFishingRod(ctx, cx, cy, bob, armSwing);
     }
 
     // Cape — behind player unless facing up (away from camera), where it covers the front
@@ -413,7 +518,7 @@ export class Player {
     drawBoots   (ctx, cx, cy, 1, eq.boots,    legSpread, bob);
 
     // Body + arms (style-dependent)
-    drawBodyStyle(ctx, cx, cy, 1, this.style, armSwing, bob, punchAngle, punchSide);
+    drawBodyStyle(ctx, cx, cy, 1, this.style, armSwing, bob, bodyAngle, bodySide);
 
     // Chestplate + gloves over body/arms
     drawChestplate(ctx, cx, cy, 1, eq.chestplate, armSwing, bob);
@@ -459,10 +564,10 @@ export class Player {
       drawWeapon(ctx, cx, cy, 1, eq.weapon, this.dir, armSwing, bob);
     }
 
-    // Skill action tool overlay (chop/mine/fish/cook only — not during fight, not UP chop/mine which drew early)
+    // Skill action tool overlay (chop/mine/fish/cook only — not during fight; UP fish drew early)
     if (this.actionLocked && this.currentAction !== 'idle' && this.currentAction !== 'fight') {
-      const upChopMine = this.dir === DIR.UP && (this.currentAction === 'chop' || this.currentAction === 'mine');
-      if (!upChopMine) {
+      const skipUpFish = this.dir === DIR.UP && this.currentAction === 'fish';
+      if (!skipUpFish) {
         this._drawActionTool(ctx, cx, cy, bob, armSwing);
       }
     }
@@ -508,84 +613,68 @@ export class Player {
   _drawActionTool(ctx, cx, cy, bob, armSwing) {
     const dir = this.dir;
 
-    // Use the arm closest to the target tile.
-    // Left arm swings opposite to armSwing (right arm swings with it).
-    const useLeft = (dir === DIR.LEFT);
-    const ax = useLeft ? cx + 2  : cx + 22;
-    const ay = useLeft ? cy + 22 - bob - armSwing   // left arm bottom
-                       : cy + 22 - bob + armSwing;  // right arm bottom
-
     if (this.currentAction === 'chop' || this.currentAction === 'mine') {
-      // 180° swing arc — same phase as skillBob (sin(t*4)):
-      //   sin = +1  →  right arm DOWN = impact; angle = baseAngle + π/2 (head past horizontal, into tree)
-      //   sin = -1  →  right arm UP   = backswing; angle = baseAngle - π/2 (head raised behind)
-      // For LEFT: left arm goes opposite, so sin=+1 = arm UP = backswing, sin=-1 = impact.
-      //   baseAngle = -π/6 so that the arc mirrors correctly: backswing right, impact left.
-      let baseAngle, swingAmt;
-      if      (dir === DIR.RIGHT) { baseAngle =  Math.PI / 6;      swingAmt = Math.PI / 2; }  // -60° → +120°
-      else if (dir === DIR.LEFT)  { baseAngle = -Math.PI / 6;      swingAmt = Math.PI / 2; }  // +60° → -120°
-      else if (dir === DIR.DOWN)  { baseAngle =  Math.PI * 3 / 4;  swingAmt = Math.PI / 2; }  // +45° → -135°
-      else /* UP */               { baseAngle =  0;                 swingAmt = Math.PI / 3; }  // -60° → +60° overhead only
+      // Recompute the same angle used in draw() to rotate bodyStyle's arm.
+      // We draw ONLY the handle + head here — the arm itself is already drawn by drawBodyStyle.
+      const _cp = Math.PI / 2;
+      const _ct = (this.skillAnim % _cp) / _cp;
+      const _ph = _ct < 0.25 ? Math.sqrt(_ct / 0.25) : 1 - Math.pow((_ct - 0.25) / 0.75, 2);
+      let ra, ia;
+      switch (dir) {
+        case DIR.LEFT:  ra =  5*Math.PI/6; ia =  Math.PI/3;   break;
+        case DIR.DOWN:  ra = -5*Math.PI/6; ia = -Math.PI/6;   break;
+        case DIR.UP:    ra = -Math.PI/6;   ia = -5*Math.PI/6; break;
+        default:        ra = -5*Math.PI/6; ia = -Math.PI/3;   break;
+      }
+      const chopAngle = ra + _ph * (ia - ra);
+      const useLeft   = (dir === DIR.RIGHT);
 
-      const angle = baseAngle + Math.sin(this.skillAnim * 4) * swingAmt;
-
-      // When facing UP the arms are near the waist from camera view; shift the grip up to
-      // shoulder level so the tool swings properly overhead.
-      const toolAy = (dir === DIR.UP) ? cy + 13 - bob + armSwing : ay;
+      // Pivot matches drawBodyStyle's drawArm pivot: (shoulderX, y+12-bob)
+      // For UP, pull the shoulder slightly inward so it sits on the body
+      const shoulderX = useLeft ? cx + 2 : (dir === DIR.UP ? cx + 16 : cx + 22);
+      const shoulderY = cy + 12 - bob;
 
       ctx.save();
-      ctx.translate(ax, toolAy);
-      ctx.rotate(angle);
+      ctx.translate(shoulderX, shoulderY);
+      ctx.rotate(chopAngle);
 
-      // Handle extends UPWARD from hand — grip is at the origin (bottom of handle)
+      // Handle: from y=10 (wrist — end of 10px arm) to y=21 (tip)
       ctx.fillStyle = '#8b6914';
-      ctx.fillRect(-1, -11, 2, 11);
+      ctx.fillRect(-1, 10, 2, 11);
 
       if (this.currentAction === 'chop') {
-        // Axe: cutting bit on the leading edge of the swing.
-        // Scale(-1,1) mirrors the blade for the left arm OR when facing UP (blade inward toward tree).
         ctx.save();
-        if (useLeft || dir === DIR.UP) ctx.scale(-1, 1);
+        if (ia > ra) ctx.scale(-1, 1);  // clockwise swing: cutting bit leads on -x side
         ctx.fillStyle = '#cd7f32';
-        ctx.fillRect(-1, -14, 2, 2);    // collar
-        ctx.fillRect( 0, -17, 6, 5);    // blade body (extends toward +x)
+        ctx.fillRect(-2, 18, 5, 4);   // collar at handle tip
+        ctx.fillRect( 0, 14, 6, 8);   // blade body
         ctx.fillStyle = '#b06c2a';
-        ctx.fillRect( 4, -19, 4, 7);    // cutting bit (right/leading edge)
+        ctx.fillRect( 4, 12, 4, 10);  // cutting bit (leading edge)
         ctx.fillStyle = 'rgba(255,200,100,0.35)';
-        ctx.fillRect( 6, -19, 2, 2);    // edge shine
+        ctx.fillRect( 6, 12, 2, 2);   // edge shine
         ctx.restore();
       } else {
-        // Pickaxe: RS-style asymmetric head — long pick spike forward, short blunt poll back
-        // scale(-1,1) already applied for useLeft/UP, so +x is always the "forward" swing side
-
-        // Socket / collar around handle top
+        ctx.save();
+        if (ia > ra) ctx.scale(-1, 1);  // clockwise swing: pick tip leads on -x side
         ctx.fillStyle = '#787878';
-        ctx.fillRect(-2, -14,  5, 4);
-
-        // Poll (blunt back end)
+        ctx.fillRect(-2, 17,  5, 4);  // socket / collar
         ctx.fillStyle = '#b0b0b0';
-        ctx.fillRect(-7, -15,  5, 4);
-
-        // Pick shaft + tapering tip (raised above poll for the RS curve)
-        ctx.fillRect( 3, -16,  3, 3);   // raised pick base
-        ctx.fillRect( 6, -15,  3, 2);   // mid taper
-        ctx.fillRect( 9, -14,  3, 1);   // sharp tip
-
-        // Top-edge shine
+        ctx.fillRect(-7, 16,  5, 4);  // poll (blunt back end)
+        ctx.fillRect( 3, 15,  3, 3);  // pick base
+        ctx.fillRect( 6, 16,  3, 2);  // mid taper
+        ctx.fillRect( 9, 17,  3, 1);  // sharp tip
         ctx.fillStyle = 'rgba(255,255,255,0.38)';
-        ctx.fillRect(-7, -15,  5, 1);   // poll
-        ctx.fillRect( 3, -16,  9, 1);   // pick
-
-        // Underside shadow
+        ctx.fillRect(-7, 16,  5, 1);  // poll shine
+        ctx.fillRect( 3, 15,  9, 1);  // pick shine
         ctx.fillStyle = 'rgba(0,0,0,0.22)';
-        ctx.fillRect(-7, -12,  5, 1);   // poll bottom
-        ctx.fillRect( 3, -13,  9, 1);   // pick bottom
+        ctx.fillRect(-7, 19,  5, 1);  // poll shadow
+        ctx.fillRect( 3, 18,  9, 1);  // pick shadow
+        ctx.restore();
       }
 
       ctx.restore();
 
-    } else if (this.currentAction === 'fish' && this.dir !== DIR.UP) {
-      // UP direction is drawn early in draw() so the rod appears behind the player body
+    } else if (this.currentAction === 'fish' && dir !== DIR.UP) {
       this._drawFishingRod(ctx, cx, cy, bob, armSwing);
     }
   }

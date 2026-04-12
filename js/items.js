@@ -1025,6 +1025,14 @@ ITEMS.COOKED_CRYSTAL_FISH={ id:'cooked_crystal_fish',name:'Cooked Crystal Fish',
 ITEMS.RAW_ABYSSAL_EEL  = { id:'raw_abyssal_eel',  name:'Raw Abyssal Eel',  stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#101820')} };
 ITEMS.COOKED_ABYSSAL_EEL={ id:'cooked_abyssal_eel',name:'Cooked Abyssal Eel',stackable:false,heal:17,draw(c,x,y,s){_ce(c,x,y,s,'#101820')} };
 
+/* ── New biome fish (added by Agent 3) ──────────────── */
+ITEMS.RAW_BOG_EEL       = { id:'raw_bog_eel',       name:'Raw Bog Eel',              stackable:false, draw(c,x,y,s){_re(c,x,y,s,'#4a6838')} };
+ITEMS.COOKED_BOG_EEL    = { id:'cooked_bog_eel',    name:'Cooked Bog Eel',           stackable:false, heal:7,  draw(c,x,y,s){_ce(c,x,y,s,'#2e4820')} };
+ITEMS.RAW_SAND_GOBY     = { id:'raw_sand_goby',     name:'Raw Sand Goby',            stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#d8b870','#b09050')} };
+ITEMS.COOKED_SAND_GOBY  = { id:'cooked_sand_goby',  name:'Cooked Sand Goby',         stackable:false, heal:4,  draw(c,x,y,s){_cf(c,x,y,s,'#906840')} };
+ITEMS.RAW_SHADOWFIN     = { id:'raw_shadowfin',     name:'Raw Shadowfin',            stackable:false, draw(c,x,y,s){_rf(c,x,y,s,'#1e1e30','#0e0e20')} };
+ITEMS.COOKED_SHADOWFIN  = { id:'cooked_shadowfin',  name:'Cooked Shadowfin',         stackable:false, heal:16, draw(c,x,y,s){_cf(c,x,y,s,'#28283a')} };
+
 /* ── Butcher meats ───────────────────────────────────── */
 function _rawMeat(ctx, x, y, s, col) {
   ctx.fillStyle = '#c0392b'; ctx.fillRect(x+s*0.2,y+s*0.3,s*0.6,s*0.4);
@@ -1089,6 +1097,10 @@ export const COOK_RECIPES = {
   [ITEMS.RAW_GLOWJELLY.id]:    { cooked: ITEMS.COOKED_GLOWJELLY,    burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
   [ITEMS.RAW_CRYSTAL_FISH.id]: { cooked: ITEMS.COOKED_CRYSTAL_FISH, burnt: ITEMS.BURNT_FISH, burnChance: 0.20 },
   [ITEMS.RAW_ABYSSAL_EEL.id]:  { cooked: ITEMS.COOKED_ABYSSAL_EEL,  burnt: ITEMS.BURNT_FISH, burnChance: 0.15 },
+  // New biome fish (Agent 3)
+  [ITEMS.RAW_BOG_EEL.id]:      { cooked: ITEMS.COOKED_BOG_EEL,      burnt: ITEMS.BURNT_FISH, burnChance: 0.32 },
+  [ITEMS.RAW_SAND_GOBY.id]:    { cooked: ITEMS.COOKED_SAND_GOBY,    burnt: ITEMS.BURNT_FISH, burnChance: 0.28 },
+  [ITEMS.RAW_SHADOWFIN.id]:    { cooked: ITEMS.COOKED_SHADOWFIN,    burnt: ITEMS.BURNT_FISH, burnChance: 0.18 },
   // Meat (items defined above, before this object)
   [ITEMS.RAW_BEEF.id]:         { cooked: ITEMS.COOKED_BEEF,         burnt: ITEMS.BURNT_MEAT, burnChance: 0.35 },
   [ITEMS.RAW_CHICKEN.id]:      { cooked: ITEMS.COOKED_CHICKEN,      burnt: ITEMS.BURNT_MEAT, burnChance: 0.28 },
@@ -1796,6 +1808,7 @@ ITEMS.MAGIC_SEED = {
 
 ITEMS.POTATO = {
   id: 'potato', name: 'Potato', stackable: true, heal: 4,
+  description: 'A hearty potato', value: 5, cookable: true, farmable: true,
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#c8a050';
     ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.55, s*.26, s*.22, 0.1, 0, Math.PI*2); ctx.fill();
@@ -3110,6 +3123,339 @@ Object.assign(ITEMS, {
   },
 
 });
+
+/* ── Consumable potions ──────────────────────────────── */
+
+ITEMS.HEALING_POTION = {
+  id: 'healing_potion', name: 'Healing Potion', stackable: true,
+  description: 'Restores 15 HP', value: 50, healAmount: 15,
+  draw(ctx, x, y, s) {
+    // Bottle shape
+    ctx.fillStyle = '#1a6a1a'; ctx.fillRect(x+s*.35, y+s*.35, s*.3, s*.45);
+    ctx.fillStyle = '#2a8a2a'; ctx.fillRect(x+s*.38, y+s*.3, s*.24, s*.08);
+    ctx.fillStyle = '#c0c0c0'; ctx.fillRect(x+s*.4, y+s*.22, s*.2, s*.1);
+    // Liquid
+    ctx.fillStyle = '#40c040'; ctx.fillRect(x+s*.37, y+s*.5, s*.26, s*.28);
+    // Shine
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x+s*.39, y+s*.37, s*.07, s*.2);
+  },
+};
+
+ITEMS.STAMINA_BREW = {
+  id: 'stamina_brew', name: 'Stamina Brew', stackable: true,
+  description: 'Restores stamina', value: 35, staminaRestore: 40,
+  // TODO: Agent 4 — stamina_brew calls player.restoreStamina(40)
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#6a3a0a'; ctx.fillRect(x+s*.35, y+s*.35, s*.3, s*.45);
+    ctx.fillStyle = '#8a5a1a'; ctx.fillRect(x+s*.38, y+s*.3, s*.24, s*.08);
+    ctx.fillStyle = '#c0c0c0'; ctx.fillRect(x+s*.4, y+s*.22, s*.2, s*.1);
+    ctx.fillStyle = '#e0a020'; ctx.fillRect(x+s*.37, y+s*.5, s*.26, s*.28);
+    ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(x+s*.39, y+s*.37, s*.07, s*.2);
+  },
+};
+
+ITEMS.FIRE_RESIST_POTION = {
+  id: 'fire_resist_potion', name: 'Fire Resistance Potion', stackable: true,
+  description: 'Reduces fire damage for 60 seconds', value: 75, resistDuration: 60,
+  // TODO: combat.js — fire_resist_potion sets player.fireResist=true for 60s
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#1a1a6a'; ctx.fillRect(x+s*.35, y+s*.35, s*.3, s*.45);
+    ctx.fillStyle = '#2a2a8a'; ctx.fillRect(x+s*.38, y+s*.3, s*.24, s*.08);
+    ctx.fillStyle = '#c0c0c0'; ctx.fillRect(x+s*.4, y+s*.22, s*.2, s*.1);
+    ctx.fillStyle = '#4080e0'; ctx.fillRect(x+s*.37, y+s*.5, s*.26, s*.28);
+    ctx.fillStyle = 'rgba(200,220,255,0.4)'; ctx.fillRect(x+s*.39, y+s*.37, s*.07, s*.2);
+  },
+};
+
+/* ── Biome resource items ─────────────────────────────── */
+
+ITEMS.SWAMP_MOSS = {
+  id: 'swamp_moss', name: 'Swamp Moss', stackable: true,
+  description: 'A clump of slimy moss from the swamp', value: 8,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#3a5a28'; ctx.fillRect(x+s*.12, y+s*.4, s*.76, s*.3);
+    ctx.fillStyle = '#4a7a30'; ctx.fillRect(x+s*.18, y+s*.32, s*.2, s*.2);
+    ctx.fillStyle = '#4a7a30'; ctx.fillRect(x+s*.4, y+s*.28, s*.22, s*.22);
+    ctx.fillStyle = '#5a9038'; ctx.fillRect(x+s*.62, y+s*.34, s*.18, s*.18);
+    ctx.fillStyle = 'rgba(80,120,40,0.5)'; ctx.fillRect(x+s*.15, y+s*.62, s*.7, s*.1);
+  },
+};
+
+ITEMS.VOLCANIC_ASH = {
+  id: 'volcanic_ash', name: 'Volcanic Ash', stackable: true,
+  description: 'Fine ash from the volcanic region', value: 12,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#2a2a2a'; ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.6, s*.32, s*.2, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#404040'; ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.55, s*.25, s*.14, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,80,0,0.2)'; ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.14, s*.08, 0, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.TUNDRA_ICE = {
+  id: 'tundra_ice', name: 'Tundra Ice', stackable: true,
+  description: 'A chunk of ice from the frozen north', value: 10,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#a0d0e8'; ctx.fillRect(x+s*.2, y+s*.28, s*.6, s*.5);
+    ctx.fillStyle = '#c8e8f8'; ctx.fillRect(x+s*.24, y+s*.3, s*.52, s*.42);
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.fillRect(x+s*.28, y+s*.32, s*.18, s*.1);
+    ctx.strokeStyle = '#80b8d0'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.28); ctx.lineTo(x+s*.2, y+s*.4); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.6, y+s*.3); ctx.lineTo(x+s*.72, y+s*.48); ctx.stroke();
+  },
+};
+
+ITEMS.DESERT_CRYSTAL = {
+  id: 'desert_crystal', name: 'Desert Crystal', stackable: true,
+  description: 'A sparkling crystal from the desert sands', value: 15,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#e8c060'; ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.15); ctx.lineTo(x+s*.72, y+s*.5); ctx.lineTo(x+s*.6, y+s*.82);
+    ctx.lineTo(x+s*.4, y+s*.82); ctx.lineTo(x+s*.28, y+s*.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#f8e090'; ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.18); ctx.lineTo(x+s*.64, y+s*.5); ctx.lineTo(x+s*.5, y+s*.78); ctx.lineTo(x+s*.36, y+s*.5); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,200,0.5)'; ctx.beginPath(); ctx.ellipse(x+s*.46, y+s*.38, s*.06, s*.14, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+/* ── Animal produce items (Agent 6) ──────────────────── */
+// TODO: Agent 6 — egg/milk/wool_ball are produced by animal pen system
+
+ITEMS.EGG = {
+  id: 'egg', name: 'Egg', stackable: true,
+  description: 'A fresh egg', value: 5, cookable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#f0e0b0'; ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.2, s*.26, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,220,0.5)'; ctx.beginPath(); ctx.ellipse(x+s*.44, y+s*.42, s*.07, s*.1, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.MILK = {
+  id: 'milk', name: 'Milk', stackable: true,
+  description: 'Fresh milk', value: 8,
+  draw(ctx, x, y, s) {
+    // Bucket
+    ctx.fillStyle = '#a0a0a0'; ctx.fillRect(x+s*.22, y+s*.3, s*.56, s*.5);
+    ctx.fillStyle = '#c0c0c0'; ctx.fillRect(x+s*.22, y+s*.28, s*.56, s*.06);
+    // White liquid
+    ctx.fillStyle = '#f8f8f8'; ctx.fillRect(x+s*.26, y+s*.34, s*.48, s*.42);
+    // Handle
+    ctx.strokeStyle = '#808080'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.28, s*.14, Math.PI, 0); ctx.stroke();
+  },
+};
+
+ITEMS.WOOL_BALL = {
+  id: 'wool_ball', name: 'Wool Ball', stackable: true,
+  description: 'A ball of fluffy wool', value: 12,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#e8e8e0'; ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.28, 0, Math.PI*2); ctx.fill();
+    ctx.strokeStyle = '#d0d0c0'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.22, 0.2, 2.5); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.28, -0.5, 1.8); ctx.stroke();
+    // Knitting needles
+    ctx.strokeStyle = '#c0a020'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.25); ctx.lineTo(x+s*.65, y+s*.72); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.65, y+s*.25); ctx.lineTo(x+s*.32, y+s*.72); ctx.stroke();
+  },
+};
+
+/* ── Farming crop yield items (Agent 6) ──────────────── */
+// TODO: Agent 6 — wheat/potato/herb_bundle are greenhouse crop yields
+
+ITEMS.WHEAT = {
+  id: 'wheat', name: 'Wheat', stackable: true,
+  description: 'A bundle of wheat stalks', value: 3, farmable: true,
+  draw(ctx, x, y, s) {
+    ctx.strokeStyle = '#c8a020'; ctx.lineWidth = 2;
+    for (let i = 0; i < 3; i++) {
+      const sx = x + s * (0.28 + i * 0.18);
+      ctx.beginPath(); ctx.moveTo(sx, y+s*.85); ctx.lineTo(sx, y+s*.2); ctx.stroke();
+      ctx.fillStyle = '#e0b828';
+      ctx.beginPath(); ctx.ellipse(sx, y+s*.18, s*.05, s*.12, 0, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.strokeStyle = '#a08010'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x+s*.25, y+s*.85); ctx.lineTo(x+s*.75, y+s*.85); ctx.stroke();
+  },
+};
+
+// ITEMS.POTATO already defined above (Farming harvest section) — cookable:true, farmable:true added there
+
+ITEMS.HERB_BUNDLE = {
+  id: 'herb_bundle', name: 'Herb Bundle', stackable: true,
+  description: 'A bundle of mixed herbs', value: 20, farmable: true,
+  draw(ctx, x, y, s) {
+    // Stems
+    ctx.strokeStyle = '#3a7a28'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x+s*.4, y+s*.82); ctx.lineTo(x+s*.35, y+s*.28); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.82); ctx.lineTo(x+s*.5, y+s*.22); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x+s*.6, y+s*.82); ctx.lineTo(x+s*.65, y+s*.3); ctx.stroke();
+    // Leaves
+    ctx.fillStyle = '#4a9a38';
+    ctx.beginPath(); ctx.ellipse(x+s*.28, y+s*.48, s*.1, s*.05, -0.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x+s*.62, y+s*.44, s*.1, s*.05, 0.5, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.35, s*.12, s*.05, 0, 0, Math.PI*2); ctx.fill();
+    // Tie
+    ctx.strokeStyle = '#8b6914'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.72); ctx.lineTo(x+s*.7, y+s*.72); ctx.stroke();
+  },
+};
+
+/* ── Loot table stub items ────────────────────────────── */
+// These IDs are referenced in LOOT_TABLES below
+
+ITEMS.FEATHER = {
+  id: 'feather', name: 'Feather', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.strokeStyle = '#e8e0d0'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(x+s*.5, y+s*.85);
+    ctx.bezierCurveTo(x+s*.2, y+s*.6, x+s*.25, y+s*.3, x+s*.5, y+s*.1);
+    ctx.bezierCurveTo(x+s*.75, y+s*.3, x+s*.8, y+s*.6, x+s*.5, y+s*.85);
+    ctx.strokeStyle = '#d8d0b8'; ctx.fillStyle = '#f0e8d8'; ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = '#c8c0a8'; ctx.lineWidth = 0.5;
+    ctx.beginPath(); ctx.moveTo(x+s*.5, y+s*.85); ctx.lineTo(x+s*.5, y+s*.12); ctx.stroke();
+  },
+};
+
+ITEMS.COWHIDE = {
+  id: 'cowhide', name: 'Cowhide', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#c8a060'; ctx.fillRect(x+s*.12, y+s*.2, s*.76, s*.6);
+    ctx.fillStyle = '#a07840'; ctx.fillRect(x+s*.18, y+s*.26, s*.64, s*.48);
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(x+s*.3, y+s*.32, s*.18, s*.14);
+    ctx.fillStyle = '#2a2a2a'; ctx.fillRect(x+s*.52, y+s*.38, s*.14, s*.14);
+  },
+};
+
+ITEMS.RAW_MUTTON = {
+  id: 'raw_mutton', name: 'Raw Mutton', stackable: false,
+  draw(c, x, y, s) { _rawMeat(c, x, y, s, '#cc9080'); },
+};
+
+ITEMS.COOKED_MUTTON = {
+  id: 'cooked_mutton', name: 'Cooked Mutton', stackable: false, heal: 7,
+  draw(c, x, y, s) { _cookedMeat(c, x, y, s, '#8a4a28'); },
+};
+
+ITEMS.WOOL = {
+  id: 'wool', name: 'Wool', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#e8e8e0'; ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*.26, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(220,220,210,0.7)'; ctx.beginPath(); ctx.arc(x+s*.38, y+s*.44, s*.12, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+s*.6, y+s*.42, s*.1, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x+s*.52, y+s*.6, s*.11, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+ITEMS.VENISON = {
+  id: 'venison', name: 'Venison', stackable: false,
+  draw(c, x, y, s) { _rawMeat(c, x, y, s, '#8b2222'); },
+};
+
+ITEMS.DEER_HIDE = {
+  id: 'deer_hide', name: 'Deer Hide', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#b87840'; ctx.fillRect(x+s*.12, y+s*.2, s*.76, s*.6);
+    ctx.fillStyle = '#9a6028'; ctx.fillRect(x+s*.18, y+s*.26, s*.64, s*.48);
+    ctx.fillStyle = '#e0c090'; ctx.fillRect(x+s*.32, y+s*.36, s*.14, s*.2);
+    ctx.fillStyle = '#e0c090'; ctx.fillRect(x+s*.54, y+s*.4, s*.12, s*.16);
+  },
+};
+
+ITEMS.RAW_RABBIT = {
+  id: 'raw_rabbit', name: 'Raw Rabbit', stackable: false,
+  draw(c, x, y, s) { _rawMeat(c, x, y, s, '#e8c0a0'); },
+};
+
+ITEMS.RABBIT_FUR = {
+  id: 'rabbit_fur', name: 'Rabbit Fur', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#c8b890'; ctx.fillRect(x+s*.12, y+s*.22, s*.76, s*.56);
+    ctx.fillStyle = '#e0d0a8'; ctx.fillRect(x+s*.18, y+s*.28, s*.64, s*.44);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.fillRect(x+s*.22, y+s*.3, s*.28, s*.12);
+  },
+};
+
+ITEMS.SPIDER_SILK = {
+  id: 'spider_silk', name: 'Spider Silk', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.strokeStyle = 'rgba(220,220,220,0.8)'; ctx.lineWidth = 1;
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.moveTo(x+s*.5, y+s*.5);
+      ctx.lineTo(x+s*.5 + Math.cos(i*Math.PI*0.4)*s*.38, y+s*.5 + Math.sin(i*Math.PI*0.4)*s*.38);
+      ctx.stroke();
+    }
+    for (let r = 0.1; r < 0.42; r += 0.14) {
+      ctx.beginPath(); ctx.arc(x+s*.5, y+s*.5, s*r, 0, Math.PI*2); ctx.stroke();
+    }
+  },
+};
+
+ITEMS.VENOM_SAC = {
+  id: 'venom_sac', name: 'Venom Sac', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#2a5a1a'; ctx.beginPath(); ctx.arc(x+s*.5, y+s*.52, s*.24, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#40901a'; ctx.beginPath(); ctx.arc(x+s*.46, y+s*.46, s*.14, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(80,200,20,0.3)'; ctx.beginPath(); ctx.arc(x+s*.43, y+s*.42, s*.06, 0, Math.PI*2); ctx.fill();
+    // Drip
+    ctx.fillStyle = '#60c030'; ctx.fillRect(x+s*.48, y+s*.72, s*.06, s*.1);
+    ctx.beginPath(); ctx.arc(x+s*.51, y+s*.84, s*.04, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+/* ── Iron/Mithril ore aliases for LOOT_TABLES ────────── */
+// LOOT_TABLES references 'iron_ore' and 'mithril_ore' as readable drop names.
+// The canonical ore IDs are 'ore_iron' and 'ore_mithril'.
+ITEMS.IRON_ORE = {
+  id: 'iron_ore', name: 'Iron Ore', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#6a6a70';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.55, s*.32, s*.22, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#8a8a96';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.5, s*.18, s*.12, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.MITHRIL_ORE = {
+  id: 'mithril_ore', name: 'Mithril Ore', stackable: true,
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#4a4a6a';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.55, s*.32, s*.22, 0, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#7b68ee';
+    ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.5, s*.18, s*.12, 0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+
+/* ═══════════════════════════════════════════════════════
+   LOOT_TABLES — authoritative mob drop source (Agent 2 imports this)
+   Each entry: { id, qty: [min,max], chance: 0.0–1.0 }
+   ═══════════════════════════════════════════════════════ */
+export const LOOT_TABLES = {
+  // Passive mobs
+  chicken:       [{ id: 'raw_chicken',  qty: [1,1], chance: 1.0 }, { id: 'feather',     qty: [3,8],  chance: 0.9 }],
+  cow:           [{ id: 'raw_beef',     qty: [1,2], chance: 1.0 }, { id: 'cowhide',     qty: [1,1],  chance: 1.0 }],
+  sheep:         [{ id: 'raw_mutton',   qty: [1,1], chance: 1.0 }, { id: 'wool',        qty: [1,3],  chance: 0.8 }],
+  deer:          [{ id: 'venison',      qty: [1,2], chance: 1.0 }, { id: 'deer_hide',   qty: [1,1],  chance: 0.7 }],
+  rabbit:        [{ id: 'raw_rabbit',   qty: [1,1], chance: 1.0 }, { id: 'rabbit_fur',  qty: [1,1],  chance: 0.6 }],
+  arctic_fox:    [{ id: 'raw_rabbit',   qty: [1,1], chance: 0.8 }, { id: 'rabbit_fur',  qty: [1,1],  chance: 0.7 }],
+  frog:          [{ id: 'swamp_moss',   qty: [1,2], chance: 0.6 }],
+  fire_lizard:   [{ id: 'volcanic_ash', qty: [1,2], chance: 0.7 }],
+  // Aggressive mobs
+  goblin:        [{ id: 'gold_coin',    qty: [1,5],   chance: 0.8 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  orc:           [{ id: 'gold_coin',    qty: [5,15],  chance: 0.9 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }, { id: 'iron_sword', qty: [1,1], chance: 0.1 }],
+  troll:         [{ id: 'gold_coin',    qty: [8,20],  chance: 1.0 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }, { id: 'iron_ore',   qty: [1,3], chance: 0.3 }],
+  demon:         [{ id: 'gold_coin',    qty: [20,50], chance: 1.0 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }, { id: 'mithril_ore',qty: [1,2], chance: 0.2 }],
+  forest_spider: [{ id: 'spider_silk',  qty: [1,3],   chance: 0.7 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  bandit:        [{ id: 'gold_coin',    qty: [3,10],  chance: 0.9 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  ice_troll:     [{ id: 'tundra_ice',   qty: [1,3],   chance: 0.7 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  frost_wolf:    [{ id: 'rabbit_fur',   qty: [1,2],   chance: 0.6 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  swamp_serpent: [{ id: 'swamp_moss',   qty: [1,2],   chance: 0.5 }, { id: 'venom_sac',   qty: [1,1],  chance: 0.3 }],
+  bog_witch:     [{ id: 'swamp_moss',   qty: [2,4],   chance: 0.8 }, { id: 'gold_coin',   qty: [5,12], chance: 0.7 }],
+  sand_scorpion: [{ id: 'desert_crystal',qty:[1,1],   chance: 0.4 }, { id: 'bones',       qty: [1,1],  chance: 1.0 }],
+  desert_bandit: [{ id: 'gold_coin',    qty: [4,12],  chance: 0.9 }, { id: 'desert_crystal',qty:[1,1],chance:0.3}],
+  lava_golem:    [{ id: 'volcanic_ash', qty: [2,5],   chance: 1.0 }, { id: 'gold_coin',   qty:[15,30], chance: 0.8 }],
+  fire_imp:      [{ id: 'volcanic_ash', qty: [1,2],   chance: 0.7 }, { id: 'gold_coin',   qty: [3,8],  chance: 0.6 }],
+};
 
 /** Maps equipment slot IDs → inventory item defs for equip/unequip */
 export const EQUIP_ID_TO_ITEM = {

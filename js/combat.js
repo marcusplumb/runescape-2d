@@ -62,7 +62,6 @@ export class Combat {
       this._engageMob(mob);
       // activeAttacker will be set by _processMobAttacks once the mob reaches
       // melee range (atMeleeStop). Don't set it here — mob might still be walking over.
-      this.notif.add(`Attacking ${mob.name}...`, '#e74c3c');
     }
   }
 
@@ -121,7 +120,6 @@ export class Combat {
     } else {
       this.combatIdleTimer += dt;
       if (this.combatIdleTimer >= 5.0) {
-        this.notif.add('You are no longer in combat.', '#aaa');
         this._releaseMob(this.targetMob);
         this.targetMob = null;
         this.player.currentAction = 'idle';
@@ -158,12 +156,6 @@ export class Combat {
         maxTimer: 1.5,
       });
 
-      if (damage > 0) {
-        this.notif.add(`You hit ${this.targetMob.name} for ${damage}.`, '#e74c3c');
-      } else {
-        this.notif.add(`You miss ${this.targetMob.name}.`, '#aaa');
-      }
-
       const combatXp = damage * 4;
       if (combatXp > 0) {
         const atkRes = this.skills.addXp(SKILL_IDS.ATTACK, combatXp);
@@ -189,7 +181,6 @@ export class Combat {
         timer: 0,
         maxTimer: 1.5,
       });
-      this.notif.add(`You miss ${this.targetMob.name}.`, '#aaa');
     }
 
   }
@@ -383,8 +374,6 @@ export class Combat {
     mob.dead = true;
     mob.respawnTimer = 45 + Math.random() * 15;
     this._releaseMob(mob);
-    this.notif.add(`You defeated the ${mob.name}!`, '#27ae60');
-
     for (const drop of mob.drops) {
       if (Math.random() <= drop.chance) {
         // Always drop to the ground — player walks over to pick up

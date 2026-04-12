@@ -101,6 +101,14 @@ export const GEAR = {
     { attack: 35 }, { accuracy: 36, power: 32 },
     'Forged from rare blue-grey metal. Holds a supernatural edge.'),
 
+  MITHRIL_DAGGER:   g('mithril_dagger',   'Mithril Dagger',    'weapon', 'RARE',
+    { attack: 35 }, { accuracy: 30, power: 18, critChance: 0.08, speed: 0.85 },
+    'A swift mithril blade — fast strikes, decent damage.'),
+
+  MITHRIL_AXE:      g('mithril_axe',      'Mithril Battleaxe', 'weapon', 'RARE',
+    { attack: 45 }, { accuracy: 28, power: 42, speed: 1.12 },
+    'Heavy mithril battleaxe — slow but crushingly powerful.'),
+
   TUNGSTEN_BLADE:   g('tungsten_blade',   'Tungsten Blade',    'weapon', 'RARE',
     { attack: 50 }, { accuracy: 52, power: 48 },
     'Extremely dense — every swing carries real weight.'),

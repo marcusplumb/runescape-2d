@@ -54,17 +54,39 @@ function update(dt) {
   // Aggro: aggressive mobs self-target the nearest player within range.
   // This mirrors the client-side aggro check in mob.update() but runs
   // server-authoritatively so all clients see the same behaviour.
+  //
+  // Skip NPCs (npc:true) — they only patrol/wander, never aggro players.
+  // Skip passive mobs (aggressive:false) — flee logic runs in mob.update().
   for (const mob of _mobManager.mobs) {
     if (mob.dead || mob.inCombat || !mob.aggressive) continue;
+    if (mob.npc) continue; // NPCs never enter the combat/aggro tick
+
+    // Use per-mob aggroRadius if set, otherwise fall back to module constant
+    const aggroRadius = mob._aggroRadius ?? AGGRO_RANGE;
+
     let nearest = null, nearestDist = Infinity;
     for (const p of _players.values()) {
       const dx = p.cx - mob.cx, dy = p.cy - mob.cy;
       const d  = Math.sqrt(dx * dx + dy * dy) / TILE_SIZE;
       if (d < nearestDist) { nearestDist = d; nearest = p; }
     }
-    if (nearest && nearestDist <= AGGRO_RANGE) {
+    if (nearest && nearestDist <= aggroRadius) {
       mob.inCombat     = true;
       mob.combatTarget = nearest;
+    }
+  }
+
+  // Decrement fleeTimer for passive mobs that are fleeing.
+  // mob.update() also does this client-side; the server mirrors it so
+  // the authoritative fleeing boolean stays accurate.
+  for (const mob of _mobManager.mobs) {
+    if (mob.dead || mob.npc) continue;
+    if (mob.fleeTimer > 0) {
+      mob.fleeTimer -= dt;
+      if (mob.fleeTimer <= 0) {
+        mob.fleeTimer = 0;
+        mob.fleeing   = false;
+      }
     }
   }
 
@@ -94,6 +116,8 @@ function getSnapshot() {
     facingLeft: m.facingLeft,
     animFrame:  m.animFrame,
     moving:     m.moving,
+    fleeing:    m.fleeing ?? false, // clients can render flee animation when true
+    npc:        m.npc    ?? false,  // clients skip combat UI for NPCs
   }));
 }
 

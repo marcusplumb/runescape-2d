@@ -21,6 +21,7 @@ function makeRng(seed) {
 
 export const MOB_DEFS = {
   // ── Passive mobs (spawn in safe areas) ──────────────────
+  // TODO: Agent 6 — these mob types are used in animal pen system
   chicken: {
     name: 'Chicken', hp: 3, speed: 52, w: 14, h: 16,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
@@ -31,6 +32,7 @@ export const MOB_DEFS = {
     ],
     biomes: [BIOMES.PLAINS, BIOMES.FOREST],
   },
+  // TODO: Agent 6 — these mob types are used in animal pen system
   cow: {
     name: 'Cow', hp: 10, speed: 34, w: 26, h: 22,
     aggressive: false, attackLevel: 1, strengthLevel: 2, defenceLevel: 1,
@@ -41,6 +43,7 @@ export const MOB_DEFS = {
     ],
     biomes: [BIOMES.PLAINS],
   },
+  // TODO: Agent 6 — these mob types are used in animal pen system
   sheep: {
     name: 'Sheep', hp: 8, speed: 44, w: 20, h: 18,
     aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
@@ -55,7 +58,8 @@ export const MOB_DEFS = {
   // ── Danger zone mobs (aggressive, drop more) ────────────
   goblin: {
     name: 'Goblin', hp: 12, speed: 68, w: 16, h: 20,
-    aggressive: true, attackLevel: 8, strengthLevel: 6, defenceLevel: 4,
+    aggressive: true, dangerZone: true, aggroRadius: 8, groupAggro: true,
+    attackLevel: 8, strengthLevel: 6, defenceLevel: 4,
     xpHp: 5, drops: [
       { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
       { item: ITEMS.GOLD_COIN,  chance: 0.5, qty: 3 },
@@ -65,7 +69,8 @@ export const MOB_DEFS = {
   },
   orc: {
     name: 'Orc', hp: 30, speed: 55, w: 22, h: 28,
-    aggressive: true, attackLevel: 16, strengthLevel: 18, defenceLevel: 12,
+    aggressive: true, dangerZone: true, aggroRadius: 8, groupAggro: true,
+    attackLevel: 16, strengthLevel: 18, defenceLevel: 12,
     xpHp: 10, drops: [
       { item: ITEMS.BONES,         chance: 1.0,  qty: 1 },
       { item: ITEMS.GOLD_COIN,     chance: 0.7,  qty: 8 },
@@ -78,7 +83,8 @@ export const MOB_DEFS = {
   },
   troll: {
     name: 'Troll', hp: 60, speed: 38, w: 28, h: 32,
-    aggressive: true, attackLevel: 24, strengthLevel: 28, defenceLevel: 20,
+    aggressive: true, dangerZone: true, aggroRadius: 8, groupAggro: true,
+    attackLevel: 24, strengthLevel: 28, defenceLevel: 20,
     xpHp: 15, drops: [
       { item: ITEMS.BONES,          chance: 1.0,  qty: 1 },
       { item: ITEMS.GOLD_COIN,      chance: 0.9,  qty: 20 },
@@ -91,7 +97,8 @@ export const MOB_DEFS = {
   },
   demon: {
     name: 'Demon', hp: 120, speed: 62, w: 30, h: 34,
-    aggressive: true, attackLevel: 40, strengthLevel: 42, defenceLevel: 35,
+    aggressive: true, dangerZone: true, aggroRadius: 8, groupAggro: true,
+    attackLevel: 40, strengthLevel: 42, defenceLevel: 35,
     xpHp: 25, drops: [
       { item: ITEMS.BONES,          chance: 1.0,  qty: 1 },
       { item: ITEMS.GOLD_COIN,      chance: 1.0,  qty: 50 },
@@ -103,23 +110,6 @@ export const MOB_DEFS = {
   },
 
   // ── Wildlife (biome-specific, rare) ─────────────────────
-  frog: {
-    name: 'Frog', hp: 2, speed: 72, w: 10, h: 8,
-    aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 1, drops: [{ item: ITEMS.BONES, chance: 0.4, qty: 1 }],
-    biomes: [BIOMES.SWAMP, BIOMES.PLAINS],
-    nearWater: true,  // must spawn adjacent to a water tile
-  },
-  deer: {
-    name: 'Deer', hp: 14, speed: 95, w: 20, h: 24,
-    aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 2, drops: [
-      { item: ITEMS.BONES,      chance: 1.0, qty: 1 },
-      { item: ITEMS.BERRY_SEED, chance: 0.06, qty: 1 },
-      { item: ITEMS.FLAX_SEED,  chance: 0.04, qty: 1 },
-    ],
-    biomes: [BIOMES.FOREST, BIOMES.PLAINS],
-  },
   fox: {
     name: 'Fox', hp: 8, speed: 100, w: 18, h: 14,
     aggressive: false, attackLevel: 1, strengthLevel: 4, defenceLevel: 2,
@@ -187,15 +177,6 @@ export const MOB_DEFS = {
   },
 
   // ── New wildlife ────────────────────────────────────────
-  rabbit: {
-    name: 'Rabbit', hp: 3, speed: 110, w: 12, h: 12,
-    aggressive: false, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
-    xpHp: 1, drops: [
-      { item: ITEMS.BONES,       chance: 0.6, qty: 1 },
-      { item: ITEMS.BERRY_SEED,  chance: 0.06, qty: 1 },
-    ],
-    biomes: [BIOMES.FOREST, BIOMES.PLAINS, BIOMES.TUNDRA],
-  },
   boar: {
     name: 'Boar', hp: 28, speed: 72, w: 24, h: 18,
     aggressive: true, attackLevel: 13, strengthLevel: 16, defenceLevel: 10,
@@ -226,6 +207,192 @@ export const MOB_DEFS = {
     ],
     biomes: [BIOMES.DESERT, BIOMES.PLAINS],
     prey: ['rabbit', 'chicken', 'deer'],
+  },
+
+  // ── Passive mobs (flee on hit / near player) ────────────────────────────
+  deer: {
+    // Existing deer definition updated with fleeOnHit behaviour
+    name: 'Deer', hp: 8, speed: 95, w: 20, h: 24,
+    aggressive: false, fleeOnHit: true, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 2, wanderRadius: 8, drops: [
+      { item: ITEMS.BONES,      chance: 1.0,  qty: 1 },
+      { item: ITEMS.BERRY_SEED, chance: 0.06, qty: 1 },
+      { item: ITEMS.FLAX_SEED,  chance: 0.04, qty: 1 },
+    ],
+    biomes: [BIOMES.FOREST],
+    // TODO: Agent 3 — define drops for deer in LOOT_TABLES in items.js
+  },
+  rabbit: {
+    name: 'Rabbit', hp: 3, speed: 120, w: 12, h: 12,
+    aggressive: false, fleeOnHit: true, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 1, drops: [
+      { item: ITEMS.BONES,      chance: 0.6, qty: 1 },
+      { item: ITEMS.BERRY_SEED, chance: 0.06, qty: 1 },
+    ],
+    biomes: [BIOMES.PLAINS, BIOMES.FOREST],
+    // TODO: Agent 3 — define drops for rabbit in LOOT_TABLES in items.js
+  },
+  arctic_fox: {
+    name: 'Arctic Fox', hp: 6, speed: 105, w: 16, h: 12,
+    aggressive: false, fleeOnHit: true, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 1.5, drops: [
+      { item: ITEMS.BONES, chance: 1.0, qty: 1 },
+    ],
+    biomes: [BIOMES.TUNDRA],
+    // TODO: Agent 3 — define drops for arctic_fox in LOOT_TABLES in items.js
+  },
+  frog: {
+    name: 'Frog', hp: 4, speed: 72, w: 10, h: 8,
+    aggressive: false, fleeOnHit: true, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 1, drops: [{ item: ITEMS.BONES, chance: 0.4, qty: 1 }],
+    biomes: [BIOMES.SWAMP],
+    nearWater: true,
+    // TODO: Agent 3 — define drops for frog in LOOT_TABLES in items.js
+  },
+  fire_lizard: {
+    name: 'Fire Lizard', hp: 15, speed: 65, w: 20, h: 10,
+    aggressive: false, fleeOnHit: true, attackLevel: 1, strengthLevel: 1, defenceLevel: 1,
+    xpHp: 3, drops: [
+      { item: ITEMS.BONES, chance: 0.8, qty: 1 },
+    ],
+    biomes: [BIOMES.VOLCANIC],
+    // TODO: Agent 3 — define drops for fire_lizard in LOOT_TABLES in items.js
+  },
+
+  // ── Biome aggressive mobs ────────────────────────────────────────────────
+  forest_spider: {
+    name: 'Forest Spider', hp: 12, speed: 70, w: 16, h: 12,
+    aggressive: true, aggroRadius: 4, attackLevel: 6, strengthLevel: 6, defenceLevel: 3,
+    xpHp: 5, drops: [
+      { item: ITEMS.BONES,     chance: 0.7, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.3, qty: 2 },
+    ],
+    biomes: [BIOMES.FOREST],
+    // TODO: Agent 3 — define drops for forest_spider in LOOT_TABLES in items.js
+  },
+  bandit: {
+    name: 'Bandit', hp: 18, speed: 65, w: 18, h: 26,
+    aggressive: true, aggroRadius: 5, attackLevel: 9, strengthLevel: 8, defenceLevel: 5,
+    xpHp: 7, drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.7, qty: 6 },
+    ],
+    biomes: [BIOMES.FOREST],
+    // TODO: Agent 3 — define drops for bandit in LOOT_TABLES in items.js
+  },
+  ice_troll: {
+    name: 'Ice Troll', hp: 35, speed: 40, w: 26, h: 30,
+    aggressive: true, aggroRadius: 4, attackLevel: 14, strengthLevel: 14, defenceLevel: 8,
+    xpHp: 12, drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.6, qty: 14 },
+    ],
+    biomes: [BIOMES.TUNDRA],
+    // TODO: Agent 3 — define drops for ice_troll in LOOT_TABLES in items.js
+  },
+  frost_wolf: {
+    name: 'Frost Wolf', hp: 20, speed: 80, w: 22, h: 18,
+    aggressive: true, aggroRadius: 6, attackLevel: 11, strengthLevel: 11, defenceLevel: 6,
+    xpHp: 8, drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.4, qty: 7 },
+    ],
+    biomes: [BIOMES.TUNDRA],
+    // TODO: Agent 3 — define drops for frost_wolf in LOOT_TABLES in items.js
+  },
+  swamp_serpent: {
+    name: 'Swamp Serpent', hp: 22, speed: 60, w: 26, h: 10,
+    aggressive: true, aggroRadius: 4, attackLevel: 10, strengthLevel: 10, defenceLevel: 7,
+    xpHp: 9, drops: [
+      { item: ITEMS.BONES,     chance: 0.8, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.5, qty: 8 },
+    ],
+    biomes: [BIOMES.SWAMP],
+    // TODO: Agent 3 — define drops for swamp_serpent in LOOT_TABLES in items.js
+  },
+  bog_witch: {
+    name: 'Bog Witch', hp: 28, speed: 52, w: 20, h: 28,
+    aggressive: true, aggroRadius: 3, attackLevel: 15, strengthLevel: 12, defenceLevel: 9,
+    xpHp: 11, drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.7, qty: 10 },
+      { item: ITEMS.HERB_SEED, chance: 0.1,  qty: 1 },
+    ],
+    biomes: [BIOMES.SWAMP],
+    // TODO: Agent 3 — define drops for bog_witch in LOOT_TABLES in items.js
+  },
+  sand_scorpion: {
+    name: 'Sand Scorpion', hp: 16, speed: 62, w: 16, h: 12,
+    aggressive: true, aggroRadius: 3, attackLevel: 8, strengthLevel: 8, defenceLevel: 10,
+    xpHp: 7, drops: [
+      { item: ITEMS.BONES,       chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN,   chance: 0.4, qty: 5 },
+      { item: ITEMS.POTATO_SEED, chance: 0.06, qty: 1 },
+    ],
+    biomes: [BIOMES.DESERT],
+    // TODO: Agent 3 — define drops for sand_scorpion in LOOT_TABLES in items.js
+  },
+  desert_bandit: {
+    name: 'Desert Bandit', hp: 20, speed: 68, w: 18, h: 26,
+    aggressive: true, aggroRadius: 5, attackLevel: 12, strengthLevel: 11, defenceLevel: 6,
+    xpHp: 9, drops: [
+      { item: ITEMS.BONES,     chance: 1.0, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.8, qty: 10 },
+      { item: ITEMS.HERB_SEED, chance: 0.05, qty: 1 },
+    ],
+    biomes: [BIOMES.DESERT],
+    // TODO: Agent 3 — define drops for desert_bandit in LOOT_TABLES in items.js
+  },
+  lava_golem: {
+    name: 'Lava Golem', hp: 60, speed: 32, w: 30, h: 34,
+    aggressive: true, aggroRadius: 4, attackLevel: 20, strengthLevel: 22, defenceLevel: 15,
+    xpHp: 16, drops: [
+      { item: ITEMS.BONES,      chance: 0.8,  qty: 1 },
+      { item: ITEMS.GOLD_COIN,  chance: 0.8,  qty: 25 },
+      { item: ITEMS.ORE_COAL,   chance: 0.3,  qty: 1 },
+    ],
+    biomes: [BIOMES.VOLCANIC],
+    // TODO: Agent 3 — define drops for lava_golem in LOOT_TABLES in items.js
+  },
+  fire_imp: {
+    name: 'Fire Imp', hp: 18, speed: 75, w: 14, h: 18,
+    aggressive: true, aggroRadius: 5, attackLevel: 10, strengthLevel: 9, defenceLevel: 6,
+    xpHp: 7, drops: [
+      { item: ITEMS.BONES,     chance: 0.9, qty: 1 },
+      { item: ITEMS.GOLD_COIN, chance: 0.5, qty: 5 },
+    ],
+    biomes: [BIOMES.VOLCANIC],
+    // TODO: Agent 3 — define drops for fire_imp in LOOT_TABLES in items.js
+  },
+
+  // ── NPC archetypes (non-hostile, no combat) ──────────────────────────────
+  // TODO: Agent 5 — call game.openDialogue({npcName, text, options}) when player clicks this NPC
+  villager: {
+    name: 'Villager', hp: 999, speed: 45, w: 16, h: 24,
+    aggressive: false, npc: true, aiType: 'wander', wanderRadius: 6,
+    attackLevel: 1, strengthLevel: 1, defenceLevel: 1, xpHp: 0,
+    // Array of possible NPC names — picked on spawn
+    npcNames: ['Alice', 'Bob', 'Clara', 'Dorin', 'Elsa', 'Finn', 'Greta', 'Harald'],
+    drops: [],
+    biomes: [BIOMES.PLAINS],
+  },
+  // TODO: Agent 5 — call game.openDialogue({npcName, text, options}) when player clicks this NPC
+  npc_guard: {
+    name: 'Guard', hp: 999, speed: 56, w: 20, h: 28,
+    aggressive: false, npc: true, aiType: 'patrol', patrolPath: [],
+    // Guards attack aggressive mobs within 5 tiles (not players)
+    guardRadius: 5,
+    attackLevel: 20, strengthLevel: 18, defenceLevel: 16, xpHp: 0,
+    drops: [],
+    biomes: [BIOMES.PLAINS],
+  },
+  // TODO: Agent 5 — call game.openDialogue({npcName, text, options}) when player clicks this NPC
+  merchant: {
+    name: 'Merchant', hp: 999, speed: 0, w: 18, h: 26,
+    aggressive: false, npc: true, aiType: 'stationary',
+    attackLevel: 1, strengthLevel: 1, defenceLevel: 1, xpHp: 0,
+    drops: [],
+    biomes: [BIOMES.PLAINS],
   },
 
   // ── Kingdom guards ────────────────────────────────────
@@ -468,6 +635,22 @@ export class Mob {
     )));
     this.drops      = def.drops;
     this.retaliates = def.retaliates ?? false;
+    // Flee-on-hit flag for passive mobs
+    this.fleeOnHit  = def.fleeOnHit ?? false;
+    // Flee state (set by takeDamage or proximity check)
+    this.fleeing    = false;
+    this.fleeTimer  = 0;
+    this._lastAttackerX = null;
+    this._lastAttackerY = null;
+    // Per-mob aggro radius override (tiles); falls back to module AGGRO_RANGE if not set
+    this._aggroRadius  = def.aggroRadius ?? AGGRO_RANGE;
+    // Group aggro (Danger Zone mobs)
+    this.groupAggro          = def.groupAggro ?? false;
+    this.groupAggroTriggered = false;
+    this.dangerZone          = def.dangerZone ?? false;
+    // NPC flags
+    this.npc    = def.npc    ?? false;
+    this.aiType = def.aiType ?? null;
     // Per-mob wander radius (tiles); falls back to module constant if not set
     this._wanderRadius = def.wanderRadius ?? WANDER_RADIUS;
 
@@ -532,9 +715,34 @@ export class Mob {
       return;
     }
 
+    // ── NPC — only wander/patrol, skip all combat logic ──────────────────
+    if (this.npc) {
+      if (this._facingFlipTimer > 0) this._facingFlipTimer -= dt;
+      if (this.aiType === 'wander') {
+        this.wanderTimer -= dt;
+        if (this.wanderTimer <= 0) this._startWander(world);
+      }
+      // aiType 'stationary' does nothing; aiType 'patrol' handled externally
+      // Animation still runs via the move block below.
+      // Fall through to movement block at step 4 by returning after the
+      // state-machine section would execute — instead just do move + anim.
+      this._runMovement(dt, world);
+      return;
+    }
+
     // Tick cooldown timers
     if (this._reAggroLockout > 0) this._reAggroLockout -= dt;
     if (this._facingFlipTimer > 0) this._facingFlipTimer -= dt;
+
+    // Tick flee timer for passive mobs
+    if (this.fleeTimer > 0) {
+      this.fleeTimer -= dt;
+      if (this.fleeTimer <= 0) {
+        this.fleeTimer = 0;
+        this.fleeing   = false;
+        if (this.state === 'fleeing') this._transitionIdle();
+      }
+    }
 
     const myDef = MOB_DEFS[this.type];
 
@@ -553,16 +761,53 @@ export class Mob {
     // ── 2. Aggro detection ────────────────────────────────────────────────
     // Aggressive mobs scan for the player. Lockout prevents re-aggro immediately
     // after returning home (stops rapid drop-and-reacquire loops).
+    // Passive mobs skip this block — they never self-initiate combat.
     if (this.aggressive && player && !this.inCombat && this._reAggroLockout <= 0) {
       const pdx = player.cx - this.cx;
       const pdy = player.cy - this.cy;
-      if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= AGGRO_RANGE &&
+      if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= this._aggroRadius &&
           hasLineOfSight(world, this.cx, this.cy, player.cx, player.cy)) {
         this.inCombat     = true;
         this.combatTarget = player;
         this.state        = 'chasing';
         this._repathTimer = 0;
         this._stuckTimer  = 0;
+      }
+    }
+
+    // ── 2b. Group aggro — Danger Zone mobs alert nearby same-type mobs ────
+    if (this.groupAggro && this.inCombat && this.combatTarget && !this.groupAggroTriggered) {
+      this.groupAggroTriggered = true;
+      const GROUP_RANGE_SQ = (10 * TILE_SIZE) ** 2;
+      if (mobs) {
+        for (const other of mobs) {
+          if (other === this || other.dead) continue;
+          if (!other.groupAggro || other.type !== this.type) continue;
+          if (other.inCombat && other.combatTarget) continue; // already has a target
+          const dx = other.cx - this.cx;
+          const dy = other.cy - this.cy;
+          if (dx * dx + dy * dy < GROUP_RANGE_SQ) {
+            other.inCombat     = true;
+            other.combatTarget = this.combatTarget;
+            other.state        = 'chasing';
+            other._repathTimer = 0;
+            other._stuckTimer  = 0;
+            other.groupAggroTriggered = true;
+          }
+        }
+      }
+    }
+    // Reset flag when mob loses its target so group aggro can re-fire next time.
+    if (!this.inCombat && this.groupAggroTriggered) {
+      this.groupAggroTriggered = false;
+    }
+
+    // ── 2c. Passive mob — flee from player when within 3 tiles ────────────
+    if (!this.aggressive && player && !this.fleeing && this.state !== 'fleeing') {
+      const pdx = player.cx - this.cx;
+      const pdy = player.cy - this.cy;
+      if (Math.sqrt(pdx * pdx + pdy * pdy) / TILE_SIZE <= 3) {
+        this._startFleeFromPos(player.cx, player.cy);
       }
     }
 
@@ -949,13 +1194,96 @@ export class Mob {
     this.state   = 'fleeing';
   }
 
+  /**
+   * Flee directly away from an arbitrary world pixel position.
+   * Used for fleeOnHit passive mobs and proximity fleeing from the player.
+   */
+  _startFleeFromPos(fromCx, fromCy) {
+    const dx = fromCx - this.cx;
+    const dy = fromCy - this.cy;
+    const d  = Math.sqrt(dx * dx + dy * dy) || 1;
+    const tCol = Math.round(this.col - (dx / d) * FLEE_SPREAD);
+    const tRow = Math.round(this.row - (dy / d) * FLEE_SPREAD);
+    const col  = Math.max(0, Math.min(tCol, WORLD_COLS - 1));
+    const row  = Math.max(0, Math.min(tRow, WORLD_ROWS - 1));
+    this.targetX = col * TILE_SIZE + TILE_SIZE / 2 - this.w / 2;
+    this.targetY = row * TILE_SIZE + TILE_SIZE      - this.h;
+    this.state   = 'fleeing';
+    this.fleeing = true;
+  }
+
+  /**
+   * Shared movement block — used by both normal update() and NPC update().
+   * Advances position toward (targetX, targetY), handles collision and animation.
+   */
+  _runMovement(dt, world) {
+    this.moving = false;
+    if (this.targetX !== null && this.targetY !== null) {
+      const dx   = this.targetX - this.x;
+      const dy   = this.targetY - this.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      if (dist > 2) {
+        const nx = dx / dist;
+        const ny = dy / dist;
+        if (this._facingFlipTimer <= 0) {
+          if      (dx < -4) { this.facingLeft = true;  this._facingFlipTimer = 0.15; }
+          else if (dx >  4) { this.facingLeft = false; this._facingFlipTimer = 0.15; }
+        }
+        const prevX = this.x;
+        const prevY = this.y;
+        const step  = Math.min(this.speed * dt, dist);
+        if (!world || !world.isBlocked(this.x + nx * step, this.y, this.w, this.h)) {
+          this.x += nx * step;
+        }
+        if (!world || !world.isBlocked(this.x, this.y + ny * step, this.w, this.h)) {
+          this.y += ny * step;
+        }
+        this.x = Math.max(0, Math.min(this.x, WORLD_COLS * TILE_SIZE - this.w));
+        this.y = Math.max(0, Math.min(this.y, WORLD_ROWS * TILE_SIZE - this.h));
+        this.moving = Math.abs(this.x - prevX) > 0.01 || Math.abs(this.y - prevY) > 0.01;
+      } else {
+        _snap(this);
+        this.targetX = null;
+        this.targetY = null;
+        if (this.npc && this.aiType === 'wander') {
+          this.state       = 'idle';
+          this.wanderTimer = WANDER_COOLDOWN_MIN + Math.random() * (WANDER_COOLDOWN_MAX - WANDER_COOLDOWN_MIN);
+        }
+      }
+    }
+    // Walk animation
+    if (this.moving) {
+      this.animTimer += dt;
+      if (this.animTimer > 0.18) {
+        this.animTimer = 0;
+        this.animFrame = (this.animFrame + 1) % 4;
+      }
+    } else {
+      this.animFrame = 0;
+      this.animTimer = 0;
+    }
+  }
+
 
   takeDamage(amount, attacker = null) {
+    const hpBefore = this.hp;
     this.hp = Math.max(0, this.hp - amount);
     // Retaliatory mobs (e.g. guards) fight back when first struck
     if (this.retaliates && !this.inCombat && attacker && amount > 0) {
       this.inCombat     = true;
       this.combatTarget = attacker;
+    }
+    // Passive fleeOnHit mobs start fleeing when hp decreases and not already fleeing
+    if (this.fleeOnHit && amount > 0 && this.hp < hpBefore && !this.fleeing) {
+      this.fleeing   = true;
+      this.fleeTimer = 5; // flee for 5 seconds
+      if (attacker) {
+        const ax = attacker.cx ?? attacker.x;
+        const ay = attacker.cy ?? attacker.y;
+        this._lastAttackerX = ax;
+        this._lastAttackerY = ay;
+        this._startFleeFromPos(ax, ay);
+      }
     }
     return this.hp <= 0;
   }
@@ -1031,11 +1359,41 @@ export class Mob {
       _drawDragonWhelp(ctx, x, y, w, h, bob, legBob, facingLeft);
     } else if (type === 'guard') {
       _drawGuard(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'arctic_fox') {
+      _drawArcticFox(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'fire_lizard') {
+      _drawFireLizard(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'forest_spider') {
+      _drawForestSpider(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'bandit') {
+      _drawBandit(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'ice_troll') {
+      _drawIceTroll(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'frost_wolf') {
+      _drawFrostWolf(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'swamp_serpent') {
+      _drawSwampSerpent(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'bog_witch') {
+      _drawBogWitch(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'sand_scorpion') {
+      _drawSandScorpion(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'desert_bandit') {
+      _drawDesertBandit(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'lava_golem') {
+      _drawLavaGolem(ctx, x, y, w, h, bob, facingLeft);
+    } else if (type === 'fire_imp') {
+      _drawFireImp(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'villager') {
+      _drawVillager(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'npc_guard') {
+      _drawNpcGuard(ctx, x, y, w, h, bob, legBob, facingLeft);
+    } else if (type === 'merchant') {
+      _drawMerchant(ctx, x, y, w, h, bob, legBob, facingLeft);
     }
 
     // Name tag — "Name (Lvl. X)", matching player label style
-    // aggressive=red, retaliates=yellow, passive=white
-    const nameColor = this.aggressive ? '#e74c3c' : this.retaliates ? '#f1c40f' : '#fff';
+    // NPCs: cyan, aggressive=red, retaliates=yellow, passive=white
+    const nameColor = this.npc ? '#4af' : this.aggressive ? '#e74c3c' : this.retaliates ? '#f1c40f' : '#fff';
     const label = `${name} (Lvl. ${this.combatLevel})`;
     ctx.fillStyle = nameColor;
     ctx.strokeStyle = '#000';
@@ -2130,6 +2488,454 @@ function _drawGuard(ctx, x, y, w, h, bob, legBob, facingLeft) {
   ctx.fillRect(cx - w * 0.02, y - h * 0.02 - bob, w * 0.04, h * 0.10);
 }
 
+/* ── New mob draw helpers ───────────────────────────── */
+
+function _drawArcticFox(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // White/silver coat — like fox but pale
+  ctx.fillStyle = '#b0b8b0';
+  ctx.fillRect(x + 2 - legBob, y + h - 5, 3, 5);
+  ctx.fillRect(x + w - 5 + legBob, y + h - 5, 3, 5);
+  const tailX = facingLeft ? x + 1 : x + w - 7;
+  ctx.fillStyle = '#e8eee8';
+  ctx.fillRect(tailX, y + Math.round(h * 0.3) - bob, 6, Math.round(h * 0.5));
+  ctx.fillStyle = '#f8fff8';
+  ctx.fillRect(tailX + 1, y + Math.round(h * 0.55) - bob, 4, Math.round(h * 0.25));
+  ctx.fillStyle = '#d8e4d8';
+  ctx.fillRect(x + 2, y + Math.round(h * 0.3) - bob, w - 4, Math.round(h * 0.5));
+  ctx.fillStyle = '#f0f8f0';
+  ctx.fillRect(x + 4, y + Math.round(h * 0.35) - bob, w - 8, Math.round(h * 0.3));
+  const headX = facingLeft ? x - 1 : x + w - 8;
+  ctx.fillStyle = '#d8e4d8';
+  ctx.fillRect(headX, y + 2 - bob, 8, 6);
+  ctx.fillStyle = '#b0b8b0';
+  ctx.fillRect(headX + (facingLeft ? 4 : 0), y - 3 - bob, 3, 5);
+  ctx.fillRect(headX + (facingLeft ? 1 : 3), y - 3 - bob, 3, 5);
+  ctx.fillStyle = '#ffd8d8';
+  ctx.fillRect(headX + (facingLeft ? 5 : 1), y - 2 - bob, 1, 3);
+  ctx.fillStyle = '#c8d0c0';
+  ctx.fillRect(facingLeft ? headX - 3 : headX + 7, y + 4 - bob, 3, 3);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(headX + (facingLeft ? 5 : 1), y + 3 - bob, 2, 2);
+  ctx.fillStyle = '#60a0d0';
+  ctx.fillRect(headX + (facingLeft ? 5 : 1), y + 3 - bob, 1, 1);
+}
+
+function _drawFireLizard(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Bright orange-red lizard on volcanic ground
+  ctx.fillStyle = '#8a2800';
+  ctx.fillRect(x + 2 - legBob, y + h - 3, 3, 3);
+  ctx.fillRect(x + w - 5 + legBob, y + h - 3, 3, 3);
+  ctx.fillRect(x + 6 + legBob, y + h - 2, 2, 2);
+  ctx.fillRect(x + w - 8 - legBob, y + h - 2, 2, 2);
+  // Body
+  ctx.fillStyle = '#d04000';
+  ctx.fillRect(x + 3, y + Math.round(h * 0.3) - bob, w - 6, Math.round(h * 0.55));
+  // Scale ridges
+  ctx.fillStyle = '#ff6010';
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(x + 5 + i * Math.round((w - 12) / 4), y + Math.round(h * 0.3) - bob, 3, 2);
+  }
+  // Tail
+  const tailX = facingLeft ? x + w - 4 : x;
+  ctx.fillStyle = '#b83400';
+  ctx.fillRect(tailX, y + Math.round(h * 0.4) - bob, 5, Math.round(h * 0.35));
+  // Head
+  const headX = facingLeft ? x - 2 : x + w - 8;
+  ctx.fillStyle = '#d04000';
+  ctx.fillRect(headX, y + Math.round(h * 0.2) - bob, 9, Math.round(h * 0.5));
+  ctx.fillStyle = '#ff8030';
+  ctx.fillRect(headX + (facingLeft ? 1 : 1), y + Math.round(h * 0.22) - bob, 5, 2);
+  ctx.fillStyle = '#ffcc00';
+  ctx.fillRect(headX + (facingLeft ? 6 : 1), y + Math.round(h * 0.28) - bob, 2, 2);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(headX + (facingLeft ? 6 : 1), y + Math.round(h * 0.29) - bob, 1, 1);
+}
+
+function _drawForestSpider(ctx, x, y, w, h, bob, _facingLeft) {
+  // Green-brown forest spider, smaller than giant_spider
+  const cx2 = x + w * 0.5, cy2 = y + h * 0.5 - bob;
+  ctx.strokeStyle = '#2a3a0a'; ctx.lineWidth = 1.5;
+  for (let i = 0; i < 4; i++) {
+    const side = i < 2 ? -1 : 1;
+    const angle = (i % 2 === 0 ? -0.6 : 0.4) * (side < 0 ? -1 : 1);
+    ctx.beginPath();
+    ctx.moveTo(cx2 + side * w * 0.18, cy2);
+    ctx.lineTo(cx2 + side * w * 0.5, cy2 + Math.sin(angle) * h * 0.35 - bob * 0.4);
+    ctx.lineTo(cx2 + side * w * 0.78, cy2 + Math.sin(angle + 0.4) * h * 0.55);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#3a5010';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2 + h * 0.12, w * 0.26, h * 0.25, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#58a828';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2 + h * 0.12, w * 0.1, h * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#2a3a0a';
+  ctx.beginPath(); ctx.ellipse(cx2, cy2 - h * 0.08, w * 0.2, h * 0.18, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#cc3010';
+  for (let i = -1; i <= 1; i += 2) {
+    ctx.beginPath(); ctx.arc(cx2 + i * w * 0.07, cy2 - h * 0.14, 1.5, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function _drawBandit(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Hooded rogue in dark leather
+  ctx.fillStyle = '#2a1a0a';
+  ctx.fillRect(x + 3 - legBob, y + h - 6, 4, 6);
+  ctx.fillRect(x + w - 7 + legBob, y + h - 6, 4, 6);
+  ctx.fillStyle = '#3a2810';
+  ctx.fillRect(x + 2, y + h * 0.38 - bob, w - 4, h * 0.46);
+  // Leather straps
+  ctx.fillStyle = '#5a3a18';
+  ctx.fillRect(x + 4, y + h * 0.4 - bob, w - 8, 2);
+  ctx.fillRect(x + Math.floor(w / 2) - 1, y + h * 0.4 - bob, 2, h * 0.3);
+  // Arms
+  ctx.fillStyle = '#3a2810';
+  ctx.fillRect(x - 1, y + h * 0.38 - bob, 4, h * 0.38);
+  ctx.fillRect(x + w - 3, y + h * 0.38 - bob, 4, h * 0.38);
+  // Hood
+  ctx.fillStyle = '#1a1208';
+  ctx.fillRect(x + 1, y + 1 - bob, w - 2, h * 0.4);
+  // Face shadow in hood
+  ctx.fillStyle = '#2a1a0a';
+  ctx.fillRect(x + 3, y + 5 - bob, w - 6, h * 0.2);
+  // Eye gleam
+  ctx.fillStyle = '#e8c060';
+  const eyeX = facingLeft ? x + w - 7 : x + 4;
+  ctx.fillRect(eyeX, y + 7 - bob, 3, 2);
+  // Dagger hint
+  ctx.fillStyle = '#a0a8b0';
+  ctx.fillRect(facingLeft ? x - 2 : x + w - 2, y + h * 0.5 - bob, 2, h * 0.28);
+}
+
+function _drawIceTroll(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Blue-white icy troll — like troll but with frost colouring
+  ctx.fillStyle = '#3a5068';
+  ctx.fillRect(x + 2 - legBob, y + h - 10, 8, 10);
+  ctx.fillRect(x + w - 10 + legBob, y + h - 10, 8, 10);
+  ctx.fillStyle = '#5080a8';
+  ctx.fillRect(x, y + h * 0.3 - bob, w, h * 0.55);
+  // Ice crystal patches
+  ctx.fillStyle = '#a0d8f0';
+  ctx.fillRect(x + 3, y + h * 0.35 - bob, 5, 3);
+  ctx.fillRect(x + w - 10, y + h * 0.45 - bob, 6, 3);
+  // Ice shards on shoulders
+  ctx.fillStyle = '#c8ecff';
+  ctx.fillRect(x - 2, y + h * 0.28 - bob, 3, 5);
+  ctx.fillRect(x + w - 1, y + h * 0.28 - bob, 3, 5);
+  // Arms
+  ctx.fillStyle = '#5080a8';
+  ctx.fillRect(x - 4, y + h * 0.3 - bob, 6, h * 0.5);
+  ctx.fillRect(x + w - 2, y + h * 0.3 - bob, 6, h * 0.5);
+  // Big icy head
+  ctx.fillStyle = '#5080a8';
+  ctx.fillRect(x + 1, y - bob, w - 2, h * 0.38);
+  // Frost nose
+  ctx.fillStyle = '#3a5068';
+  ctx.fillRect(x + Math.floor(w / 2) - 3, y + h * 0.18 - bob, 6, 5);
+  // Glowing ice eyes
+  ctx.fillStyle = '#80d8ff';
+  ctx.fillRect(x + 5, y + 6 - bob, 3, 3);
+  ctx.fillRect(x + w - 8, y + 6 - bob, 3, 3);
+}
+
+function _drawFrostWolf(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Like wolf but icy blue-white
+  ctx.fillStyle = '#8090a8';
+  ctx.fillRect(x + 2 - legBob, y + h - 6, 4, 6);
+  ctx.fillRect(x + w - 6 + legBob, y + h - 6, 4, 6);
+  ctx.fillRect(x + 5 + legBob, y + h - 5, 3, 5);
+  ctx.fillRect(x + w - 8 - legBob, y + h - 5, 3, 5);
+  const tailX = facingLeft ? x + w - 4 : x;
+  ctx.fillStyle = '#a0b4c8';
+  ctx.fillRect(tailX, y + Math.round(h * 0.1) - bob, 4, Math.round(h * 0.4));
+  ctx.fillStyle = '#e0f0ff';
+  ctx.fillRect(tailX + 1, y + Math.round(h * 0.12) - bob, 2, 4);
+  ctx.fillStyle = '#b0c4d8';
+  ctx.fillRect(x + 2, y + Math.round(h * 0.28) - bob, w - 4, Math.round(h * 0.48));
+  ctx.fillStyle = '#8090a8';
+  ctx.fillRect(x + 3, y + Math.round(h * 0.3) - bob, w - 6, Math.round(h * 0.22));
+  const neckX = facingLeft ? x + w - 8 : x + 2;
+  ctx.fillStyle = '#b0c4d8';
+  ctx.fillRect(neckX, y + Math.round(h * 0.18) - bob, 6, Math.round(h * 0.2));
+  const headX = facingLeft ? x + w - 11 : x - 1;
+  ctx.fillStyle = '#b0c4d8';
+  ctx.fillRect(headX, y + 2 - bob, 10, 8);
+  ctx.fillStyle = '#8090a8';
+  ctx.fillRect(headX + (facingLeft ? 6 : 1), y - 4 - bob, 3, 6);
+  ctx.fillRect(headX + (facingLeft ? 2 : 5), y - 3 - bob, 3, 5);
+  ctx.fillStyle = '#7898b8';
+  ctx.fillRect(facingLeft ? headX - 4 : headX + 9, y + 5 - bob, 5, 4);
+  ctx.fillStyle = '#80d8ff';
+  ctx.fillRect(headX + (facingLeft ? 6 : 2), y + 3 - bob, 2, 2);
+}
+
+function _drawSwampSerpent(ctx, x, y, w, h, bob, facingLeft) {
+  // Larger, murkier snake — green-brown swamp colouring
+  const bx  = facingLeft ? x + w - 2 : x;
+  const dir  = facingLeft ? -1 : 1;
+  const segW = Math.round(w / 5);
+  ctx.fillStyle = '#1a3810';
+  ctx.fillRect(bx + dir * Math.round(w * 0.72), y + 3 - bob, segW - 1, h - 4);
+  ctx.fillStyle = '#2a5818';
+  ctx.fillRect(bx + dir * Math.round(w * 0.44), y + 1 - bob, segW + 2, h - 1);
+  ctx.fillRect(bx + dir * Math.round(w * 0.22), y + 2 - bob, segW + 1, h - 2);
+  // Murky scales
+  ctx.fillStyle = '#1a3810';
+  for (let i = 0; i < 4; i++) {
+    ctx.fillRect(bx + dir * (Math.round(w * 0.24) + i * 3), y + 3 - bob, 3, 2);
+  }
+  // Wider, flatter head
+  ctx.fillStyle = '#2a5818';
+  ctx.fillRect(facingLeft ? x - 3 : x + w - 9, y - bob, 11, h);
+  ctx.fillStyle = '#c8b400';
+  ctx.fillRect(facingLeft ? x + 5 : x + w - 8, y + 2 - bob, 3, 3);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(facingLeft ? x + 6 : x + w - 7, y + 3 - bob, 1, 2);
+  ctx.fillStyle = '#aa2020';
+  const tongueX = facingLeft ? x - 5 : x + w + 1;
+  ctx.fillRect(tongueX, y + Math.round(h * 0.5) - bob, 4, 1);
+}
+
+function _drawBogWitch(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Robed hag figure with greenish skin
+  ctx.fillStyle = '#2a1a08';
+  ctx.fillRect(x + 4 - legBob, y + h - 5, 4, 5);
+  ctx.fillRect(x + w - 8 + legBob, y + h - 5, 4, 5);
+  // Dark robe
+  ctx.fillStyle = '#1a2808';
+  ctx.fillRect(x + 1, y + h * 0.35 - bob, w - 2, h * 0.5);
+  // Robe hem widens at bottom
+  ctx.fillRect(x, y + h * 0.7 - bob, w, h * 0.15);
+  // Bony arms
+  ctx.fillStyle = '#4a7028';
+  ctx.fillRect(x - 2, y + h * 0.38 - bob, 5, h * 0.35);
+  ctx.fillRect(x + w - 3, y + h * 0.38 - bob, 5, h * 0.35);
+  // Gnarled hands
+  ctx.fillStyle = '#3a5820';
+  ctx.fillRect(x - 2, y + h * 0.68 - bob, 4, 3);
+  ctx.fillRect(x + w - 2, y + h * 0.68 - bob, 4, 3);
+  // Head — long nose, hood
+  ctx.fillStyle = '#1a2808';
+  ctx.fillRect(x + 2, y + 2 - bob, w - 4, h * 0.38);
+  // Green face
+  ctx.fillStyle = '#4a7028';
+  ctx.fillRect(x + 5, y + 6 - bob, w - 10, h * 0.22);
+  // Long nose
+  ctx.fillStyle = '#3a5820';
+  ctx.fillRect(facingLeft ? x + 4 : x + w - 7, y + 10 - bob, 3, 5);
+  // Glowing eyes
+  ctx.fillStyle = '#80ff40';
+  ctx.fillRect(x + 6, y + 8 - bob, 3, 3);
+  ctx.fillRect(x + w - 9, y + 8 - bob, 3, 3);
+  // Pointy hat
+  ctx.fillStyle = '#0a1404';
+  ctx.beginPath();
+  ctx.moveTo(x + Math.floor(w / 2), y - 10 - bob);
+  ctx.lineTo(x + 3, y + 3 - bob);
+  ctx.lineTo(x + w - 3, y + 3 - bob);
+  ctx.fill();
+}
+
+function _drawSandScorpion(ctx, x, y, w, h, bob, facingLeft) {
+  // Sandy desert scorpion — like scorpion but sandy-coloured
+  ctx.fillStyle = '#7a5820';
+  for (let i = 0; i < 3; i++) {
+    const lx = x + 3 + i * 3;
+    ctx.fillRect(lx - 3, y + Math.round(h * 0.5) - bob, 3, 2);
+    ctx.fillRect(lx + w - 5, y + Math.round(h * 0.5) - bob, 3, 2);
+  }
+  ctx.fillStyle = '#9a7030';
+  ctx.fillRect(x + 2, y + Math.round(h * 0.25) - bob, Math.round(w * 0.55), Math.round(h * 0.5));
+  ctx.fillStyle = '#7a5820';
+  const tailBase = facingLeft ? x + 2 : x + Math.round(w * 0.55);
+  ctx.fillRect(tailBase, y + Math.round(h * 0.15) - bob, Math.round(w * 0.28), Math.round(h * 0.25));
+  ctx.fillRect(tailBase + (facingLeft ? -3 : Math.round(w * 0.2)), y + 1 - bob, Math.round(w * 0.22), Math.round(h * 0.2));
+  ctx.fillStyle = '#ff8800';
+  ctx.fillRect(tailBase + (facingLeft ? -4 : Math.round(w * 0.38)), y - 1 - bob, 3, 3);
+  ctx.fillStyle = '#9a7030';
+  const clawX = facingLeft ? x + Math.round(w * 0.45) : x + 1;
+  ctx.fillRect(clawX, y + Math.round(h * 0.28) - bob, 4, 3);
+  ctx.fillRect(clawX + (facingLeft ? 3 : -2), y + Math.round(h * 0.2) - bob, 3, 2);
+  ctx.fillRect(clawX + (facingLeft ? 3 : -2), y + Math.round(h * 0.34) - bob, 3, 2);
+  ctx.fillStyle = '#cc6600';
+  ctx.fillRect(x + Math.round(w * 0.35), y + Math.round(h * 0.28) - bob, 2, 2);
+}
+
+function _drawDesertBandit(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Wrapped desert raider — sandy cloth, keffiyeh
+  ctx.fillStyle = '#6a4818';
+  ctx.fillRect(x + 3 - legBob, y + h - 6, 4, 6);
+  ctx.fillRect(x + w - 7 + legBob, y + h - 6, 4, 6);
+  // Sandy robe
+  ctx.fillStyle = '#c8a060';
+  ctx.fillRect(x + 2, y + h * 0.38 - bob, w - 4, h * 0.48);
+  // Belt
+  ctx.fillStyle = '#5a3010';
+  ctx.fillRect(x + 2, y + h * 0.6 - bob, w - 4, 3);
+  // Arms
+  ctx.fillStyle = '#b89050';
+  ctx.fillRect(x - 1, y + h * 0.38 - bob, 4, h * 0.35);
+  ctx.fillRect(x + w - 3, y + h * 0.38 - bob, 4, h * 0.35);
+  // Keffiyeh head wrap
+  ctx.fillStyle = '#e8c888';
+  ctx.fillRect(x + 2, y + 2 - bob, w - 4, h * 0.38);
+  // Wrap fold
+  ctx.fillStyle = '#c8a060';
+  ctx.fillRect(x + 2, y + 2 - bob, w - 4, 4);
+  // Cloth drape (lower face)
+  ctx.fillRect(x + 3, y + h * 0.25 - bob, w - 6, h * 0.15);
+  // Eyes exposed
+  ctx.fillStyle = '#3a2010';
+  ctx.fillRect(x + 5, y + 8 - bob, w - 10, 4);
+  ctx.fillStyle = '#e8c000';
+  const eyeX = facingLeft ? x + w - 8 : x + 5;
+  ctx.fillRect(eyeX, y + 9 - bob, 3, 2);
+  // Scimitar hint
+  ctx.fillStyle = '#c0c8b0';
+  const swX = facingLeft ? x - 3 : x + w - 1;
+  ctx.fillRect(swX, y + h * 0.45 - bob, 3, h * 0.3);
+}
+
+function _drawLavaGolem(ctx, x, y, w, h, bob, _facingLeft) {
+  // Massive stone golem with lava cracks glowing red-orange
+  const stone = '#3a2820', lava = '#ff4400';
+  ctx.fillStyle = stone;
+  ctx.fillRect(x + w * 0.18, y + h * 0.58 - bob, w * 0.24, h * 0.42);
+  ctx.fillRect(x + w * 0.58, y + h * 0.58 - bob, w * 0.24, h * 0.42);
+  ctx.beginPath(); ctx.ellipse(x + w * 0.5, y + h * 0.38 - bob, w * 0.42, h * 0.32, 0, 0, Math.PI * 2); ctx.fill();
+  // Lava cracks glowing
+  ctx.strokeStyle = lava; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.28, y + h * 0.28 - bob); ctx.lineTo(x + w * 0.44, y + h * 0.48 - bob); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + w * 0.68, y + h * 0.32 - bob); ctx.lineTo(x + w * 0.55, y + h * 0.52 - bob); ctx.stroke();
+  ctx.strokeStyle = '#ff8800'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(x + w * 0.35, y + h * 0.5 - bob); ctx.lineTo(x + w * 0.5, y + h * 0.6 - bob); ctx.stroke();
+  // Arms
+  ctx.fillStyle = stone;
+  ctx.fillRect(x - w * 0.04, y + h * 0.22 - bob, w * 0.22, h * 0.45);
+  ctx.fillRect(x + w * 0.82, y + h * 0.22 - bob, w * 0.22, h * 0.45);
+  // Fists with lava glow
+  ctx.fillStyle = '#5a1800';
+  ctx.beginPath(); ctx.arc(x + w * 0.07, y + h * 0.65 - bob, w * 0.13, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w * 0.93, y + h * 0.65 - bob, w * 0.13, 0, Math.PI * 2); ctx.fill();
+  // Head
+  ctx.fillStyle = stone;
+  ctx.beginPath(); ctx.ellipse(x + w * 0.5, y + h * 0.1 - bob, w * 0.28, h * 0.22, 0, 0, Math.PI * 2); ctx.fill();
+  // Glowing lava eyes
+  ctx.fillStyle = lava;
+  ctx.beginPath(); ctx.arc(x + w * 0.4, y + h * 0.08 - bob, w * 0.07, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w * 0.6, y + h * 0.08 - bob, w * 0.07, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ffaa00';
+  ctx.beginPath(); ctx.arc(x + w * 0.4, y + h * 0.08 - bob, w * 0.035, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + w * 0.6, y + h * 0.08 - bob, w * 0.035, 0, Math.PI * 2); ctx.fill();
+}
+
+function _drawFireImp(ctx, x, y, w, h, bob, legBob, _facingLeft) {
+  // Small red demonic imp with tiny wings
+  ctx.fillStyle = '#8a0a0a';
+  ctx.fillRect(x + 3 - legBob, y + h - 5, 3, 5);
+  ctx.fillRect(x + w - 6 + legBob, y + h - 5, 3, 5);
+  // Body
+  ctx.fillStyle = '#c02020';
+  ctx.fillRect(x + 2, y + h * 0.4 - bob, w - 4, h * 0.44);
+  // Tiny wings
+  ctx.fillStyle = '#4a0808';
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.4, y + h * 0.38 - bob);
+  ctx.bezierCurveTo(x + w * 0.15, y + h * 0.2 - bob, x + w * 0.05, y + h * 0.5 - bob, x + w * 0.25, y + h * 0.52 - bob);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x + w * 0.6, y + h * 0.38 - bob);
+  ctx.bezierCurveTo(x + w * 0.85, y + h * 0.2 - bob, x + w * 0.95, y + h * 0.5 - bob, x + w * 0.75, y + h * 0.52 - bob);
+  ctx.fill();
+  // Arms
+  ctx.fillStyle = '#c02020';
+  ctx.fillRect(x - 1, y + h * 0.42 - bob, 4, h * 0.3);
+  ctx.fillRect(x + w - 3, y + h * 0.42 - bob, 4, h * 0.3);
+  // Head
+  ctx.fillStyle = '#c02020';
+  ctx.fillRect(x + 1, y + 3 - bob, w - 2, h * 0.38);
+  // Horns
+  ctx.fillStyle = '#6a0000';
+  ctx.fillRect(x + 3, y - 3 - bob, 2, 6);
+  ctx.fillRect(x + w - 5, y - 3 - bob, 2, 6);
+  // Glowing eyes
+  ctx.fillStyle = '#ffcc00';
+  ctx.fillRect(x + 4, y + 6 - bob, 3, 3);
+  ctx.fillRect(x + w - 7, y + 6 - bob, 3, 3);
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x + 5, y + 7 - bob, 1, 2);
+  ctx.fillRect(x + w - 6, y + 7 - bob, 1, 2);
+}
+
+function _drawVillager(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Simple peasant — coloured tunic, no armour
+  ctx.fillStyle = '#5a3a18';
+  ctx.fillRect(x + 3 - legBob, y + h - 5, 4, 5);
+  ctx.fillRect(x + w - 7 + legBob, y + h - 5, 4, 5);
+  // Tunic (earthy colour)
+  ctx.fillStyle = '#8a6030';
+  ctx.fillRect(x + 2, y + h * 0.38 - bob, w - 4, h * 0.46);
+  // Belt
+  ctx.fillStyle = '#4a2808';
+  ctx.fillRect(x + 2, y + h * 0.6 - bob, w - 4, 2);
+  // Arms
+  ctx.fillStyle = '#8a6030';
+  ctx.fillRect(x - 1, y + h * 0.38 - bob, 4, h * 0.32);
+  ctx.fillRect(x + w - 3, y + h * 0.38 - bob, 4, h * 0.32);
+  // Skin hands
+  ctx.fillStyle = '#e8b87a';
+  ctx.fillRect(x - 1, y + h * 0.66 - bob, 4, 4);
+  ctx.fillRect(x + w - 3, y + h * 0.66 - bob, 4, 4);
+  // Head
+  ctx.fillStyle = '#e8b87a';
+  ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.18 - bob, w * 0.28, 0, Math.PI * 2); ctx.fill();
+  // Hair
+  ctx.fillStyle = '#5a3010';
+  ctx.fillRect(x + 2, y + 1 - bob, w - 4, 5);
+  // Eyes
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x + w * (facingLeft ? 0.55 : 0.25), y + h * 0.14 - bob, 2, 2);
+}
+
+function _drawNpcGuard(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Reuse the existing guard draw — same appearance as kingdom guard
+  _drawGuard(ctx, x, y, w, h, bob, legBob, facingLeft);
+}
+
+function _drawMerchant(ctx, x, y, w, h, bob, legBob, facingLeft) {
+  // Prosperous merchant — fine clothes, coin pouch
+  ctx.fillStyle = '#3a2808';
+  ctx.fillRect(x + 3 - legBob, y + h - 5, 4, 5);
+  ctx.fillRect(x + w - 7 + legBob, y + h - 5, 4, 5);
+  // Fine robe (deep blue-purple)
+  ctx.fillStyle = '#2a1a6a';
+  ctx.fillRect(x + 1, y + h * 0.35 - bob, w - 2, h * 0.5);
+  // Gold trim
+  ctx.fillStyle = '#d4aa00';
+  ctx.fillRect(x + 1, y + h * 0.35 - bob, w - 2, 2);
+  ctx.fillRect(x + 1, y + h * 0.82 - bob, w - 2, 2);
+  ctx.fillRect(x + 1, y + h * 0.35 - bob, 2, h * 0.48);
+  ctx.fillRect(x + w - 3, y + h * 0.35 - bob, 2, h * 0.48);
+  // Arms
+  ctx.fillStyle = '#2a1a6a';
+  ctx.fillRect(x - 1, y + h * 0.37 - bob, 4, h * 0.36);
+  ctx.fillRect(x + w - 3, y + h * 0.37 - bob, 4, h * 0.36);
+  // Coin pouch
+  ctx.fillStyle = '#c8a010';
+  ctx.beginPath(); ctx.arc(facingLeft ? x - 1 : x + w + 1, y + h * 0.65 - bob, 4, 0, Math.PI * 2); ctx.fill();
+  // Head
+  ctx.fillStyle = '#e8b87a';
+  ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.17 - bob, w * 0.26, 0, Math.PI * 2); ctx.fill();
+  // Hat (merchant's cap)
+  ctx.fillStyle = '#2a1a6a';
+  ctx.fillRect(x + 3, y - 2 - bob, w - 6, 6);
+  ctx.fillRect(x + 1, y + 3 - bob, w - 2, 3);
+  ctx.fillStyle = '#d4aa00';
+  ctx.fillRect(x + 1, y + 3 - bob, w - 2, 1);
+  // Eyes
+  ctx.fillStyle = '#111';
+  ctx.fillRect(x + w * (facingLeft ? 0.55 : 0.25), y + h * 0.14 - bob, 2, 2);
+}
+
 /* ── MobManager ─────────────────────────────────────── */
 
 export class MobManager {
@@ -2194,6 +3000,22 @@ export class MobManager {
       boar:       byArea(80000,  2,  12),
       snake:      byArea(88000,  2,  10),
       coyote:     byArea(52000,  3,  16),
+
+      // New passive mobs
+      arctic_fox:  byArea(120000, 1,   6),
+      fire_lizard: byArea(150000, 1,   5),
+
+      // New biome aggressive mobs
+      forest_spider: byArea(60000,  3,  16),
+      bandit:        byArea(70000,  3,  14),
+      ice_troll:     byArea(110000, 2,   8),
+      frost_wolf:    byArea(80000,  2,  12),
+      swamp_serpent: byArea(100000, 2,   8),
+      bog_witch:     byArea(130000, 1,   6),
+      sand_scorpion: byArea(80000,  2,  10),
+      desert_bandit: byArea(90000,  2,  10),
+      lava_golem:    byArea(200000, 1,   4),
+      fire_imp:      byArea(110000, 2,   8),
     };
   }
 

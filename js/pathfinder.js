@@ -1,5 +1,12 @@
 import { WORLD_COLS, WORLD_ROWS } from './constants.js';
 
+// findPath(map, startCol, startRow, endCol, endRow) -> [{col,row}] | null
+// nearestWalkableAdjacent(map, col, row, fromCol, fromRow) -> {col,row} | null
+//
+// `map` must expose: map.isSolid(col, row), map.cols, map.rows
+//
+// TODO: game.js — update all findPath() and nearestWalkableAdjacent() calls to pass activeMap as first arg
+
 /**
  * 8-direction BFS pathfinding on the tile grid.
  *
@@ -8,11 +15,8 @@ import { WORLD_COLS, WORLD_ROWS } from './constants.js';
  * Returns an array of { col, row } from the tile AFTER start
  * up to goal (inclusive).
  *
- * Returns [] if:
- * - start === goal
- * - start/goal are out of bounds
- * - no path exists
- * - BFS exploration exceeds MAX_TILES
+ * Returns [] if start === goal.
+ * Returns null if no path exists or path exceeds 300 tiles.
  */
 
 const N = WORLD_COLS * WORLD_ROWS;
@@ -24,13 +28,16 @@ const DC = [ 1, -1,  0,  0,  1, -1,  1, -1 ];
 const DR = [ 0,  0,  1, -1,  1,  1, -1, -1 ];
 
 const MAX_TILES = 80_000;
+const MAX_PATH_LENGTH = 300;
 
 // Reused arrays for goal-biased direction ordering
 const _dirOrder = new Int8Array(8);
 const _dirScore = new Float64Array(8);
 
-function inBounds(col, row) {
-  return col >= 0 && col < WORLD_COLS && row >= 0 && row < WORLD_ROWS;
+function inBounds(map, col, row) {
+  const cols = map.cols != null ? map.cols : WORLD_COLS;
+  const rows = map.rows != null ? map.rows : WORLD_ROWS;
+  return col >= 0 && col < cols && row >= 0 && row < rows;
 }
 
 function isDiagonalDir(d) {
@@ -41,12 +48,12 @@ function isDiagonalDir(d) {
  * Prevent diagonal corner cutting:
  * if moving diagonally, both touching orthogonal tiles must be walkable.
  */
-function canStep(world, c, r, d) {
+function canStep(map, c, r, d) {
   const nc = c + DC[d];
   const nr = r + DR[d];
 
-  if (!inBounds(nc, nr)) return false;
-  if (world.isSolid(nc, nr)) return false;
+  if (!inBounds(map, nc, nr)) return false;
+  if (map.isSolid(nc, nr)) return false;
 
   if (isDiagonalDir(d)) {
     const side1c = c + DC[d];
@@ -54,7 +61,7 @@ function canStep(world, c, r, d) {
     const side2c = c;
     const side2r = r + DR[d];
 
-    if (world.isSolid(side1c, side1r) || world.isSolid(side2c, side2r)) {
+    if (map.isSolid(side1c, side1r) || map.isSolid(side2c, side2r)) {
       return false;
     }
   }
@@ -96,14 +103,23 @@ function computeDirOrder(col, row, goalCol, goalRow) {
   }
 }
 
-export function findPath(world, startCol, startRow, goalCol, goalRow) {
-  if (!inBounds(startCol, startRow) || !inBounds(goalCol, goalRow)) return [];
+export function findPath(map, startCol, startRow, goalCol, goalRow) {
+  // Use map dimensions when available, fall back to world constants
+  const mapCols = map.cols != null ? map.cols : WORLD_COLS;
+  const mapRows = map.rows != null ? map.rows : WORLD_ROWS;
+
+  // Edge case: out of bounds
+  if (startCol < 0 || startCol >= mapCols || startRow < 0 || startRow >= mapRows) return null;
+  if (goalCol  < 0 || goalCol  >= mapCols || goalRow  < 0 || goalRow  >= mapRows) return null;
+
+  // Edge case: start === end
   if (startCol === goalCol && startRow === goalRow) return [];
 
   _parent.fill(-1);
 
-  const si = startCol + startRow * WORLD_COLS;
-  const gi = goalCol + goalRow * WORLD_COLS;
+  const stride = mapCols;
+  const si = startCol + startRow * stride;
+  const gi = goalCol  + goalRow  * stride;
 
   _parent[si] = si;
 
@@ -117,8 +133,8 @@ export function findPath(world, startCol, startRow, goalCol, goalRow) {
 
   while (head < tail && explored < MAX_TILES) {
     const ci = _queue[head++];
-    const c = ci % WORLD_COLS;
-    const r = Math.floor(ci / WORLD_COLS);
+    const c = ci % stride;
+    const r = Math.floor(ci / stride);
 
     explored++;
 
@@ -131,11 +147,11 @@ export function findPath(world, startCol, startRow, goalCol, goalRow) {
 
     for (let k = 0; k < 8; k++) {
       const d = _dirOrder[k];
-      if (!canStep(world, c, r, d)) continue;
+      if (!canStep(map, c, r, d)) continue;
 
       const nc = c + DC[d];
       const nr = r + DR[d];
-      const ni = nc + nr * WORLD_COLS;
+      const ni = nc + nr * stride;
 
       if (_parent[ni] !== -1) continue;
 
@@ -144,20 +160,25 @@ export function findPath(world, startCol, startRow, goalCol, goalRow) {
     }
   }
 
-  if (!found) return [];
+  // No path found
+  if (!found) return null;
 
   const path = [];
   let i = gi;
 
   while (i !== si) {
     path.push({
-      col: i % WORLD_COLS,
-      row: Math.floor(i / WORLD_COLS),
+      col: i % stride,
+      row: Math.floor(i / stride),
     });
     i = _parent[i];
   }
 
   path.reverse();
+
+  // Path exceeds maximum length — too far, return null
+  if (path.length > MAX_PATH_LENGTH) return null;
+
   return path;
 }
 
@@ -167,8 +188,8 @@ export function findPath(world, startCol, startRow, goalCol, goalRow) {
  *
  * Includes diagonals, but still disallows corner cutting.
  */
-export function nearestWalkableAdjacent(world, col, row, fromCol, fromRow) {
-  if (!inBounds(col, row)) return null;
+export function nearestWalkableAdjacent(map, col, row, fromCol, fromRow) {
+  if (!inBounds(map, col, row)) return null;
 
   let best = null;
   let bestDist = Infinity;
@@ -177,8 +198,8 @@ export function nearestWalkableAdjacent(world, col, row, fromCol, fromRow) {
     const nc = col + DC[d];
     const nr = row + DR[d];
 
-    if (!inBounds(nc, nr)) continue;
-    if (world.isSolid(nc, nr)) continue;
+    if (!inBounds(map, nc, nr)) continue;
+    if (map.isSolid(nc, nr)) continue;
 
     if (isDiagonalDir(d)) {
       const side1c = col + DC[d];
@@ -186,7 +207,7 @@ export function nearestWalkableAdjacent(world, col, row, fromCol, fromRow) {
       const side2c = col;
       const side2r = row + DR[d];
 
-      if (world.isSolid(side1c, side1r) || world.isSolid(side2c, side2r)) {
+      if (map.isSolid(side1c, side1r) || map.isSolid(side2c, side2r)) {
         continue;
       }
     }

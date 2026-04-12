@@ -57,6 +57,15 @@ export const SEED_DEFS = {
   },
 };
 
+// ── Greenhouse crop definitions ────────────────────────────────────────────
+// growthDuration: seconds until fully grown
+// yield.id: item ID — TODO: Agent 3 defines wheat/potato/herb_bundle items in items.js
+export const GREENHOUSE_CROPS = {
+  wheat:  { growthDuration: 180, yield: { id: 'wheat',        qty: 3 } },
+  potato: { growthDuration: 240, yield: { id: 'potato',       qty: 2 } },
+  herb:   { growthDuration: 300, yield: { id: 'herb_bundle',  qty: 1 } },
+};
+
 // ── FarmingState ───────────────────────────────────────────────────────────
 
 export class FarmingState {
@@ -66,6 +75,19 @@ export class FarmingState {
      * Each array has exactly PATCH_LOCAL_POSITIONS.length (6) slots.
      */
     this.patches = new Map();
+
+    /**
+     * Greenhouse patches — up to 12 slots, driven by tickGreenhouse(dt).
+     * Each slot: { state: 'empty'|'seeded'|'growing'|'ready', cropType: string|null,
+     *              growthTimer: number (seconds), growthDuration: number (seconds) }
+     * Placed in interiors.js greenhouse room (rows 1-5, cols 1-7, 4×3 grid with spacing).
+     */
+    this.greenhousePatches = Array.from({ length: 12 }, () => ({
+      state:          'empty',
+      cropType:       null,
+      growthTimer:    0,
+      growthDuration: 0,
+    }));
   }
 
   _ensureCell(gx, gy) {
@@ -106,19 +128,113 @@ export class FarmingState {
     return patch;
   }
 
-  toJSON() {
-    const out = {};
-    for (const [k, v] of this.patches) {
-      if (v.some(p => p !== null)) out[k] = v;
+  // ── Greenhouse methods ────────────────────────────────────
+
+  /**
+   * Plant a crop in a greenhouse patch.
+   * @param {number} patchIndex  0-11
+   * @param {string} cropType    Key from GREENHOUSE_CROPS (e.g. 'wheat')
+   * @param {number} growthDuration  Seconds until ready (use GREENHOUSE_CROPS[cropType].growthDuration)
+   */
+  plantGreenhouse(patchIndex, cropType, growthDuration) {
+    const patch = this.greenhousePatches[patchIndex];
+    if (!patch) return;
+    patch.state          = 'seeded';
+    patch.cropType       = cropType;
+    patch.growthTimer    = 0;
+    patch.growthDuration = growthDuration;
+  }
+
+  /**
+   * Advance greenhouse growth timers by dt seconds.
+   * At 50% of growthDuration: state → 'growing'.
+   * At 100%: state → 'ready'.
+   * Called automatically from tick() — do not call separately.
+   * @param {number} dt  Elapsed seconds since last tick
+   */
+  tickGreenhouse(dt) {
+    for (const patch of this.greenhousePatches) {
+      if (patch.state !== 'seeded' && patch.state !== 'growing') continue;
+      patch.growthTimer += dt;
+      if (patch.growthTimer >= patch.growthDuration) {
+        patch.state = 'ready';
+      } else if (patch.growthTimer >= patch.growthDuration * 0.5) {
+        patch.state = 'growing';
+      }
     }
-    return out;
+  }
+
+  /**
+   * Harvest a ready greenhouse patch. Returns the yield object or null.
+   * The patch is reset to empty on success.
+   * @param {number} patchIndex  0-11
+   * @returns {{ id: string, qty: number }|null}
+   */
+  harvestGreenhouse(patchIndex) {
+    const patch = this.greenhousePatches[patchIndex];
+    if (!patch || patch.state !== 'ready') return null;
+    const cropDef = GREENHOUSE_CROPS[patch.cropType];
+    // Reset patch to empty
+    patch.state          = 'empty';
+    patch.cropType       = null;
+    patch.growthTimer    = 0;
+    patch.growthDuration = 0;
+    if (!cropDef) return null;
+    return { id: cropDef.yield.id, qty: cropDef.yield.qty };
+  }
+
+  /**
+   * Main update tick — call this from game.js each frame (dt in seconds).
+   * Drives greenhouse patch timers.
+   * TODO: game.js — call farmingState.tick(dt) in the update loop (dt = deltaMs / 1000)
+   * @param {number} dt  Elapsed seconds since last tick
+   */
+  tick(dt) {
+    this.tickGreenhouse(dt);
+  }
+
+  toJSON() {
+    // patches — only include non-empty cells to keep save file small
+    const patches = {};
+    for (const [k, v] of this.patches) {
+      if (v.some(p => p !== null)) patches[k] = v;
+    }
+
+    // greenhousePatches — include all 12 slots so indices stay stable
+    const greenhousePatches = this.greenhousePatches.map(p => ({
+      state:          p.state,
+      cropType:       p.cropType,
+      growthTimer:    Math.round(p.growthTimer * 100) / 100, // 2dp precision
+      growthDuration: p.growthDuration,
+    }));
+
+    return { patches, greenhousePatches };
   }
 
   fromJSON(data) {
     this.patches.clear();
     if (!data) return;
-    for (const [k, v] of Object.entries(data)) {
-      if (Array.isArray(v)) this.patches.set(k, v);
+
+    // Support old format (bare object of patch arrays) or new { patches, greenhousePatches }
+    const rawPatches = data.patches ?? data;
+    if (rawPatches && typeof rawPatches === 'object' && !Array.isArray(rawPatches)) {
+      for (const [k, v] of Object.entries(rawPatches)) {
+        if (Array.isArray(v)) this.patches.set(k, v);
+      }
+    }
+
+    // Restore greenhouse patches
+    if (Array.isArray(data.greenhousePatches)) {
+      for (let i = 0; i < Math.min(data.greenhousePatches.length, 12); i++) {
+        const src = data.greenhousePatches[i];
+        if (!src) continue;
+        this.greenhousePatches[i] = {
+          state:          src.state          ?? 'empty',
+          cropType:       src.cropType       ?? null,
+          growthTimer:    typeof src.growthTimer    === 'number' ? src.growthTimer    : 0,
+          growthDuration: typeof src.growthDuration === 'number' ? src.growthDuration : 0,
+        };
+      }
     }
   }
 }
