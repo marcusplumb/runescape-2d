@@ -20,7 +20,7 @@ import {
 import { drawHairStyle, drawBodyStyle } from './player.js';
 import {
   FORGE_PW, FORGE_HEADER_H, FORGE_TAB_H, FORGE_ROW_H,
-  SMELT_PH, SMITH_PH,
+  SMELT_PH, SMITH_PH, SMITH_CONTENT_H,
 } from './forge.js';
 import { EQUIP_ID_TO_ITEM } from './items.js';
 import { GEAR_BY_ID } from './gear.js';
@@ -5751,7 +5751,7 @@ export class Renderer {
     }
   }
 
-  drawSmithPanel(recipes, tab, inventory, skills) {
+  drawSmithPanel(recipes, tab, inventory, skills, scrollOffset = 0) {
     const ctx = this.ctx;
     const W = this.canvas.width, H = this.canvas.height;
     const px = Math.floor((W - FORGE_PW) / 2);
@@ -5830,15 +5830,44 @@ export class Renderer {
     ctx.lineTo(px + FORGE_PW - 8, contentY);
     ctx.stroke();
 
-    // Recipe rows for active tab
+    // Recipe rows — clipped scrollable area
     const tabRecipes = recipes[tab] || [];
+    const totalH = tabRecipes.length * FORGE_ROW_H;
+    const scrollW = 10; // scrollbar width
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(px, contentY, FORGE_PW, SMITH_CONTENT_H);
+    ctx.clip();
+
     for (let i = 0; i < tabRecipes.length; i++) {
+      const rowY = contentY + i * FORGE_ROW_H - scrollOffset;
+      if (rowY + FORGE_ROW_H < contentY || rowY > contentY + SMITH_CONTENT_H) continue;
       const recipe = tabRecipes[i];
       const canCraft = recipe.inputs.every(({ item, qty }) =>
         inventory.count(item().id) >= qty
       );
-      this._drawForgeRow(ctx, px, contentY + i * FORGE_ROW_H, FORGE_PW, FORGE_ROW_H,
+      this._drawForgeRow(ctx, px, rowY, FORGE_PW - scrollW, FORGE_ROW_H,
         recipe, canCraft, forgeLevel, true);
+    }
+
+    ctx.restore();
+
+    // Scrollbar
+    if (totalH > SMITH_CONTENT_H) {
+      const trackX = px + FORGE_PW - scrollW - 2;
+      const trackY = contentY;
+      const trackH = SMITH_CONTENT_H;
+      // Track
+      ctx.fillStyle = 'rgba(20,25,35,0.8)';
+      this._roundRect(ctx, trackX, trackY, scrollW, trackH, 4);
+      ctx.fill();
+      // Thumb
+      const thumbH = Math.max(24, trackH * (SMITH_CONTENT_H / totalH));
+      const thumbY = trackY + (trackH - thumbH) * (scrollOffset / (totalH - SMITH_CONTENT_H));
+      ctx.fillStyle = '#4a7ab7';
+      this._roundRect(ctx, trackX, thumbY, scrollW, thumbH, 4);
+      ctx.fill();
     }
   }
 

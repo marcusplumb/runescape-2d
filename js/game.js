@@ -57,7 +57,7 @@ import {
 import {
   SMELT_RECIPES, SMITH_RECIPES,
   FORGE_PW, FORGE_HEADER_H, FORGE_TAB_H, FORGE_ROW_H,
-  SMELT_PH, SMITH_PH, SMELT_RECIPE_COUNT,
+  SMELT_PH, SMITH_PH, SMELT_RECIPE_COUNT, SMITH_CONTENT_H,
 } from './forge.js';
 import { DungeonMasterNPC } from './dungeonMaster.js';
 import { RaidInstance } from './raidInstance.js';
@@ -283,6 +283,7 @@ export class Game {
     this.chestOpen     = false;  // chest storage panel
     this.chestPos      = null;   // { col, row } of the open chest tile
     this.smithTab      = 'weapons'; // 'weapons' | 'tools' | 'armor'
+    this.smithScrollOffsets = { weapons: 0, tools: 0, armor: 0 };
     this.playerViewOpen  = false; // character stat popup (from Worn tab)
     this.skillInfoSkill  = null;  // index of skill whose info popup is open, or null
     this.skillInfoScroll = 0;     // scroll offset in pixels for skill info popup
@@ -457,6 +458,11 @@ export class Game {
       } else if (this.shopOpen) {
         e.preventDefault();
         this.shopScroll = Math.max(0, this.shopScroll + e.deltaY);
+      } else if (this.smithOpen) {
+        e.preventDefault();
+        const tab = this.smithTab;
+        const maxScroll = Math.max(0, SMITH_RECIPES[tab].length * FORGE_ROW_H - SMITH_CONTENT_H);
+        this.smithScrollOffsets[tab] = Math.max(0, Math.min(maxScroll, this.smithScrollOffsets[tab] + e.deltaY));
       } else if (this.smithyShopOpen) {
         e.preventDefault();
         this.smithyShopScroll = Math.max(0, this.smithyShopScroll + e.deltaY);
@@ -1585,7 +1591,7 @@ export class Game {
       this.renderer.drawSmeltPanel(SMELT_RECIPES, this.inventory, this.skills);
     }
     if (this.smithOpen) {
-      this.renderer.drawSmithPanel(SMITH_RECIPES, this.smithTab, this.inventory, this.skills);
+      this.renderer.drawSmithPanel(SMITH_RECIPES, this.smithTab, this.inventory, this.skills, this.smithScrollOffsets[this.smithTab]);
     }
     if (this.chestOpen && this.chestPos) {
       const chestSlots = this._getChestSlots(this.chestPos.col, this.chestPos.row);
@@ -2073,14 +2079,17 @@ export class Game {
     const tabY = py + FORGE_HEADER_H;
     if (sy >= tabY && sy <= tabY + FORGE_TAB_H) {
       const tabW = Math.floor(FORGE_PW / 3);
-      if      (sx < px + tabW)     this.smithTab = 'weapons';
-      else if (sx < px + tabW * 2) this.smithTab = 'tools';
-      else                         this.smithTab = 'armor';
+      let newTab = this.smithTab;
+      if      (sx < px + tabW)     newTab = 'weapons';
+      else if (sx < px + tabW * 2) newTab = 'tools';
+      else                         newTab = 'armor';
+      this.smithTab = newTab;
       return;
     }
     const contentY = tabY + FORGE_TAB_H;
-    if (sy < contentY) return;
-    const row = Math.floor((sy - contentY) / FORGE_ROW_H);
+    if (sy < contentY || sy > contentY + SMITH_CONTENT_H) return;
+    const scroll = this.smithScrollOffsets[this.smithTab] || 0;
+    const row = Math.floor((sy - contentY + scroll) / FORGE_ROW_H);
     const recipes = SMITH_RECIPES[this.smithTab];
     if (row < 0 || row >= recipes.length) return;
     const btnX = px + FORGE_PW - 70;

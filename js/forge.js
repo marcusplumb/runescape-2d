@@ -411,8 +411,6 @@ export const SMITH_RECIPES = {
   ],
 };
 
-export const SMITH_PH =
-  FORGE_HEADER_H +
-  FORGE_TAB_H +
-  Math.max(...SMITH_CATEGORIES.map(cat => SMITH_RECIPES[cat].length)) * FORGE_ROW_H +
-  FORGE_PAD_BOT;
+export const SMITH_VISIBLE_ROWS = 7;
+export const SMITH_CONTENT_H    = SMITH_VISIBLE_ROWS * FORGE_ROW_H;
+export const SMITH_PH           = FORGE_HEADER_H + FORGE_TAB_H + SMITH_CONTENT_H + FORGE_PAD_BOT;
