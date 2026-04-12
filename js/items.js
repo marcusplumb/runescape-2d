@@ -1314,6 +1314,25 @@ ITEMS.STEEL_AXE = {
     ctx.fillStyle = 'rgba(180,220,240,0.3)'; ctx.fillRect(x+s*.35, y+s*.13, s*.37, s*.06);
   },
 };
+ITEMS.MITHRIL_AXE = {
+  id: 'mithril_axe', name: 'Mithril Axe', stackable: false, toolType: 'axe',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a3a1a'; ctx.fillRect(x+s*.2, y+s*.3, s*.15, s*.55);
+    ctx.fillStyle = '#5a5a9a'; ctx.fillRect(x+s*.35, y+s*.12, s*.37, s*.33);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.55, y+s*.07, s*.22, s*.43);
+    ctx.fillStyle = 'rgba(140,140,255,0.3)'; ctx.fillRect(x+s*.35, y+s*.12, s*.37, s*.06);
+  },
+};
+ITEMS.TUNGSTEN_AXE = {
+  id: 'tungsten_axe', name: 'Tungsten Axe', stackable: false, toolType: 'axe',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a3a1a'; ctx.fillRect(x+s*.2, y+s*.3, s*.15, s*.55);
+    ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.35, y+s*.11, s*.37, s*.35);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.55, y+s*.06, s*.22, s*.44);
+    ctx.fillStyle = 'rgba(120,120,200,0.35)'; ctx.fillRect(x+s*.35, y+s*.11, s*.37, s*.06);
+    ctx.fillStyle = 'rgba(80,80,180,0.2)'; ctx.fillRect(x+s*.35, y+s*.11, s*.37, s*.35);
+  },
+};
 ITEMS.IRON_PICKAXE = {
   id: 'iron_pickaxe', name: 'Iron Pickaxe', stackable: false, toolType: 'pickaxe',
   draw(ctx, x, y, s) {
@@ -1332,6 +1351,17 @@ ITEMS.STEEL_PICKAXE = {
     ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.3); ctx.lineTo(x+s*.7, y+s*.15); ctx.lineTo(x+s*.75, y+s*.3); ctx.lineTo(x+s*.3, y+s*.45); ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#5a7a8a';
     ctx.beginPath(); ctx.moveTo(x+s*.68, y+s*.16); ctx.lineTo(x+s*.88, y+s*.22); ctx.lineTo(x+s*.73, y+s*.3); ctx.closePath(); ctx.fill();
+  },
+};
+ITEMS.MITHRIL_PICKAXE = {
+  id: 'mithril_pickaxe', name: 'Mithril Pickaxe', stackable: false, toolType: 'pickaxe',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a3a1a'; ctx.fillRect(x+s*.15, y+s*.25, s*.15, s*.6);
+    ctx.fillStyle = '#5a5a9a';
+    ctx.beginPath(); ctx.moveTo(x+s*.3, y+s*.3); ctx.lineTo(x+s*.7, y+s*.14); ctx.lineTo(x+s*.75, y+s*.3); ctx.lineTo(x+s*.3, y+s*.45); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#3a3a7a';
+    ctx.beginPath(); ctx.moveTo(x+s*.68, y+s*.15); ctx.lineTo(x+s*.89, y+s*.21); ctx.lineTo(x+s*.73, y+s*.3); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(140,140,255,0.25)'; ctx.fillRect(x+s*.3, y+s*.25, s*.46, s*.2);
   },
 };
 ITEMS.TUNGSTEN_PICKAXE = {
@@ -1484,6 +1514,16 @@ ITEMS.IRON_LEGS = {
     ctx.fillStyle = 'rgba(0,0,0,0.15)'; ctx.fillRect(x+s*.44, y+s*.05, s*.12, s*.55);
   },
 };
+ITEMS.STEEL_LEGS = {
+  id: 'steel_legs', name: 'Steel Legs', stackable: false, equipSlot: 'leggings',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#7a9aaa'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.55);
+    ctx.fillStyle = '#5a6a7a'; ctx.fillRect(x+s*.12, y+s*.52, s*.34, s*.42);
+    ctx.fillStyle = '#5a6a7a'; ctx.fillRect(x+s*.54, y+s*.52, s*.34, s*.42);
+    ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x+s*.44, y+s*.05, s*.12, s*.55);
+    ctx.fillStyle = 'rgba(180,220,240,0.2)'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.1);
+  },
+};
 ITEMS.MITHRIL_LEGS = {
   id: 'mithril_legs', name: 'Mithril Legs', stackable: false, equipSlot: 'leggings',
   draw(ctx, x, y, s) {
@@ -1492,6 +1532,17 @@ ITEMS.MITHRIL_LEGS = {
     ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.54, y+s*.52, s*.34, s*.42);
     ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(x+s*.44, y+s*.05, s*.12, s*.55);
     ctx.fillStyle = 'rgba(120,120,220,0.2)'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.55);
+  },
+};
+ITEMS.TUNGSTEN_LEGS = {
+  id: 'tungsten_legs', name: 'Tungsten Legs', stackable: false, equipSlot: 'leggings',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.55);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.12, y+s*.52, s*.34, s*.42);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.54, y+s*.52, s*.34, s*.42);
+    ctx.fillStyle = 'rgba(0,0,0,0.22)'; ctx.fillRect(x+s*.44, y+s*.05, s*.12, s*.55);
+    ctx.fillStyle = 'rgba(120,120,200,0.35)'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.1);
+    ctx.fillStyle = 'rgba(80,80,180,0.18)'; ctx.fillRect(x+s*.12, y+s*.05, s*.76, s*.55);
   },
 };
 
@@ -1539,6 +1590,29 @@ ITEMS.STEEL_GAUNTLETS = {
     ctx.fillStyle = 'rgba(180,220,240,0.25)'; ctx.fillRect(x+s*.14, y+s*.2, s*.26, s*.1);
   },
 };
+ITEMS.MITHRIL_GAUNTLETS = {
+  id: 'mithril_gauntlets', name: 'Mithril Gauntlets', stackable: false, equipSlot: 'gloves',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a5a9a'; ctx.fillRect(x+s*.1,  y+s*.18, s*.8,  s*.6);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.1,  y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.28, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.46, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.64, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = 'rgba(140,140,255,0.3)'; ctx.fillRect(x+s*.14, y+s*.2, s*.26, s*.1);
+  },
+};
+ITEMS.TUNGSTEN_GAUNTLETS = {
+  id: 'tungsten_gauntlets', name: 'Tungsten Gauntlets', stackable: false, equipSlot: 'gloves',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.1,  y+s*.18, s*.8,  s*.6);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.1,  y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.28, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.46, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.64, y+s*.66, s*.15, s*.2);
+    ctx.fillStyle = 'rgba(120,120,200,0.35)'; ctx.fillRect(x+s*.14, y+s*.2, s*.26, s*.1);
+    ctx.fillStyle = 'rgba(80,80,180,0.18)'; ctx.fillRect(x+s*.1, y+s*.18, s*.8, s*.6);
+  },
+};
 
 /* ── Boots ───────────────────────────────────────────── */
 ITEMS.LEATHER_BOOTS = {
@@ -1571,6 +1645,23 @@ ITEMS.STEEL_BOOTS = {
     ctx.fillStyle = '#7a8a9a'; ctx.fillRect(x+s*.08, y+s*.28, s*.84, s*.48);
     ctx.fillStyle = '#5a6a7a'; ctx.fillRect(x+s*.08, y+s*.68, s*.84, s*.18);
     ctx.fillStyle = 'rgba(180,220,240,0.25)'; ctx.fillRect(x+s*.12, y+s*.3, s*.28, s*.12);
+  },
+};
+ITEMS.MITHRIL_BOOTS = {
+  id: 'mithril_boots', name: 'Mithril Boots', stackable: false, equipSlot: 'boots',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#5a5a9a'; ctx.fillRect(x+s*.08, y+s*.28, s*.84, s*.48);
+    ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.08, y+s*.68, s*.84, s*.18);
+    ctx.fillStyle = 'rgba(140,140,255,0.3)'; ctx.fillRect(x+s*.12, y+s*.3, s*.28, s*.12);
+  },
+};
+ITEMS.TUNGSTEN_BOOTS = {
+  id: 'tungsten_boots', name: 'Tungsten Boots', stackable: false, equipSlot: 'boots',
+  draw(ctx, x, y, s) {
+    ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.08, y+s*.28, s*.84, s*.48);
+    ctx.fillStyle = '#28284a'; ctx.fillRect(x+s*.08, y+s*.68, s*.84, s*.18);
+    ctx.fillStyle = 'rgba(120,120,200,0.35)'; ctx.fillRect(x+s*.12, y+s*.3, s*.28, s*.12);
+    ctx.fillStyle = 'rgba(80,80,180,0.18)'; ctx.fillRect(x+s*.08, y+s*.28, s*.84, s*.48);
   },
 };
 
@@ -3490,18 +3581,24 @@ export const EQUIP_ID_TO_ITEM = {
   leather_legs:      ITEMS.LEATHER_LEGS,
   bronze_legs:       ITEMS.BRONZE_LEGS,
   iron_legs:         ITEMS.IRON_LEGS,
+  steel_legs:        ITEMS.STEEL_LEGS,
   mithril_legs:      ITEMS.MITHRIL_LEGS,
+  tungsten_legs:     ITEMS.TUNGSTEN_LEGS,
   // ── Gloves ────────────────────────────────────────────
   leather_gloves:    ITEMS.LEATHER_GLOVES,
   bronze_gauntlets:  ITEMS.BRONZE_GAUNTLETS,
   iron_gauntlets:    ITEMS.IRON_GAUNTLETS,
   steel_gauntlets:   ITEMS.STEEL_GAUNTLETS,
+  mithril_gauntlets: ITEMS.MITHRIL_GAUNTLETS,
+  tungsten_gauntlets: ITEMS.TUNGSTEN_GAUNTLETS,
   berserker_wraps:   ITEMS.BERSERKER_WRAPS,
   // ── Boots ─────────────────────────────────────────────
   leather_boots:     ITEMS.LEATHER_BOOTS,
   bronze_boots:      ITEMS.BRONZE_BOOTS,
   iron_boots:        ITEMS.IRON_BOOTS,
   steel_boots:       ITEMS.STEEL_BOOTS,
+  mithril_boots:     ITEMS.MITHRIL_BOOTS,
+  tungsten_boots:    ITEMS.TUNGSTEN_BOOTS,
   shadow_treads:     ITEMS.SHADOW_TREADS,
   // ── Capes ─────────────────────────────────────────────
   brown_cape:        ITEMS.BROWN_CAPE,

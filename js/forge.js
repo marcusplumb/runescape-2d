@@ -179,6 +179,20 @@ export const SMITH_RECIPES = {
       inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 3 }],
     },
     {
+      name: 'Mithril Axe',
+      level: 40,
+      xp: 110,
+      output: () => ITEMS.MITHRIL_AXE,
+      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 4 }],
+    },
+    {
+      name: 'Tungsten Axe',
+      level: 50,
+      xp: 150,
+      output: () => ITEMS.TUNGSTEN_AXE,
+      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 4 }],
+    },
+    {
       name: 'Iron Pickaxe',
       level: 10,
       xp: 50,
@@ -191,6 +205,13 @@ export const SMITH_RECIPES = {
       xp: 80,
       output: () => ITEMS.STEEL_PICKAXE,
       inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 4 }],
+    },
+    {
+      name: 'Mithril Pickaxe',
+      level: 40,
+      xp: 130,
+      output: () => ITEMS.MITHRIL_PICKAXE,
+      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 5 }],
     },
     {
       name: 'Tungsten Pickaxe',
@@ -280,10 +301,17 @@ export const SMITH_RECIPES = {
     // Steel
     {
       name: 'Steel Helm',
-      level: 22,
+      level: 21,
       xp: 80,
       output: () => ITEMS.STEEL_HELM,
       inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 3 }],
+    },
+    {
+      name: 'Steel Legs',
+      level: 22,
+      xp: 100,
+      output: () => ITEMS.STEEL_LEGS,
+      inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 4 }],
     },
     {
       name: 'Steel Plate',
@@ -294,14 +322,14 @@ export const SMITH_RECIPES = {
     },
     {
       name: 'Steel Gauntlets',
-      level: 21,
+      level: 20,
       xp: 60,
       output: () => ITEMS.STEEL_GAUNTLETS,
       inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 2 }],
     },
     {
       name: 'Steel Boots',
-      level: 21,
+      level: 20,
       xp: 60,
       output: () => ITEMS.STEEL_BOOTS,
       inputs: [{ item: () => ITEMS.BAR_STEEL, qty: 2 }],
@@ -316,6 +344,13 @@ export const SMITH_RECIPES = {
       inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 4 }],
     },
     {
+      name: 'Mithril Legs',
+      level: 43,
+      xp: 170,
+      output: () => ITEMS.MITHRIL_LEGS,
+      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 5 }],
+    },
+    {
       name: 'Mithril Plate',
       level: 44,
       xp: 260,
@@ -323,11 +358,18 @@ export const SMITH_RECIPES = {
       inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 8 }],
     },
     {
-      name: 'Mithril Legs',
-      level: 43,
-      xp: 170,
-      output: () => ITEMS.MITHRIL_LEGS,
-      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 5 }],
+      name: 'Mithril Gauntlets',
+      level: 41,
+      xp: 100,
+      output: () => ITEMS.MITHRIL_GAUNTLETS,
+      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 3 }],
+    },
+    {
+      name: 'Mithril Boots',
+      level: 41,
+      xp: 100,
+      output: () => ITEMS.MITHRIL_BOOTS,
+      inputs: [{ item: () => ITEMS.BAR_MITHRIL, qty: 3 }],
     },
 
     // Tungsten
@@ -339,11 +381,32 @@ export const SMITH_RECIPES = {
       inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 4 }],
     },
     {
+      name: 'Tungsten Legs',
+      level: 53,
+      xp: 240,
+      output: () => ITEMS.TUNGSTEN_LEGS,
+      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 6 }],
+    },
+    {
       name: 'Tungsten Plate',
-      level: 54,
+      level: 55,
       xp: 350,
       output: () => ITEMS.TUNGSTEN_PLATE,
-      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 8 }],
+      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 9 }],
+    },
+    {
+      name: 'Tungsten Gauntlets',
+      level: 51,
+      xp: 130,
+      output: () => ITEMS.TUNGSTEN_GAUNTLETS,
+      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 3 }],
+    },
+    {
+      name: 'Tungsten Boots',
+      level: 51,
+      xp: 130,
+      output: () => ITEMS.TUNGSTEN_BOOTS,
+      inputs: [{ item: () => ITEMS.BAR_TUNGSTEN, qty: 3 }],
     },
   ],
 };

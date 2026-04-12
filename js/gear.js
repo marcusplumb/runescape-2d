@@ -202,8 +202,15 @@ export const GEAR = {
   IRON_LEGS:        g('iron_legs',        'Iron Legs',         'leggings', 'COMMON',
     { defence: 10 }, { armour: 12 }),
 
+  STEEL_LEGS:       g('steel_legs',       'Steel Legs',        'leggings', 'UNCOMMON',
+    { defence: 20 }, { armour: 22 }),
+
   MITHRIL_LEGS:     g('mithril_legs',     'Mithril Legs',      'leggings', 'RARE',
     { defence: 35 }, { armour: 32 }),
+
+  TUNGSTEN_LEGS:    g('tungsten_legs',    'Tungsten Legs',     'leggings', 'RARE',
+    { defence: 50 }, { armour: 55 },
+    'Forged from the heaviest ore. Virtually impenetrable.'),
 
   /* ──────────────────────────────────────────────────────
      GLOVES  (armour; berserker variant adds power + crit)
@@ -219,6 +226,12 @@ export const GEAR = {
 
   STEEL_GAUNTLETS:  g('steel_gauntlets',  'Steel Gauntlets',   'gloves', 'UNCOMMON',
     { defence: 20 }, { armour:  9 }),
+
+  MITHRIL_GAUNTLETS: g('mithril_gauntlets', 'Mithril Gauntlets', 'gloves', 'RARE',
+    { defence: 35 }, { armour: 14 }),
+
+  TUNGSTEN_GAUNTLETS: g('tungsten_gauntlets', 'Tungsten Gauntlets', 'gloves', 'RARE',
+    { defence: 50 }, { armour: 22 }),
 
   BERSERKER_WRAPS:  g('berserker_wraps',  "Berserker's Wraps", 'gloves', 'EPIC',
     { strength: 40 }, { armour: 4, power: 12, critChance: 0.04 },
@@ -238,6 +251,12 @@ export const GEAR = {
 
   STEEL_BOOTS:      g('steel_boots',      'Steel Boots',       'boots', 'UNCOMMON',
     { defence: 20 }, { armour:  9 }),
+
+  MITHRIL_BOOTS:    g('mithril_boots',    'Mithril Boots',     'boots', 'RARE',
+    { defence: 35 }, { armour: 14 }),
+
+  TUNGSTEN_BOOTS:   g('tungsten_boots',   'Tungsten Boots',    'boots', 'RARE',
+    { defence: 50 }, { armour: 22 }),
 
   SHADOW_TREADS:    g('shadow_treads',    'Shadow Treads',     'boots', 'EPIC',
     { attack: 30 }, { armour: 7, accuracy: 8, speed: 0.95 },
