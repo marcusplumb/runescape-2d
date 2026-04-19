@@ -27,6 +27,10 @@ export class Camera {
     this.mapW = WORLD_WIDTH;
     this.mapH = WORLD_HEIGHT;
 
+    // World zoom factor. Applied in begin()/screenToWorld — HUD draws at 1.0
+    // because it renders outside the camera transform.
+    this.zoom = 1.25;
+
     // Adaptive lerp state
     this._moving     = false;
     this._movingTime = 0;
@@ -71,8 +75,12 @@ export class Camera {
       }
     }
 
-    const idealX = (targetX + lookaheadX) - this.canvas.width  / 2;
-    const idealY = (targetY + lookaheadY) - this.canvas.height / 2;
+    // Viewport dimensions in WORLD units (shrinks when zoom > 1 → shows less world)
+    const viewW = this.canvas.width  / this.zoom;
+    const viewH = this.canvas.height / this.zoom;
+
+    const idealX = (targetX + lookaheadX) - viewW / 2;
+    const idealY = (targetY + lookaheadY) - viewH / 2;
 
     // ── Adaptive lerp ──────────────────────────────────────
     // Detect whether the target is changing by more than 0.5 tiles per frame
@@ -104,15 +112,18 @@ export class Camera {
     this.y += (idealY - this.y) * k;
 
     // ── Bounds clamping ────────────────────────────────────
-    // Camera x/y is the top-left corner of the viewport; must not go out of map
-    this.x = _clampAxis(this.x, this.mapW, this.canvas.width);
-    this.y = _clampAxis(this.y, this.mapH, this.canvas.height);
+    // Camera x/y is the top-left corner of the viewport; must not go out of map.
+    // The viewport is scaled down by zoom when expressed in world units.
+    this.x = _clampAxis(this.x, this.mapW, viewW);
+    this.y = _clampAxis(this.y, this.mapH, viewH);
   }
 
   /** Snap to target instantly (e.g. on init or map transition) */
   snapTo(targetX, targetY) {
-    this.x = _clampAxis(targetX - this.canvas.width  / 2, this.mapW, this.canvas.width);
-    this.y = _clampAxis(targetY - this.canvas.height / 2, this.mapH, this.canvas.height);
+    const viewW = this.canvas.width  / this.zoom;
+    const viewH = this.canvas.height / this.zoom;
+    this.x = _clampAxis(targetX - viewW / 2, this.mapW, viewW);
+    this.y = _clampAxis(targetY - viewH / 2, this.mapH, viewH);
     // Reset adaptive-lerp state so the snap doesn't trigger a fast-lerp burst
     this._lastIdealX = null;
     this._lastIdealY = null;
@@ -124,6 +135,7 @@ export class Camera {
   /** Apply camera transform to canvas context */
   begin(ctx) {
     ctx.save();
+    ctx.scale(this.zoom, this.zoom);
     ctx.translate(-Math.round(this.x), -Math.round(this.y));
   }
 
@@ -131,8 +143,8 @@ export class Camera {
     ctx.restore();
   }
 
-  /** Convert screen coords → world coords */
+  /** Convert screen coords → world coords (accounts for zoom). */
   screenToWorld(sx, sy) {
-    return { x: sx + this.x, y: sy + this.y };
+    return { x: sx / this.zoom + this.x, y: sy / this.zoom + this.y };
   }
 }

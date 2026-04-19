@@ -239,7 +239,7 @@ export class Player {
 
   /** Replace the queued path. The player finishes the current tile, then follows. */
   setPath(path) {
-    this.path = path;
+    this.path = path || [];
   }
 
   /** Returns the final destination {col, row}, or null if idle. */
@@ -449,11 +449,24 @@ export class Player {
       }
     }
 
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath();
-    ctx.ellipse(cx + this.w / 2, cy + this.h, this.w / 2, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
+    // Shadow — clip to current tile row so it doesn't bleed onto walls below
+    if (this.hideShadow) {
+      const tileBottom = (this.row + 1) * TILE_SIZE;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(cx - this.w, cy, this.w * 3, tileBottom - cy);
+      ctx.clip();
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(cx + this.w / 2, cy + this.h, this.w / 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx.beginPath();
+      ctx.ellipse(cx + this.w / 2, cy + this.h, this.w / 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     const legSpread = this.moving ? Math.abs(Math.sin(animPhase)) * 4 : 0;
     const armSwing  = this.moving ? Math.sin(animPhase) * 2 : skillBob;

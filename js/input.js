@@ -18,7 +18,14 @@ export class Input {
       this.keys[e.code] = false;
     });
 
+    this._suppressNextClick = false;
     canvas.addEventListener('click', e => {
+      // Suppress one click — used after a drag-and-drop so the trailing click
+      // event doesn't also trigger click-handlers (e.g. eat food).
+      if (this._suppressNextClick) {
+        this._suppressNextClick = false;
+        return;
+      }
       const rect = canvas.getBoundingClientRect();
       this.click = {
         screenX: e.clientX - rect.left,
@@ -49,6 +56,13 @@ export class Input {
     const c = this.click;
     this.click = null;
     return c;
+  }
+
+  /** Swallow the next canvas `click` event before it registers.
+   *  Call this from mouseup when a drag ended in an action that should NOT
+   *  also fire the default click handler (e.g. swapping inventory slots). */
+  suppressNextClick() {
+    this._suppressNextClick = true;
   }
 
   /** Check if key was just pressed this frame (single trigger) */

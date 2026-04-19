@@ -162,9 +162,9 @@ export class Combat {
         const strRes = this.skills.addXp(SKILL_IDS.STRENGTH, combatXp);
         const hpRes  = this.skills.addXp(SKILL_IDS.HITPOINTS, Math.floor(combatXp / 3));
 
-        if (atkRes.leveled) this.notif.add(`🎉 Attack level ${atkRes.newLevel}!`, '#f1c40f');
-        if (strRes.leveled) this.notif.add(`🎉 Strength level ${strRes.newLevel}!`, '#f1c40f');
-        if (hpRes.leveled)  this.notif.add(`🎉 Hitpoints level ${hpRes.newLevel}!`, '#f1c40f');
+        if (atkRes.leveled) this.notif.levelUp('Attack', atkRes.newLevel);
+        if (strRes.leveled) this.notif.levelUp('Strength', strRes.newLevel);
+        if (hpRes.leveled)  this.notif.levelUp('Hitpoints', hpRes.newLevel);
       }
 
       if (killed) {
@@ -360,7 +360,7 @@ export class Combat {
     const defXp = Math.max(0, (mobMaxHit - mobDmg) * 4);
     if (defXp > 0) {
       const defRes = this.skills.addXp(SKILL_IDS.DEFENCE, defXp);
-      if (defRes.leveled) this.notif.add(`🎉 Defence level ${defRes.newLevel}!`, '#f1c40f');
+      if (defRes.leveled) this.notif.levelUp('Defence', defRes.newLevel);
     }
 
     if (this.player.hp <= 0) {

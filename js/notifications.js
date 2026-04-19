@@ -8,15 +8,18 @@ const CATEGORY_COLORS = {
   loot:    '#f1c40f',
   system:  '#ffffff',
   warning: '#e67e22',
+  levelup: '#f1c40f',
 };
 
 export class Notifications {
   constructor() {
-    this.messages = [];     // { text, color, timer, time } — oldest first
+    this.messages = [];     // { text, color, category, timer, time } — oldest first
     this.xpDrops = [];      // { text, color, x, y, timer }
     this.maxMessages = 30;
     this.msgLifetime = 20;  // seconds
     this.dropLifetime = 2;
+    /** Optional callback invoked on every local level-up: (skillName, newLevel) => void */
+    this.onLevelUp = null;
   }
 
   /**
@@ -34,10 +37,16 @@ export class Notifications {
     } else {
       resolvedColor = '#fff';
     }
-    this.messages.push({ text, color: resolvedColor, timer: this.msgLifetime, time: Date.now() });
+    this.messages.push({ text, color: resolvedColor, category: category || null, timer: this.msgLifetime, time: Date.now() });
     if (this.messages.length > this.maxMessages) {
       this.messages.shift();
     }
+  }
+
+  /** Record a local level-up: adds a chat entry and fires the onLevelUp hook for milestone broadcasts. */
+  levelUp(skillName, newLevel) {
+    this.add(`🎉 ${skillName} level ${newLevel}!`, null, 'levelup');
+    if (this.onLevelUp) this.onLevelUp(skillName, newLevel);
   }
 
   /** Add a floating XP drop at a screen position */

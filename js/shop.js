@@ -115,6 +115,7 @@ export const SHOP_STOCK = [
   { item: ITEMS.COOKED_SHRIMP, buyPrice: 5  },
   { item: ITEMS.COOKED_TROUT,  buyPrice: 10 },
   { item: ITEMS.COOKED_SALMON, buyPrice: 20 },
+  { item: ITEMS.BERRY_BUSH_SAPLING, buyPrice: 15 },
 ];
 
 /* ── What the shop buys from the player (sell prices) ──── */
@@ -212,6 +213,7 @@ export const SELL_PRICES = {
   herb_seed:        2,
   flax_seed:        3,
   magic_seed:       10,
+  berry_bush_sapling: 8,
   // Farming harvest
   potato:           3,
   berries:          2,
@@ -251,22 +253,6 @@ export const SELL_PRICES = {
   obsidian_plate:   2200,
   vitality_cape:    400,
 };
-
-/* ── House furniture shop ──────────────────────────────── */
-export const HOUSE_SHOP_PW       = 380;
-export const HOUSE_SHOP_HEADER_H = 52;
-export const HOUSE_SHOP_ROW_H    = 46;
-export const HOUSE_SHOP_PAD_BOT  = 14;
-export const HOUSE_SHOP_PH       = HOUSE_SHOP_HEADER_H + 6 * HOUSE_SHOP_ROW_H + HOUSE_SHOP_PAD_BOT;
-
-export const HOUSE_SHOP_STOCK = [
-  { item: ITEMS.FURN_CHAIR,     buyPrice: 1 },
-  { item: ITEMS.FURN_RUG,       buyPrice: 1 },
-  { item: ITEMS.FURN_TABLE,     buyPrice: 1 },
-  { item: ITEMS.FURN_CHEST,     buyPrice: 1 },
-  { item: ITEMS.FURN_BOOKSHELF, buyPrice: 1 },
-  { item: ITEMS.FURN_PLANT,     buyPrice: 1 },
-];
 
 /* ── ShopKeeper NPC ─────────────────────────────────────── */
 export class ShopKeeper {
@@ -352,68 +338,6 @@ export class ShopKeeper {
     ctx.fillRect(x + 6,  y + 5, 2, 2);
     ctx.fillRect(x + 16, y + 5, 2, 2);
 
-  }
-}
-
-/* ── HouseShopKeeper NPC (inside player house) ─────────── */
-export class HouseShopKeeper {
-  constructor() {
-    this.w = 24;
-    this.h = 32;
-    // Top-right corner of the starter room inner floor
-    // Starter cell inner origin: col 33, row 33  (grid cell (2,2), CELL_SIZE=13)
-    this.x = 42 * TILE_SIZE + (TILE_SIZE - this.w) / 2;
-    this.y = 33 * TILE_SIZE;
-    this.name = 'Decorator';
-  }
-
-  containsWorld(wx, wy) {
-    return wx >= this.x && wx <= this.x + this.w &&
-           wy >= this.y && wy <= this.y + this.h;
-  }
-
-  draw(ctx) {
-    const x = Math.round(this.x);
-    const y = Math.round(this.y);
-    const { w, h } = this;
-
-    ctx.fillStyle = 'rgba(0,0,0,0.2)';
-    ctx.beginPath();
-    ctx.ellipse(x + w / 2, y + h, w / 2, 4, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = '#2c3e50';
-    ctx.fillRect(x + 5,      y + 26, 5, 6);
-    ctx.fillRect(x + w - 10, y + 26, 5, 6);
-
-    ctx.fillStyle = '#2c3e7a'; ctx.fillRect(x + 2, y + 10, w - 4, 18);
-    ctx.fillStyle = '#1a2a5a'; ctx.fillRect(x + 2, y + 22, w - 4, 6);
-    ctx.fillStyle = '#d4a017'; ctx.fillRect(x + 2, y + 20, w - 4, 3);
-    ctx.fillStyle = '#8b6914'; ctx.fillRect(x + 7, y + 22, 7, 5);
-    ctx.fillStyle = '#2c3e7a';
-    ctx.fillRect(x - 1,      y + 12, 4, 9);
-    ctx.fillRect(x + w - 3,  y + 12, 4, 9);
-
-    ctx.fillStyle = '#deb887'; ctx.fillRect(x + 4, y + 1, w - 8, 11);
-    ctx.fillStyle = '#2c3e7a'; ctx.fillRect(x + 1, y + 3, w - 2, 3);
-    ctx.fillStyle = '#1a2a5a'; ctx.fillRect(x + 4, y - 6, w - 8, 10);
-    ctx.fillStyle = '#d4a017'; ctx.fillRect(x + 4, y + 1, w - 8, 2);
-
-    ctx.fillStyle = '#222';
-    ctx.fillRect(x + 6,  y + 5, 2, 2);
-    ctx.fillRect(x + 16, y + 5, 2, 2);
-    ctx.fillStyle = '#8b4513';
-    ctx.fillRect(x + 8,  y + 8, 2, 1);
-    ctx.fillRect(x + 14, y + 8, 2, 1);
-    ctx.fillRect(x + 10, y + 9, 4, 1);
-
-    ctx.fillStyle = '#f1c40f';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    ctx.strokeText(this.name, x + w / 2, y - 10);
-    ctx.fillText(this.name, x + w / 2, y - 10);
   }
 }
 

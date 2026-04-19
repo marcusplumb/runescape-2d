@@ -7,7 +7,11 @@
  * Exiting:  player walks onto TILES.STAIRS in interior → fade → world
  */
 import { TILES, SOLID_TILES, TILE_SIZE } from './constants.js';
-import { FURNITURE_DEFS, rotatedFootprint } from './housing.js';
+import {
+  FURNITURE_DEFS, rotatedFootprint, ROOM_DEFS,
+  CELL_INNER, CELL_STRIDE, GRID_COLS, GRID_ROWS,
+  HOUSE_MAP_SIZE, cellInnerOrigin,
+} from './housing.js';
 import { PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
 
 /* ── Interior map class ─────────────────────────────── */
@@ -493,231 +497,239 @@ function _buildKingdomExchangeInterior() {
 /* ── Player house interior ──────────────────────────── */
 
 /**
- * Build (or rebuild) the player house interior.
+ * Build (or rebuild) the player house interior map (73x73 tiles).
  *
- * Fixed 4-room layout — 22 tiles wide × 18 tiles tall.
- *
- * ┌────────────────────────────────────────────────────────────┐
- * │  GREENHOUSE  (cols 0-21, rows 0-5)  — GRASS floor          │
- * │  4×3 grid of FARM_PATCH at cols 2,4,6,8 × rows 1,3 (+ 5)  │
- * ├──────────────┬──────────────────────┬──────────────────────┤
- * │ ANIMAL PEN   │   ENTRY / MAIN ROOM  │   STORAGE ROOM       │
- * │ cols 0-5     │   cols 6-15          │   cols 16-21         │
- * │ rows 6-17    │   rows 6-12          │   rows 6-12          │
- * │ DIRT floor   │   PLANK floor        │   PLANK floor        │
- * │ 4 pen slots  │   furniture here     │   FURN_CHEST at      │
- * │              │                      │   (19, 8)            │
- * │              ├──────────────────────┤                      │
- * │              │   (south open area)  │                      │
- * │              │   rows 13-17         │                      │
- * └──────────────┴──────────────────────┴──────────────────────┘
- *
- * Walls: WALL=6 between all rooms.  Every room connects to the
- * entry/main room via a DOOR=29 gap — no room is ever sealed off.
- *
- * Player spawn: centre of the entry/main room at (10, 9).
- * Exit (STAIRS=30): south wall of entry room at (10, 17).
- *
- * Solidity: WALL=6 is solid (via SOLID_TILES in constants.js).
- *           DOOR=29 is walkable.
+ * Layout: 6x6 grid of 11x11 cells on a grass field enclosed by fence.
+ * Only cells owned by HousingState are carved out (floor + walls).
+ * Adjacent owned cells are connected by DOOR tiles in the shared wall.
+ * Farming plot rooms contain 5 rows x 9 soil patches.
+ * Player spawns at the centre of the starter cell (grid 2,2).
+ * STAIRS exit at the bottom edge of the starter room.
  *
  * @param {import('./housing.js').HousingState} housingState
  * @param {import('./farming.js').FarmingState|null} farmingState
  */
 function _buildPlayerHouseFromState(housingState, farmingState = null) {
-  const W = 22, H = 18;
+  const W = HOUSE_MAP_SIZE;  // 73
+  const H = HOUSE_MAP_SIZE;
 
-  // Start with all walls; we'll carve out rooms below.
-  const t = _grid(W, H); // fills with TILES.WALL
-
+  // Start with grass everywhere — unbuilt areas are open lawn.
+  const t = new Uint8Array(W * H).fill(TILES.GRASS);
   const propGroundMap = new Map();
 
-  // ── Helper: record floor under a prop tile ─────────────
   function _prop(c, r, tile) {
     propGroundMap.set(`${c},${r}`, t[r * W + c]);
     _set(t, W, c, r, tile);
   }
 
-  // ══════════════════════════════════════════════════════
-  // ROOM 1 — GREENHOUSE  (cols 0-21, rows 0-5)
-  // Floor: GRASS.  Surrounded by the outer WALL border
-  // already set by _grid.  South wall shared with rooms below.
-  // ══════════════════════════════════════════════════════
-  // Interior floor: cols 1-20, rows 1-4
-  _fill(t, W, 1, 1, 20, 4, TILES.GRASS);
-
-  // 12 greenhouse FARM_PATCH tiles — 4 cols × 3 rows.
-  // Cols: 2, 4, 6, 8   Rows: 1, 2, 3  (fits within greenhouse interior rows 1-4)
-  const greenhouseCols = [2, 4, 6, 8];
-  const ghRows = [1, 2, 3];
-  let ghPatchIndex = 0;
-  for (const pr of ghRows) {
-    for (const pc of greenhouseCols) {
-      // Determine tile from farmingState greenhouse patch state
-      let patchTile = TILES.FARM_PATCH; // default: empty
-      if (farmingState && farmingState.greenhousePatches[ghPatchIndex]) {
-        const gp = farmingState.greenhousePatches[ghPatchIndex];
-        if      (gp.state === 'seeded')  patchTile = TILES.FARM_PATCH_SEEDED;
-        else if (gp.state === 'growing') patchTile = TILES.FARM_PATCH_GROWING;
-        else if (gp.state === 'ready')   patchTile = TILES.FARM_PATCH_READY;
-      }
-      _prop(pc, pr, patchTile);
-      ghPatchIndex++;
-    }
+  // ── Fence border — solid, player cannot leave ──────────
+  for (let c = 0; c < W; c++) {
+    _set(t, W, c, 0,     TILES.FENCE);
+    _set(t, W, c, H - 1, TILES.FENCE);
+  }
+  for (let r = 0; r < H; r++) {
+    _set(t, W, 0,     r, TILES.FENCE);
+    _set(t, W, W - 1, r, TILES.FENCE);
   }
 
-  // Door from greenhouse → main entry room.
-  // Shared wall is row 5 (south border of greenhouse / north border of middle rooms).
-  // Place DOOR at col 10, row 5 (aligns with the centre of the entry room).
-  _set(t, W, 10, 5, TILES.DOOR);
+  // Collect furniture rotations during build; applied after InteriorMap creation.
+  const furnRotations = [];
 
-  // ══════════════════════════════════════════════════════
-  // ROOM 2 — ENTRY / MAIN ROOM  (cols 6-15, rows 6-12)
-  // Floor: PLANK.  Existing furniture placed here by HousingState.
-  // ══════════════════════════════════════════════════════
-  // Outer walls already wall from _grid.  Carve interior:
-  _fill(t, W, 7, 7, 8, 5, TILES.PLANK); // cols 7-14, rows 7-11 (interior floor)
+  // ── Build each owned cell ──────────────────────────────
+  for (const [key, cell] of housingState.cells) {
+    const [gx, gy] = key.split(',').map(Number);
+    const roomDef  = ROOM_DEFS[cell.typeId];
+    if (!roomDef) continue;
 
-  // Left wall of entry room (col 6): solid WALL — already set by _grid.
-  // Right wall of entry room (col 15): solid WALL — already set by _grid.
-  // North wall of entry room (row 6): solid WALL row — already set.
-  // South wall of entry room (row 12): solid WALL row — already set.
+    const io = cellInnerOrigin(gx, gy);          // top-left of 11x11 inner area
 
-  // ── Phase: place furniture tiles from HousingState ────
-  // Map furniture from the housing grid onto the entry/main room floor.
-  // We iterate over all furniture entries and place them relative to the
-  // inner origin of the starter cell, then offset into the entry room area.
-  // For compatibility, furniture local coords are placed starting at (7,7).
-  for (const [, furList] of housingState.furniture) {
+    // Fill the 11x11 inner floor
+    _fill(t, W, io.col, io.row, CELL_INNER, CELL_INNER, roomDef.floorTile);
+
+    // ── Walls around this cell ───────────────────────────
+    const wL = io.col - 1;
+    const wR = io.col + CELL_INNER;
+    const wT = io.row - 1;
+    const wB = io.row + CELL_INNER;
+
+    // Choose wall tile per edge.
+    // Fenced rooms: garden (steel), taming_pen (wood), farming_plot (wood).
+    // Use fence when edge is exterior OR adjacent room is also fenced.
+    // Use WALL when adjacent room is a non-fenced type.
+    const FENCED_TYPES = new Set(['garden', 'taming_pen', 'farming_plot']);
+    const isFenced = FENCED_TYPES.has(cell.typeId);
+    const fenceH = cell.typeId === 'garden' ? TILES.STEEL_FENCE_H : TILES.WOOD_FENCE_H;
+    const fenceV = cell.typeId === 'garden' ? TILES.STEEL_FENCE_V : TILES.WOOD_FENCE_V;
+    const fenceCorner = cell.typeId === 'garden' ? TILES.STEEL_FENCE_CORNER : TILES.WOOD_FENCE_CORNER;
+
+    function _edgeTile(adjGX, adjGY, isHoriz) {
+      if (!isFenced) return TILES.WALL;
+      const adj = housingState.getCell(adjGX, adjGY);
+      // No adjacent room → fence (exterior edge)
+      if (!adj) return isHoriz ? fenceH : fenceV;
+      // Adjacent room is also fenced → fence
+      if (FENCED_TYPES.has(adj.typeId)) return isHoriz ? fenceH : fenceV;
+      // Adjacent room is a solid-wall type → WALL
+      return TILES.WALL;
+    }
+
+    const tileTop   = _edgeTile(gx, gy - 1, true);
+    const tileBot   = _edgeTile(gx, gy + 1, true);
+    const tileLeft  = _edgeTile(gx - 1, gy, false);
+    const tileRight = _edgeTile(gx + 1, gy, false);
+
+    // Top wall row (excluding corners)
+    if (wT >= 0) {
+      for (let c = io.col; c < io.col + CELL_INNER; c++)
+        _set(t, W, c, wT, tileTop);
+    }
+    // Bottom wall row (excluding corners)
+    if (wB < H) {
+      for (let c = io.col; c < io.col + CELL_INNER; c++)
+        _set(t, W, c, wB, tileBot);
+    }
+    // Left wall column (excluding corners)
+    if (wL >= 0) {
+      for (let r = io.row; r < io.row + CELL_INNER; r++)
+        _set(t, W, wL, r, tileLeft);
+    }
+    // Right wall column (excluding corners)
+    if (wR < W) {
+      for (let r = io.row; r < io.row + CELL_INNER; r++)
+        _set(t, W, wR, r, tileRight);
+    }
+
+    // Corners — set corner post for now; second pass below upgrades to WALL if needed
+    const cornerPositions = [
+      [wL, wT], [wR, wT], [wL, wB], [wR, wB],
+    ];
+    for (const [cc, cr] of cornerPositions) {
+      if (cc < 0 || cc >= W || cr < 0 || cr >= H) continue;
+      _set(t, W, cc, cr, isFenced ? fenceCorner : TILES.WALL);
+    }
+
+    // ── 3-tile gap in shared walls to adjacent rooms (no doors) ─
+    const mid = 5; // centre of 11-tile span
+    if (housingState.hasCell(gx + 1, gy)) {
+      for (let r = io.row + mid - 1; r <= io.row + mid + 1; r++)
+        _set(t, W, wR, r, roomDef.floorTile);
+    }
+    if (housingState.hasCell(gx - 1, gy)) {
+      for (let r = io.row + mid - 1; r <= io.row + mid + 1; r++)
+        _set(t, W, wL, r, roomDef.floorTile);
+    }
+    if (housingState.hasCell(gx, gy + 1)) {
+      for (let c = io.col + mid - 1; c <= io.col + mid + 1; c++)
+        _set(t, W, c, wB, roomDef.floorTile);
+    }
+    if (housingState.hasCell(gx, gy - 1)) {
+      for (let c = io.col + mid - 1; c <= io.col + mid + 1; c++)
+        _set(t, W, c, wT, roomDef.floorTile);
+    }
+
+    // ── Room-specific content ────────────────────────────
+
+    // Farming plot — rows of soil patches
+    if (cell.typeId === 'farming_plot') {
+      const patches = farmingState ? (farmingState.patches.get(key) ?? []) : [];
+      let patchIdx = 0;
+      for (const pos of PATCH_LOCAL_POSITIONS) {
+        const pc = io.col + pos.localCol;
+        const pr = io.row + pos.localRow;
+        const patch = patches[patchIdx] ?? null;
+        const tile = farmingState ? farmingState.getPatchTile(patch) : GROW_STAGES[0].tile;
+        _prop(pc, pr, tile);
+        patchIdx++;
+      }
+    }
+
+    // Furniture placement — record rotation for each tile so the renderer
+    // can draw directional sprites (chairs, chests, bookshelves, etc.).
+    const furList = housingState.getFurniture(gx, gy);
     for (const f of furList) {
       const fd = FURNITURE_DEFS[f.defId];
       if (!fd) continue;
       const { w, h } = rotatedFootprint(fd, f.rotation);
       for (let dr = 0; dr < h; dr++) {
         for (let dc = 0; dc < w; dc++) {
-          // Place furniture within the main room floor area (cols 7-14, rows 7-11)
-          const tc = 7 + f.localCol + dc;
-          const tr = 7 + f.localRow + dr;
-          if (tc >= 7 && tc <= 14 && tr >= 7 && tr <= 11) {
+          const tc = io.col + f.localCol + dc;
+          const tr = io.row + f.localRow + dr;
+          // Wall-mount items may sit on the wall row (localRow = -1)
+          const onWall = fd.wallMount && tr === io.row + f.localRow && f.localRow < 0;
+          if (onWall ||
+              (tc >= io.col && tc < io.col + CELL_INNER &&
+               tr >= io.row && tr < io.row + CELL_INNER)) {
             _prop(tc, tr, fd.tileId);
+            furnRotations.push({ c: tc, r: tr, rot: f.rotation });
           }
         }
       }
     }
   }
 
-  // ── Phase: old-style farming patches inside entry room ─
-  // (farming_plot cell patches from patches Map, for backward compatibility)
-  for (const [key, cell] of housingState.cells) {
-    if (cell.typeId !== 'farming_plot') continue;
-    const patches = farmingState ? (farmingState.patches.get(key) ?? []) : [];
-    for (let i = 0; i < PATCH_LOCAL_POSITIONS.length; i++) {
-      const { localCol, localRow } = PATCH_LOCAL_POSITIONS[i];
-      const pc = 7 + localCol, pr = 7 + localRow;
-      if (pc >= 7 && pc <= 14 && pr >= 7 && pr <= 11) {
-        const patch = patches[i] ?? null;
-        const stage = farmingState ? farmingState.getPatchStage(patch) : 0;
-        _prop(pc, pr, GROW_STAGES[stage].tile);
+  // ── Corner fix pass: upgrade fence corners to WALL if any adjacent edge is WALL ─
+  for (const [key] of housingState.cells) {
+    const [gx, gy] = key.split(',').map(Number);
+    const io = cellInnerOrigin(gx, gy);
+    const wL = io.col - 1, wR = io.col + CELL_INNER;
+    const wT = io.row - 1, wB = io.row + CELL_INNER;
+    // Each corner: check the two edge tiles adjacent to it (one horizontal, one vertical)
+    const cornerChecks = [
+      // [cornerCol, cornerRow, horizNeighbor, vertNeighbor]
+      [wL, wT, [io.col, wT], [wL, io.row]],        // top-left
+      [wR, wT, [io.col + CELL_INNER - 1, wT], [wR, io.row]],  // top-right
+      [wL, wB, [io.col, wB], [wL, io.row + CELL_INNER - 1]],  // bottom-left
+      [wR, wB, [io.col + CELL_INNER - 1, wB], [wR, io.row + CELL_INNER - 1]],  // bottom-right
+    ];
+    for (const [cc, cr, [hc, hr], [vc, vr]] of cornerChecks) {
+      if (cc < 0 || cc >= W || cr < 0 || cr >= H) continue;
+      const cur = t[cr * W + cc];
+      if (cur === TILES.WALL) continue; // already WALL
+      // If either adjacent edge tile is WALL, corner must be WALL
+      const hTile = (hr >= 0 && hr < H && hc >= 0 && hc < W) ? t[hr * W + hc] : TILES.WALL;
+      const vTile = (vr >= 0 && vr < H && vc >= 0 && vc < W) ? t[vr * W + vc] : TILES.WALL;
+      if (hTile === TILES.WALL || vTile === TILES.WALL) {
+        _set(t, W, cc, cr, TILES.WALL);
       }
     }
   }
 
-  // South extension of entry room (cols 7-14, rows 12-16) — open walkable area
-  _fill(t, W, 7, 12, 8, 5, TILES.PLANK); // cols 7-14, rows 12-16
-
-  // STAIRS exit at south wall of entry room (bottom of map)
-  // South outer wall is row 17. Place stairs at (10, 16) — one tile from south wall.
-  _set(t, W, 10, 16, TILES.STAIRS);
-  // Open the south wall at col 10 so the player can reach stairs from inside.
-  _set(t, W, 10, 17, TILES.DOOR);
-
-  // ══════════════════════════════════════════════════════
-  // ROOM 3 — STORAGE ROOM  (cols 16-21, rows 6-12)
-  // Floor: PLANK.  Contains large chest.
-  // ══════════════════════════════════════════════════════
-  // Interior: cols 17-20, rows 7-11
-  _fill(t, W, 17, 7, 4, 5, TILES.PLANK);
-
-  // Large chest at interior position (19, 8)
-  // TODO: game.js — when player opens chest at interior position (19,8), use
-  //   LARGE_CHEST_CAPACITY (112) slots if housingState.hasLargeChest, else 28 slots.
-  _prop(19, 8, TILES.FURN_CHEST);
-
-  // Shelving along the east wall of storage room (col 20, rows 9-10)
-  _prop(20, 9,  TILES.FURN_BOOKSHELF);
-  _prop(20, 10, TILES.FURN_BOOKSHELF);
-
-  // Door from storage room → entry room at shared wall col 15, row 9
-  // (centre of the shared wall between entry col 15 and storage col 16)
-  _set(t, W, 15, 9, TILES.DOOR);
-  _set(t, W, 16, 9, TILES.PLANK); // open passage tile inside storage room
-
-  // ══════════════════════════════════════════════════════
-  // ROOM 4 — ANIMAL PEN  (cols 0-5, rows 6-17)
-  // Floor: DIRT.  4 animal slot positions using FARM_PATCH.
-  // ══════════════════════════════════════════════════════
-  // Interior: cols 1-4, rows 7-16
-  _fill(t, W, 1, 7, 4, 10, TILES.DIRT);
-
-  // 4 animal slot positions (FARM_PATCH tiles mark interactive spots)
-  // Positions: (2,9), (4,9), (2,11), (4,11)
-  // TODO: game.js — add animalPenOpen panel flag; clicking a pen tile at
-  //   interior positions (2,9), (4,9), (2,11), (4,11) opens animal management;
-  //   call housingState.tickAnimals(dt) in update loop; renderer.drawAnimalPenPanel()
-  _prop(2,  9,  TILES.FARM_PATCH);
-  _prop(4,  9,  TILES.FARM_PATCH);
-  _prop(2,  11, TILES.FARM_PATCH);
-  _prop(4,  11, TILES.FARM_PATCH);
-
-  // Door from animal pen → entry room at shared wall col 5, row 9
-  // (passage connecting pen to entry room)
-  _set(t, W, 5, 9, TILES.DOOR);
-  _set(t, W, 6, 9, TILES.PLANK); // open passage tile on entry room side
-
-  // ── Ensure outer border is solid WALL ─────────────────
-  // Top row and bottom row
-  for (let c = 0; c < W; c++) {
-    _set(t, W, c, 0,     TILES.WALL);
-    _set(t, W, c, H - 1, TILES.WALL);
+  // ── Exit door in the player-chosen exit room ───────────
+  // Validate: if exit room now has a south neighbour, auto-fix
+  let exitGX = housingState.exitGX;
+  let exitGY = housingState.exitGY;
+  if (housingState.cells.has(`${exitGX},${exitGY + 1}`)) {
+    // Find a valid exit room (southernmost with no south neighbour)
+    let maxGY = -1;
+    for (const key of housingState.cells.keys()) {
+      const [gx, gy] = key.split(',').map(Number);
+      if (gy > maxGY && !housingState.cells.has(`${gx},${gy + 1}`)) {
+        maxGY = gy; exitGX = gx;
+      }
+    }
+    exitGY = maxGY >= 0 ? maxGY : housingState.exitGY;
+    housingState.setExitCell(exitGX, exitGY);
   }
-  // Left col and right col
-  for (let r = 0; r < H; r++) {
-    _set(t, W, 0,     r, TILES.WALL);
-    _set(t, W, W - 1, r, TILES.WALL);
-  }
+  const exitIO = cellInnerOrigin(exitGX, exitGY);
+  const doorCol = exitIO.col + 5;                 // centre of 11-wide room
+  const doorRow = exitIO.row + CELL_INNER;        // south wall (one tile below inner floor)
+  _set(t, W, doorCol, doorRow, TILES.DOOR);
 
-  // ── Spawn point: centre of entry/main room ─────────────
-  // Entry room interior is cols 7-14, rows 7-11. Centre ≈ (10, 9).
-  const entryC = 10;
-  const entryR = 9;
+  // Entry point — one tile above the exit door
+  const entryC = doorCol;
+  const entryR = doorRow - 1;
 
   const map = new InteriorMap('player_house', 'My Home', W, H, t, entryC, entryR);
   map.propGroundMap = propGroundMap;
+
+  // Apply furniture rotations now that the InteriorMap's _rotations array exists.
+  for (const { c, r, rot } of furnRotations) {
+    map._rotations[r * W + c] = rot & 3;
+  }
+
   return map;
 }
 
-/* ── Public factory ─────────────────────────────────── */
-
-/**
- * Build (or rebuild) the player house interior map (22×18 tiles).
- *
- * Room layout:
- *   Greenhouse   — cols 0-21, rows 0-5   (GRASS floor, 12 FARM_PATCH slots)
- *   Entry/Main   — cols 6-15, rows 6-17  (PLANK floor, furniture, STAIRS exit)
- *   Storage      — cols 16-21, rows 6-12 (PLANK floor, FURN_CHEST at (19,8))
- *   Animal Pen   — cols 0-5,  rows 6-17  (DIRT floor, 4 pen slots)
- *
- * All rooms connect to the entry/main room via DOOR=29 gaps.
- * WALL=6 is solid (isSolid returns true). DOOR=29 is walkable.
- * Player spawns at (10, 9) — centre of entry room.
- * STAIRS exit at (10, 16), door gap at (10, 17) in south wall.
- *
- * Call again to rebuild after state changes (room added, furniture placed,
- * greenhouse patch updated, animal pen changed).
- *
- * @param {import('./housing.js').HousingState} housingState
- * @param {import('./farming.js').FarmingState|null} farmingState
- */
 export function buildPlayerHouse(housingState, farmingState = null) {
   return _buildPlayerHouseFromState(housingState, farmingState);
 }

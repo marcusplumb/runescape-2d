@@ -226,6 +226,17 @@ function attachRooms(io) {
       io.emit('chat_message', { name, message: text });
     });
 
+    // Milestone level-up broadcast (every 10th level, and 100). Server validates
+    // and forwards to all OTHER clients so the leveler doesn't see their own echo.
+    socket.on('levelup_milestone', ({ skill, level }) => {
+      if (typeof skill !== 'string' || typeof level !== 'number') return;
+      const lvl = Math.floor(level);
+      if (lvl < 10 || lvl > 100 || lvl % 10 !== 0) return;
+      const p    = online.get(socket.id);
+      const name = p ? (p.name || username) : username;
+      socket.broadcast.emit('levelup_broadcast', { name, skill: skill.slice(0, 24), level: lvl });
+    });
+
     socket.on('disconnect', () => {
       mobSim.removePlayer(socket.id);
       online.delete(socket.id);

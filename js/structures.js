@@ -723,6 +723,12 @@ function connectSettlementsWithRoads(map, rows, cols, settlements, rng) {
  */
 function placeKingdom(map, rows, cols, cx, cy) {
   const doors = [];
+  const propGroundMap = new Map();
+  /** Record the underlying floor tile before overwriting with a prop/furniture tile. */
+  function _propOn(r, c, tile) {
+    propGroundMap.set(`${c},${r}`, map[r][c]);
+    map[r][c] = tile;
+  }
   const OW = 76, OH = 60;
   const ox = cx - 38, oy = cy - 30;
 
@@ -873,18 +879,18 @@ function placeKingdom(map, rows, cols, cx, cy) {
     // Gap at bc+6 aligns with NPC position and door below
     const gapC = bc + 6;
     for (let dc = 1; dc <= 10; dc++)
-      if (bc + dc !== gapC) map[br + 1][bc + dc] = TILES.MEAT_HOOK;
+      if (bc + dc !== gapC) _propOn(br + 1, bc + dc, TILES.MEAT_HOOK);
 
     // Butcher's chopping blocks flanking the aisle (row br+3)
-    map[br + 3][bc + 3] = TILES.BUTCHER_BLOCK;
-    map[br + 3][bc + 8] = TILES.BUTCHER_BLOCK;
+    _propOn(br + 3, bc + 3, TILES.BUTCHER_BLOCK);
+    _propOn(br + 3, bc + 8, TILES.BUTCHER_BLOCK);
 
     // Storage barrels in the rear corners (row br+5)
-    map[br + 5][bc + 1]  = TILES.BARREL;
-    map[br + 5][bc + 10] = TILES.BARREL;
+    _propOn(br + 5, bc + 1, TILES.BARREL);
+    _propOn(br + 5, bc + 10, TILES.BARREL);
 
     // Hearth fireplace in the south-west inner corner (row br+6)
-    map[br + 6][bc + 1]  = TILES.HEARTH;
+    _propOn(br + 6, bc + 1, TILES.HEARTH);
   }
 
   _bld(westC, bldR + 11, 10, 7, 'kingdom_fishmonger', TILES.WET_STONE);
@@ -899,13 +905,13 @@ function placeKingdom(map, rows, cols, cx, cy) {
         map[br + dr][bc + dc] = TILES.WET_STONE;
     // Fish counter along north inner wall; gap at dc=5 for NPC
     for (let dc = 1; dc <= 8; dc++)
-      if (dc !== 5) map[br + 1][bc + dc] = TILES.FISH_COUNTER;
+      if (dc !== 5) _propOn(br + 1, bc + dc, TILES.FISH_COUNTER);
     // Fish tanks flanking the aisle (row br+2)
-    map[br + 2][bc + 1] = TILES.FISH_TANK;
-    map[br + 2][bc + 8] = TILES.FISH_TANK;
+    _propOn(br + 2, bc + 1, TILES.FISH_TANK);
+    _propOn(br + 2, bc + 8, TILES.FISH_TANK);
     // Ice boxes near the entrance (row br+4)
-    map[br + 4][bc + 1] = TILES.ICE_BOX;
-    map[br + 4][bc + 8] = TILES.ICE_BOX;
+    _propOn(br + 4, bc + 1, TILES.ICE_BOX);
+    _propOn(br + 4, bc + 8, TILES.ICE_BOX);
   }
 
   _bld(westC, bldR + 21, 12, 7, 'kingdom_variety',    TILES.WOOD_FLOOR);
@@ -920,15 +926,15 @@ function placeKingdom(map, rows, cols, cx, cy) {
         map[br + dr][bc + dc] = TILES.WOOD_FLOOR;
     // Display shelves along north inner wall (dr=1, full row)
     for (let dc = 1; dc <= 10; dc++)
-      map[br + 1][bc + dc] = TILES.DISPLAY_SHELF;
+      _propOn(br + 1, bc + dc, TILES.DISPLAY_SHELF);
     // Barrels flanking mid-aisle (dr=3, corners)
-    map[br + 3][bc + 1]  = TILES.BARREL;
-    map[br + 3][bc + 10] = TILES.BARREL;
+    _propOn(br + 3, bc + 1, TILES.BARREL);
+    _propOn(br + 3, bc + 10, TILES.BARREL);
     // Side shelves near entrance (dr=4, outer pairs)
-    map[br + 4][bc + 1]  = TILES.DISPLAY_SHELF;
-    map[br + 4][bc + 2]  = TILES.DISPLAY_SHELF;
-    map[br + 4][bc + 9]  = TILES.DISPLAY_SHELF;
-    map[br + 4][bc + 10] = TILES.DISPLAY_SHELF;
+    _propOn(br + 4, bc + 1, TILES.DISPLAY_SHELF);
+    _propOn(br + 4, bc + 2, TILES.DISPLAY_SHELF);
+    _propOn(br + 4, bc + 9, TILES.DISPLAY_SHELF);
+    _propOn(br + 4, bc + 10, TILES.DISPLAY_SHELF);
   }
 
   // ── East side (3 stacked) ───────────────────────────────────
@@ -944,12 +950,12 @@ function placeKingdom(map, rows, cols, cx, cy) {
         map[br + dr][bc + dc] = TILES.STONE_TILE;
     // Weapon racks along full north inner wall (dr=1)
     for (let dc = 1; dc <= 10; dc++)
-      map[br + 1][bc + dc] = TILES.WEAPON_RACK;
+      _propOn(br + 1, bc + dc, TILES.WEAPON_RACK);
     // Armor stands flanking the room in two rows
-    map[br + 2][bc + 1]  = TILES.ARMOR_STAND;
-    map[br + 2][bc + 10] = TILES.ARMOR_STAND;
-    map[br + 4][bc + 1]  = TILES.ARMOR_STAND;
-    map[br + 4][bc + 10] = TILES.ARMOR_STAND;
+    _propOn(br + 2, bc + 1, TILES.ARMOR_STAND);
+    _propOn(br + 2, bc + 10, TILES.ARMOR_STAND);
+    _propOn(br + 4, bc + 1, TILES.ARMOR_STAND);
+    _propOn(br + 4, bc + 10, TILES.ARMOR_STAND);
   }
 
   _bld(eastC, bldR + 11, 10, 7, 'kingdom_capes',      TILES.TEXTILE_FLOOR);
@@ -964,12 +970,12 @@ function placeKingdom(map, rows, cols, cx, cy) {
         map[br + dr][bc + dc] = TILES.TEXTILE_FLOOR;
     // Cape displays along full north inner wall (dr=1)
     for (let dc = 1; dc <= 8; dc++)
-      map[br + 1][bc + dc] = TILES.CAPE_DISPLAY;
+      _propOn(br + 1, bc + dc, TILES.CAPE_DISPLAY);
     // Tailor tables flanking the room (dr=2 and dr=4, sides)
-    map[br + 2][bc + 1] = TILES.TAILOR_TABLE;
-    map[br + 2][bc + 8] = TILES.TAILOR_TABLE;
-    map[br + 4][bc + 1] = TILES.TAILOR_TABLE;
-    map[br + 4][bc + 8] = TILES.TAILOR_TABLE;
+    _propOn(br + 2, bc + 1, TILES.TAILOR_TABLE);
+    _propOn(br + 2, bc + 8, TILES.TAILOR_TABLE);
+    _propOn(br + 4, bc + 1, TILES.TAILOR_TABLE);
+    _propOn(br + 4, bc + 8, TILES.TAILOR_TABLE);
   }
 
   _bld(eastC, bldR + 21, 12, 7, 'kingdom_exchange');
@@ -1096,7 +1102,7 @@ function placeKingdom(map, rows, cols, cx, cy) {
       map[torchR][torchC] = TILES.FIRE;
   }
 
-  return { doors, roofBounds };
+  return { doors, roofBounds, propGroundMap };
 }
 
 /**
@@ -1223,6 +1229,7 @@ export function placeAllStructures(map, rows, cols, rng) {
 
   const doorMap = new Map(); // "col,row" → interiorId string
   const roofBounds = [];
+  const propGroundMap = new Map();
 
   // 1. Draw existing road network first (dirt paths between named nodes)
   for (const [a, b] of ROADS) {
@@ -1265,6 +1272,9 @@ export function placeAllStructures(map, rows, cols, rng) {
         const kd = placeKingdom(map, rows, cols, node.c, node.r);
         kd.doors.forEach(({ door, id }) => doorMap.set(`${door.col},${door.row}`, id));
         kd.roofBounds.forEach(rb => roofBounds.push(rb));
+        if (kd.propGroundMap) {
+          for (const [key, val] of kd.propGroundMap) propGroundMap.set(key, val);
+        }
         settlementCentres.push({ c: node.c, r: node.r, type: node.type });
         break;
       }
@@ -1293,5 +1303,5 @@ export function placeAllStructures(map, rows, cols, rng) {
   // 4. Organic biome-aware roads between settlements within 200 tiles of each other
   connectSettlementsWithRoads(map, rows, cols, settlementCentres, rng);
 
-  return { doorMap, roofBounds };
+  return { doorMap, roofBounds, propGroundMap };
 }

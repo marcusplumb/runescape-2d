@@ -2,9 +2,9 @@
  * Player Housing System
  *
  * Grid-based expandable house tied to the Architect skill.
- * The player house interior (90×90 tiles) contains a 6×6 grid of "cells".
- * Each cell is CELL_SIZE×CELL_SIZE tiles and can be an indoor room or
- * an outdoor plot. Cells must be placed adjacent to owned cells.
+ * The player house interior is a 73×73-tile map containing a 6×6 grid of
+ * "cells".  Every cell is 11×11 walkable tiles separated by 1-tile walls.
+ * The entire property is fenced — grass fills unbuilt areas.
  */
 
 import { TILES, SKILL_IDS } from './constants.js';
@@ -31,12 +31,11 @@ const ANIMAL_PRODUCE_IDS = {
 };
 
 // ── Grid constants ────────────────────────────────────────────────────────
-export const CELL_SIZE     = 13;   // tile size per cell including outer walls
-export const CELL_INNER    = 11;   // inner walkable floor width/height
+export const CELL_INNER    = 11;   // inner walkable floor width/height per cell
+export const CELL_STRIDE   = 12;   // inner + 1 wall tile between cells
 export const GRID_COLS     = 6;
 export const GRID_ROWS     = 6;
-export const GRID_OFFSET_C = 6;    // tile col where grid (0,0) top-left starts
-export const GRID_OFFSET_R = 6;    // tile row where grid (0,0) top-left starts
+export const HOUSE_MAP_SIZE = 1 + GRID_COLS * CELL_INNER + (GRID_COLS - 1) + 1; // 73
 export const START_GX      = 2;    // starter cell grid col
 export const START_GY      = 2;    // starter cell grid row
 
@@ -49,18 +48,12 @@ export const BM_GRID_OFF    = 24;  // left pad inside grid section
 export const BM_GRID_TOP    = BM_HEADER_H + 16;
 export const BM_SPLIT_X     = BM_GRID_OFF * 2 + GRID_COLS * BM_GRID_CELL + 4; // ≈ 284
 
-/** Tile col/row of a cell's top-left corner (outer wall). */
-export function cellOrigin(gx, gy) {
-  return {
-    col: GRID_OFFSET_C + gx * CELL_SIZE,
-    row: GRID_OFFSET_R + gy * CELL_SIZE,
-  };
-}
-
 /** Tile col/row of a cell's inner floor top-left corner. */
 export function cellInnerOrigin(gx, gy) {
-  const o = cellOrigin(gx, gy);
-  return { col: o.col + 1, row: o.row + 1 };
+  return {
+    col: 1 + gx * CELL_STRIDE,
+    row: 1 + gy * CELL_STRIDE,
+  };
 }
 
 // ── Room definitions ──────────────────────────────────────────────────────
@@ -165,15 +158,6 @@ export const ROOM_DEFS = {
     floorTile: TILES.DIRT,
     color: '#6a4a20',
   },
-  pond: {
-    id: 'pond', name: 'Pond',
-    category: 'outdoor',
-    desc: 'A serene decorative water feature.',
-    levelReq: 20, goldCost: 200,
-    materials: [{ itemId: 'bar_iron', qty: 5 }],
-    floorTile: TILES.WATER,
-    color: '#1a5080',
-  },
   decorative_path: {
     id: 'decorative_path', name: 'Stone Path',
     category: 'outdoor',
@@ -199,70 +183,44 @@ export const ROOM_DEFS = {
 // solid: whether the tile blocks movement
 
 export const FURNITURE_DEFS = {
-  // ── Indoor ──────────────────────────────────────────────
+  // ── General indoor (most rooms) ────────────────────────────
   chair: {
     id: 'chair', name: 'Wooden Chair',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: false,
-    tileId: TILES.FURN_CHAIR,
+    tileId: TILES.FURN_CHAIR, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 2 }],
     desc: 'A simple wooden chair.',
   },
   rug: {
     id: 'rug', name: 'Rug',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: false,
-    tileId: TILES.FURN_RUG,
+    tileId: TILES.FURN_RUG, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 1 }],
     desc: 'A decorative floor rug.',
+    rooms: ['starter', 'living_room', 'bedroom', 'kitchen', 'library', 'trophy_room'],
   },
   table: {
     id: 'table', name: 'Wooden Table',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.FURN_TABLE,
+    tileId: TILES.FURN_TABLE, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 4 }],
     desc: 'A sturdy wooden dining table.',
   },
   chest: {
     id: 'chest', name: 'Storage Chest',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.FURN_CHEST,
+    tileId: TILES.FURN_CHEST, rotatable: true,
     levelReq: 5, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 4 }],
     desc: 'A lockable wooden chest.',
+    rooms: ['starter', 'living_room', 'bedroom', 'kitchen', 'storage', 'workshop', 'trophy_room'],
   },
-  bookshelf: {
-    id: 'bookshelf', name: 'Bookshelf',
+  candelabra: {
+    id: 'candelabra', name: 'Candelabra',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.FURN_BOOKSHELF,
-    levelReq: 10, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 6 }],
-    desc: 'A shelf packed with books.',
-  },
-  bed: {
-    id: 'bed', name: 'Wooden Bed',
-    category: 'indoor', footprint: { w: 1, h: 2 }, solid: true,
-    tileId: TILES.FURN_BED,
-    levelReq: 15, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 8 }],
-    desc: 'A cosy bed to sleep in.',
-  },
-  crafting_bench: {
-    id: 'crafting_bench', name: 'Crafting Bench',
-    category: 'indoor', footprint: { w: 2, h: 1 }, solid: true,
-    tileId: TILES.FURN_BENCH,
-    levelReq: 10, goldCost: 0,
-    materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'bar_iron', qty: 2 }],
-    desc: 'A heavy-duty work surface.',
-  },
-  furnace: {
-    id: 'furnace', name: 'Furnace',
-    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.FURNACE,
-    levelReq: 20, goldCost: 0, materials: [{ itemId: 'bar_iron', qty: 10 }],
-    desc: 'Smelt ores into bars.',
-  },
-  anvil: {
-    id: 'anvil', name: 'Anvil',
-    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.ANVIL,
-    levelReq: 20, goldCost: 0, materials: [{ itemId: 'bar_steel', qty: 5 }],
-    desc: 'Smith bars into equipment.',
+    tileId: TILES.FURN_CANDELABRA,
+    levelReq: 5, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 3 }],
+    desc: 'A standing iron candle holder.',
   },
   plant: {
     id: 'plant', name: 'Potted Plant',
@@ -271,13 +229,142 @@ export const FURNITURE_DEFS = {
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 1 }],
     desc: 'A decorative potted plant.',
   },
-  // ── Outdoor ─────────────────────────────────────────────
+  // ── Bedroom ────────────────────────────────────────────────
+  bed: {
+    id: 'bed', name: 'Wooden Bed',
+    category: 'indoor', footprint: { w: 1, h: 2 }, solid: true,
+    tileId: TILES.FURN_BED, rotatable: true,
+    levelReq: 15, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 8 }],
+    desc: 'A cosy bed to sleep in.',
+    rooms: ['bedroom', 'starter'],
+  },
+  wardrobe: {
+    id: 'wardrobe', name: 'Wardrobe',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_WARDROBE, rotatable: true,
+    levelReq: 15, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 10 }],
+    desc: 'A tall wooden cabinet for garments.',
+    rooms: ['bedroom', 'starter', 'living_room'],
+  },
+  // ── Kitchen / cooking ──────────────────────────────────────
+  fireplace: {
+    id: 'fireplace', name: 'Fireplace',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.HEARTH, wallMount: 'north',
+    levelReq: 10, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 4 }, { itemId: 'logs', qty: 6 }],
+    desc: 'A stone hearth for warmth and cooking.',
+    rooms: ['kitchen', 'living_room', 'starter', 'bedroom'],
+  },
+  chopping_block: {
+    id: 'chopping_block', name: 'Chopping Block',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.BUTCHER_BLOCK,
+    levelReq: 10, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 6 }, { itemId: 'bar_iron', qty: 1 }],
+    desc: 'A thick wooden block for preparing meat.',
+    rooms: ['kitchen'],
+  },
+  meat_hooks: {
+    id: 'meat_hooks', name: 'Meat Hooks',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.MEAT_HOOK, wallMount: 'north',
+    levelReq: 15, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 4 }],
+    desc: 'Iron hooks for hanging cured meats.',
+    rooms: ['kitchen', 'storage'],
+  },
+  cauldron: {
+    id: 'cauldron', name: 'Cauldron',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_CAULDRON,
+    levelReq: 15, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 6 }],
+    desc: 'A large iron pot for stews and brews.',
+    rooms: ['kitchen'],
+  },
+  // ── Library ────────────────────────────────────────────────
+  bookshelf: {
+    id: 'bookshelf', name: 'Bookshelf',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_BOOKSHELF, rotatable: true,
+    levelReq: 10, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 6 }],
+    desc: 'A shelf packed with books.',
+    rooms: ['library', 'living_room', 'starter', 'bedroom', 'trophy_room'],
+  },
+  // ── Living room / decoration ───────────────────────────────
+  tapestry: {
+    id: 'tapestry', name: 'Tapestry',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_TAPESTRY, rotatable: true,
+    levelReq: 10, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 2 }],
+    desc: 'A woven wall banner.',
+    rooms: ['living_room', 'bedroom', 'library', 'trophy_room', 'starter'],
+  },
+  // ── Workshop ───────────────────────────────────────────────
+  crafting_bench: {
+    id: 'crafting_bench', name: 'Crafting Bench',
+    category: 'indoor', footprint: { w: 2, h: 1 }, solid: true,
+    tileId: TILES.FURN_BENCH, rotatable: true,
+    levelReq: 10, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'bar_iron', qty: 2 }],
+    desc: 'A heavy-duty work surface.',
+    rooms: ['workshop'],
+  },
+  furnace: {
+    id: 'furnace', name: 'Furnace',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURNACE,
+    levelReq: 20, goldCost: 0, materials: [{ itemId: 'bar_iron', qty: 10 }],
+    desc: 'Smelt ores into bars.',
+    rooms: ['workshop'],
+  },
+  anvil: {
+    id: 'anvil', name: 'Anvil',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.ANVIL,
+    levelReq: 20, goldCost: 0, materials: [{ itemId: 'bar_steel', qty: 5 }],
+    desc: 'Smith bars into equipment.',
+    rooms: ['workshop'],
+  },
+  // ── Trophy room / display ──────────────────────────────────
+  weapon_rack: {
+    id: 'weapon_rack', name: 'Weapon Rack',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.WEAPON_RACK, rotatable: true,
+    levelReq: 20, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'bar_iron', qty: 3 }],
+    desc: 'A wall rack displaying swords and axes.',
+    rooms: ['trophy_room', 'workshop'],
+  },
+  armor_stand: {
+    id: 'armor_stand', name: 'Armour Stand',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.ARMOR_STAND,
+    levelReq: 25, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 8 }],
+    desc: 'A mannequin bearing chainmail.',
+    rooms: ['trophy_room'],
+  },
+  display_shelf: {
+    id: 'display_shelf', name: 'Display Shelf',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.DISPLAY_SHELF, rotatable: true,
+    levelReq: 10, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 6 }],
+    desc: 'Shelves for displaying wares and trophies.',
+    rooms: ['trophy_room', 'storage', 'library', 'living_room'],
+  },
+  // ── Outdoor ────────────────────────────────────────────────
   barrel: {
     id: 'barrel', name: 'Barrel',
     category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
     tileId: TILES.BARREL,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 3 }],
     desc: 'A wooden storage barrel.',
+    rooms: ['courtyard', 'garden', 'taming_pen', 'farming_plot'],
   },
   well: {
     id: 'well', name: 'Stone Well',
@@ -285,6 +372,7 @@ export const FURNITURE_DEFS = {
     tileId: TILES.WELL,
     levelReq: 10, goldCost: 0, materials: [{ itemId: 'bar_iron', qty: 3 }],
     desc: 'A decorative stone well.',
+    rooms: ['courtyard', 'garden'],
   },
   fence: {
     id: 'fence', name: 'Fence',
@@ -299,8 +387,37 @@ export const FURNITURE_DEFS = {
     tileId: TILES.FIRE,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 3 }],
     desc: 'A crackling outdoor campfire.',
+    rooms: ['courtyard', 'garden', 'farming_plot'],
+  },
+  hay_bale: {
+    id: 'hay_bale', name: 'Hay Bale',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_HAY_BALE,
+    levelReq: 1, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 2 }],
+    desc: 'A bundle of dried hay.',
+    rooms: ['courtyard', 'garden', 'farming_plot', 'taming_pen'],
+  },
+  scarecrow: {
+    id: 'scarecrow', name: 'Scarecrow',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_SCARECROW,
+    levelReq: 5, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 4 }],
+    desc: 'A straw-stuffed guardian for the crops.',
+    rooms: ['farming_plot', 'garden'],
   },
 };
+
+/** Return furniture defs available for a given room type. */
+export function furnitureForRoom(roomTypeId) {
+  const roomDef = ROOM_DEFS[roomTypeId];
+  if (!roomDef) return [];
+  return Object.values(FURNITURE_DEFS).filter(fd => {
+    if (fd.rooms) return fd.rooms.includes(roomTypeId);
+    return fd.category === roomDef.category || fd.category === 'both';
+  });
+}
 
 // ── Inventory helpers ─────────────────────────────────────────────────────
 
@@ -337,6 +454,10 @@ export class HousingState {
 
     // Starter room is always present
     this.cells.set(`${START_GX},${START_GY}`, { typeId: 'starter' });
+
+    // ── Exit cell (which room has the entrance/exit door) ──
+    this.exitGX = START_GX;
+    this.exitGY = START_GY;
 
     // ── Large Storage Chest ──────────────────────────────
     /** True once the large chest upgrade is unlocked (Architect level 5 required).
@@ -380,6 +501,75 @@ export class HousingState {
       }
     }
     return avail;
+  }
+
+  // ── Exit cell management ────────────────────────────────
+
+  /**
+   * Check whether a room can be set as the exit.
+   * Only rooms with no south neighbour are allowed.
+   * @returns {{ ok: boolean, reason?: string }}
+   */
+  canSetExitCell(gx, gy) {
+    if (!this.cells.has(`${gx},${gy}`))
+      return { ok: false, reason: 'No room here.' };
+    if (this.cells.has(`${gx},${gy + 1}`))
+      return { ok: false, reason: 'Exit must be on a room with no south neighbour.' };
+    return { ok: true };
+  }
+
+  setExitCell(gx, gy) {
+    this.exitGX = gx;
+    this.exitGY = gy;
+  }
+
+  // ── Room removal ────────────────────────────────────────
+
+  /**
+   * Check whether a room can be removed without disconnecting the house.
+   * The starter room can never be removed.
+   * The exit room can never be removed.
+   * @returns {{ ok: boolean, reason?: string }}
+   */
+  canRemoveCell(gx, gy) {
+    const key = `${gx},${gy}`;
+    if (!this.cells.has(key))
+      return { ok: false, reason: 'No room here.' };
+    if (gx === START_GX && gy === START_GY)
+      return { ok: false, reason: 'Cannot remove the starter room.' };
+    if (gx === this.exitGX && gy === this.exitGY)
+      return { ok: false, reason: 'Cannot remove the exit room. Move the exit first.' };
+
+    // Check connectivity: removing this cell must leave all remaining cells connected
+    const remaining = new Set([...this.cells.keys()].filter(k => k !== key));
+    if (remaining.size === 0) return { ok: true };
+
+    const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    const start = remaining.values().next().value;
+    const visited = new Set([start]);
+    const queue = [start];
+    while (queue.length > 0) {
+      const cur = queue.shift();
+      const [cx, cy] = cur.split(',').map(Number);
+      for (const [dx, dy] of dirs) {
+        const nk = `${cx+dx},${cy+dy}`;
+        if (remaining.has(nk) && !visited.has(nk)) {
+          visited.add(nk);
+          queue.push(nk);
+        }
+      }
+    }
+    if (visited.size < remaining.size)
+      return { ok: false, reason: 'Removing this room would disconnect other rooms.' };
+
+    return { ok: true };
+  }
+
+  /** Remove a cell and its furniture. Assumes canRemoveCell returned ok. */
+  removeCell(gx, gy) {
+    const key = `${gx},${gy}`;
+    this.cells.delete(key);
+    this.furniture.delete(key);
   }
 
   // ── Room building ────────────────────────────────────────
@@ -455,8 +645,20 @@ export class HousingState {
     }
 
     const { w, h } = rotatedFootprint(def, rotation);
-    if (localCol < 0 || localRow < 0 || localCol + w > CELL_INNER || localRow + h > CELL_INNER)
+    const minRow = def.wallMount === 'north' ? -1 : 0;
+    if (localCol < 0 || localRow < minRow || localCol + w > CELL_INNER || localRow + h > CELL_INNER)
       return { ok: false, reason: 'Does not fit inside this room.' };
+
+    // Wall-mounted furniture must be placed directly on the wall
+    if (def.wallMount === 'north') {
+      if (localRow !== -1)
+        return { ok: false, reason: 'Must be placed on the north wall.' };
+      // Cannot place on the 3-tile door gap if an adjacent room exists to the north
+      const mid = Math.floor(CELL_INNER / 2);       // centre of 11-tile span = 5
+      if (this.hasCell(gx, gy - 1) &&
+          localCol >= mid - 1 && localCol <= mid + 1)
+        return { ok: false, reason: 'Cannot place on a doorway.' };
+    }
 
     const existing = this.getFurniture(gx, gy);
     for (const placed of existing) {
@@ -604,6 +806,8 @@ export class HousingState {
       furniture,
       hasLargeChest: this.hasLargeChest,
       animalPen: animalPenOut,
+      exitGX: this.exitGX,
+      exitGY: this.exitGY,
     };
   }
 
@@ -612,7 +816,11 @@ export class HousingState {
     this.cells.clear();
     this.furniture.clear();
     if (data.cells) {
-      for (const [k, v] of Object.entries(data.cells)) this.cells.set(k, v);
+      for (const [k, v] of Object.entries(data.cells)) {
+        // Skip cells whose room type was removed
+        if (v && v.typeId && !ROOM_DEFS[v.typeId]) continue;
+        this.cells.set(k, v);
+      }
     }
     if (data.furniture) {
       for (const [k, v] of Object.entries(data.furniture)) {
@@ -625,6 +833,25 @@ export class HousingState {
 
     // Restore hasLargeChest flag
     this.hasLargeChest = data.hasLargeChest === true;
+
+    // Restore exit cell (fallback: find southernmost room for old saves)
+    if (typeof data.exitGX === 'number' && typeof data.exitGY === 'number' &&
+        this.cells.has(`${data.exitGX},${data.exitGY}`)) {
+      this.exitGX = data.exitGX;
+      this.exitGY = data.exitGY;
+    } else {
+      // Old save — pick southernmost room with no south neighbour
+      let maxGY = -1;
+      let bestGX = START_GX;
+      for (const key of this.cells.keys()) {
+        const [gx, gy] = key.split(',').map(Number);
+        if (gy > maxGY && !this.cells.has(`${gx},${gy + 1}`)) {
+          maxGY = gy; bestGX = gx;
+        }
+      }
+      this.exitGX = bestGX;
+      this.exitGY = maxGY >= 0 ? maxGY : START_GY;
+    }
 
     // Restore animalPen
     if (data.animalPen && Array.isArray(data.animalPen.animals)) {

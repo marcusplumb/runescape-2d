@@ -346,6 +346,8 @@ export function makeFishItem(species, weight) {
     name: `${species.name} (${weight}kg)`,
     weight,
     stackable: false,
+    rarityLabel: species.rarity,
+    description: `A ${species.name.toLowerCase()} hauled from the waters.`,
   };
 }
 

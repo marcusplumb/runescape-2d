@@ -9,6 +9,7 @@ export const ITEMS = {
     id: 'axe',
     name: 'Bronze Axe',
     stackable: false,
+    description: 'A simple bronze axe. Cuts ordinary trees.',
     draw(ctx, x, y, s) {
       // Handle
       ctx.fillStyle = '#8b6914';
@@ -23,6 +24,7 @@ export const ITEMS = {
 
   TINDERBOX: {
     id: 'tinderbox',
+    description: 'Flint and steel in a tidy pouch. Strike to light a fire.',
     name: 'Tinderbox',
     stackable: false,
     draw(ctx, x, y, s) {
@@ -41,6 +43,7 @@ export const ITEMS = {
 
   FISHING_ROD: {
     id: 'fishing_rod',
+    description: 'A sturdy rod. Use at a fishing spot to cast a line.',
     name: 'Fishing Rod',
     stackable: false,
     draw(ctx, x, y, s) {
@@ -68,6 +71,7 @@ export const ITEMS = {
   /* ── Currency ───────────────────────────────────────── */
   GOLD_COIN: {
     id: 'gold_coin',
+    description: 'Legal tender across the kingdom.',
     name: 'Gold Coin',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -122,6 +126,7 @@ export const ITEMS = {
     id: 'logs',
     name: 'Logs',
     stackable: true,
+    description: 'Rough logs from an ordinary tree. Good for firewood or planks.',
     draw(ctx, x, y, s) {
       ctx.fillStyle = '#8b6914';
       ctx.fillRect(x + s * 0.1, y + s * 0.55, s * 0.8, s * 0.18);
@@ -136,6 +141,7 @@ export const ITEMS = {
 
   OAK_LOGS: {
     id: 'oak_logs',
+    description: 'Dense oak logs. Burn longer and crackle loudly.',
     name: 'Oak Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -157,6 +163,7 @@ export const ITEMS = {
 
   WILLOW_LOGS: {
     id: 'willow_logs',
+    description: 'Pale willow logs, soft and easy to split.',
     name: 'Willow Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -176,6 +183,7 @@ export const ITEMS = {
 
   MAPLE_LOGS: {
     id: 'maple_logs',
+    description: 'Reddish maple logs streaked with amber.',
     name: 'Maple Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -195,6 +203,7 @@ export const ITEMS = {
 
   YEW_LOGS: {
     id: 'yew_logs',
+    description: 'Ancient yew — prized by bowyers for its spring.',
     name: 'Yew Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -215,6 +224,7 @@ export const ITEMS = {
 
   MAGIC_LOGS: {
     id: 'magic_logs',
+    description: 'Faintly luminous logs that hum when burned.',
     name: 'Magic Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -243,6 +253,7 @@ export const ITEMS = {
 
   ELDER_LOGS: {
     id: 'elder_logs',
+    description: 'Relic wood from a forgotten age. Burns with eerie flame.',
     name: 'Elder Logs',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -386,6 +397,7 @@ export const ITEMS = {
   /* ── Mining tool ─────────────────────────────────────── */
   PICKAXE: {
     id: 'pickaxe',
+    description: 'A bronze pickaxe. Strikes soft ores.',
     name: 'Bronze Pickaxe',
     stackable: false,
     draw(ctx, x, y, s) {
@@ -415,6 +427,7 @@ export const ITEMS = {
   /* ── Ores ────────────────────────────────────────────── */
   ORE_COPPER: {
     id: 'ore_copper',
+    description: 'A chunk of copper ore. Smelt with tin to make bronze.',
     name: 'Copper Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -430,6 +443,7 @@ export const ITEMS = {
   },
   ORE_IRON: {
     id: 'ore_iron',
+    description: 'Rust-red iron ore. The backbone of any smith.',
     name: 'Iron Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -445,6 +459,7 @@ export const ITEMS = {
   },
   ORE_COAL: {
     id: 'ore_coal',
+    description: 'Dense black coal. Fuels hotter furnaces.',
     name: 'Coal',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -460,6 +475,7 @@ export const ITEMS = {
   },
   ORE_GOLD: {
     id: 'ore_gold',
+    description: 'Flecked gold ore. Worth a pretty coin.',
     name: 'Gold Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -475,6 +491,7 @@ export const ITEMS = {
   },
   ORE_MITHRIL: {
     id: 'ore_mithril',
+    description: 'Rare blue-silver ore. Lightweight and fierce.',
     name: 'Mithril Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -491,6 +508,7 @@ export const ITEMS = {
 
   ORE_TIN: {
     id: 'ore_tin',
+    description: 'Brittle tin ore. Alloyed with copper to yield bronze.',
     name: 'Tin Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -504,6 +522,7 @@ export const ITEMS = {
   },
   ORE_SILVER: {
     id: 'ore_silver',
+    description: 'Pale silver ore. Valued by jewellers.',
     name: 'Silver Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -520,6 +539,7 @@ export const ITEMS = {
   },
   ORE_TUNGSTEN: {
     id: 'ore_tungsten',
+    description: 'Impossibly dense ore. Few forges can tame it.',
     name: 'Tungsten Ore',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -535,6 +555,7 @@ export const ITEMS = {
   },
   ORE_OBSIDIAN: {
     id: 'ore_obsidian',
+    description: 'Volcanic glass, black as night and sharp as regret.',
     name: 'Obsidian Shard',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -557,6 +578,7 @@ export const ITEMS = {
   },
   ORE_MOONSTONE: {
     id: 'ore_moonstone',
+    description: 'A pale stone that glows softly under moonlight.',
     name: 'Moonstone Crystal',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -894,6 +916,7 @@ export const ITEMS = {
   /* ── Combat drops ────────────────────────────────────── */
   BONES: {
     id: 'bones',
+    description: 'The remains of a slain creature.',
     name: 'Bones',
     stackable: true,
     draw(ctx, x, y, s) {
@@ -1117,11 +1140,11 @@ ITEMS.BRONZE_SWORD = {
     ctx.fillStyle = '#5a3010'; ctx.fillRect(x+s*.35, y+s*.55, s*.12, s*.35); // grip
     ctx.fillStyle = '#a06020'; ctx.fillRect(x+s*.28, y+s*.48, s*.26, s*.1);  // guard
     ctx.fillStyle = '#cd7f32';
-    ctx.fillRect(x+s*.38, y+s*.12, s*.1,  s*.18);                            // blade near
+    ctx.fillRect(x+s*.38, y+s*.12, s*.1,  s*.36);                            // blade near→guard
     ctx.fillRect(x+s*.40, y+s*.08, s*.09, s*.06);                            // blade mid
     ctx.fillRect(x+s*.42, y+s*.04, s*.08, s*.06);                            // tip
     ctx.fillStyle = 'rgba(255,200,80,0.4)';
-    ctx.fillRect(x+s*.38, y+s*.12, s*.04, s*.18);                            // shine
+    ctx.fillRect(x+s*.38, y+s*.12, s*.04, s*.36);                            // shine
   },
 };
 ITEMS.IRON_SWORD = {
@@ -1131,11 +1154,11 @@ ITEMS.IRON_SWORD = {
     ctx.fillStyle = '#3a2a18'; ctx.fillRect(x+s*.35, y+s*.55, s*.12, s*.35);
     ctx.fillStyle = '#6a6a6a'; ctx.fillRect(x+s*.26, y+s*.48, s*.3,  s*.1);
     ctx.fillStyle = '#8a8a8a';
-    ctx.fillRect(x+s*.37, y+s*.10, s*.12, s*.2);
+    ctx.fillRect(x+s*.37, y+s*.10, s*.12, s*.38);
     ctx.fillRect(x+s*.39, y+s*.05, s*.10, s*.07);
     ctx.fillRect(x+s*.41, y+s*.01, s*.08, s*.06);
     ctx.fillStyle = 'rgba(255,255,255,0.22)';
-    ctx.fillRect(x+s*.37, y+s*.10, s*.04, s*.2);
+    ctx.fillRect(x+s*.37, y+s*.10, s*.04, s*.38);
   },
 };
 ITEMS.STEEL_SWORD = {
@@ -1145,11 +1168,11 @@ ITEMS.STEEL_SWORD = {
     ctx.fillStyle = '#2a3a4a'; ctx.fillRect(x+s*.35, y+s*.55, s*.12, s*.35);
     ctx.fillStyle = '#7a8a9a'; ctx.fillRect(x+s*.25, y+s*.48, s*.32, s*.1);
     ctx.fillStyle = '#9aaabb';
-    ctx.fillRect(x+s*.37, y+s*.08, s*.13, s*.22);
+    ctx.fillRect(x+s*.37, y+s*.08, s*.13, s*.40);
     ctx.fillRect(x+s*.39, y+s*.04, s*.11, s*.06);
     ctx.fillRect(x+s*.41, y+s*.00, s*.09, s*.06);
     ctx.fillStyle = 'rgba(255,255,255,0.28)';
-    ctx.fillRect(x+s*.37, y+s*.08, s*.04, s*.22);
+    ctx.fillRect(x+s*.37, y+s*.08, s*.04, s*.40);
   },
 };
 ITEMS.MITHRIL_SWORD = {
@@ -1159,11 +1182,11 @@ ITEMS.MITHRIL_SWORD = {
     ctx.fillStyle = '#2a2a6a'; ctx.fillRect(x+s*.35, y+s*.55, s*.12, s*.35);
     ctx.fillStyle = '#5050aa'; ctx.fillRect(x+s*.24, y+s*.48, s*.34, s*.1);
     ctx.fillStyle = '#7070cc';
-    ctx.fillRect(x+s*.37, y+s*.06, s*.13, s*.24);
+    ctx.fillRect(x+s*.37, y+s*.06, s*.13, s*.42);
     ctx.fillRect(x+s*.39, y+s*.02, s*.11, s*.06);
     ctx.fillRect(x+s*.41, y-s*.02, s*.09, s*.06);
     ctx.fillStyle = 'rgba(160,160,255,0.5)';
-    ctx.fillRect(x+s*.37, y+s*.06, s*.04, s*.24);
+    ctx.fillRect(x+s*.37, y+s*.06, s*.04, s*.42);
     // Glow
     ctx.fillStyle = 'rgba(100,100,255,0.15)';
     ctx.fillRect(x+s*.3, y+s*.0, s*.22, s*.55);
@@ -1173,6 +1196,7 @@ ITEMS.MITHRIL_SWORD = {
 /* ── Smelted bars ────────────────────────────────────── */
 ITEMS.BAR_BRONZE = {
   id: 'bar_bronze', name: 'Bronze Bar', stackable: true,
+  description: 'A bar of bronze, poured fresh from the crucible.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#8b5020'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#cd7f32'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1182,6 +1206,7 @@ ITEMS.BAR_BRONZE = {
 };
 ITEMS.BAR_IRON = {
   id: 'bar_iron', name: 'Iron Bar', stackable: true,
+  description: 'A rough iron bar ready for the anvil.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#4a4a4a'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#8a8a8a'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1191,6 +1216,7 @@ ITEMS.BAR_IRON = {
 };
 ITEMS.BAR_STEEL = {
   id: 'bar_steel', name: 'Steel Bar', stackable: true,
+  description: 'A bar of steel — iron hardened with coal.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#4a5a6a'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#7a9aaa'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1200,6 +1226,7 @@ ITEMS.BAR_STEEL = {
 };
 ITEMS.BAR_SILVER = {
   id: 'bar_silver', name: 'Silver Bar', stackable: true,
+  description: 'A lustrous silver bar. Reflects candlelight beautifully.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#808088'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#c0c0c8'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1209,6 +1236,7 @@ ITEMS.BAR_SILVER = {
 };
 ITEMS.BAR_GOLD = {
   id: 'bar_gold', name: 'Gold Bar', stackable: true,
+  description: 'A gleaming gold bar. Heavier than it looks.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#9a7000'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#f1c40f'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1218,6 +1246,7 @@ ITEMS.BAR_GOLD = {
 };
 ITEMS.BAR_MITHRIL = {
   id: 'bar_mithril', name: 'Mithril Bar', stackable: true,
+  description: 'A rare mithril bar, light and cold to the touch.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#3a3a7a'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#6a6acc'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1228,6 +1257,7 @@ ITEMS.BAR_MITHRIL = {
 };
 ITEMS.BAR_TUNGSTEN = {
   id: 'bar_tungsten', name: 'Tungsten Bar', stackable: true,
+  description: 'Dense tungsten, forged at extreme temperature.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#28283a'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1237,6 +1267,7 @@ ITEMS.BAR_TUNGSTEN = {
 };
 ITEMS.BAR_OBSIDIAN = {
   id: 'bar_obsidian', name: 'Obsidian Ingot', stackable: true,
+  description: 'A black glass ingot. Edges remain razor sharp.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#18101a'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#2e1a3e'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1247,6 +1278,7 @@ ITEMS.BAR_OBSIDIAN = {
 };
 ITEMS.BAR_MOONSTONE = {
   id: 'bar_moonstone', name: 'Moonstone Ingot', stackable: true,
+  description: 'A pale ingot humming with lunar energy.',
   draw(ctx, x, y, s) {
     ctx.fillStyle = '#303050'; ctx.fillRect(x+s*.15, y+s*.52, s*.7, s*.22);
     ctx.fillStyle = '#5878b0'; ctx.fillRect(x+s*.15, y+s*.38, s*.7, s*.16);
@@ -1264,10 +1296,10 @@ ITEMS.TUNGSTEN_BLADE = {
     ctx.fillStyle = '#20202a'; ctx.fillRect(x+s*.35, y+s*.55, s*.12, s*.35);
     ctx.fillStyle = '#4a4a6a'; ctx.fillRect(x+s*.22, y+s*.48, s*.38, s*.1);
     ctx.fillStyle = '#5a5a8a';
-    ctx.fillRect(x+s*.36, y+s*.06, s*.16, s*.26);
+    ctx.fillRect(x+s*.36, y+s*.06, s*.16, s*.42);
     ctx.fillRect(x+s*.38, y+s*.01, s*.12, s*.07);
     ctx.fillRect(x+s*.40, -s*.02, s*.10, s*.05);
-    ctx.fillStyle = 'rgba(150,150,220,0.35)'; ctx.fillRect(x+s*.36, y+s*.06, s*.05, s*.26);
+    ctx.fillStyle = 'rgba(150,150,220,0.35)'; ctx.fillRect(x+s*.36, y+s*.06, s*.05, s*.42);
   },
 };
 ITEMS.OBSIDIAN_CLEAVER = {
@@ -1863,6 +1895,22 @@ ITEMS.BERRY_SEED = {
     ctx.beginPath(); ctx.ellipse(x+s*.5, y+s*.52, s*.15, s*.13, 0, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = '#b04090';
     ctx.beginPath(); ctx.ellipse(x+s*.46, y+s*.47, s*.07, s*.06, -0.3, 0, Math.PI*2); ctx.fill();
+  },
+};
+ITEMS.BERRY_BUSH_SAPLING = {
+  id: 'berry_bush_sapling', name: 'Berry Bush Sapling', stackable: true,
+  draw(ctx, x, y, s) {
+    // Small brown stem
+    ctx.fillStyle = '#6b4520';
+    ctx.fillRect(x + s * .46, y + s * .55, s * .08, s * .3);
+    // Small green bush top
+    ctx.fillStyle = '#3d7a34';
+    ctx.beginPath(); ctx.arc(x + s * .5, y + s * .45, s * .22, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#5aaa4a';
+    ctx.beginPath(); ctx.arc(x + s * .45, y + s * .4, s * .12, 0, Math.PI * 2); ctx.fill();
+    // Tiny berry dot
+    ctx.fillStyle = '#c0203a';
+    ctx.beginPath(); ctx.arc(x + s * .55, y + s * .5, s * .06, 0, Math.PI * 2); ctx.fill();
   },
 };
 ITEMS.HERB_SEED = {

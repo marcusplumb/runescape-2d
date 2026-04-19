@@ -82,6 +82,11 @@ export class Network {
     this.socket.emit('chat', { message });
   }
 
+  /** Notify the server that this player just reached a milestone level. */
+  sendLevelUpMilestone(skill, level) {
+    this.socket.emit('levelup_milestone', { skill, level });
+  }
+
   on(event, cb)  { this.socket.on(event, cb); }
   off(event, cb) { this.socket.off(event, cb); }
 

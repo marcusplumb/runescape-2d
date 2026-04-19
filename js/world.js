@@ -555,12 +555,12 @@ export class World {
     this.roofBounds    = [..._structures.roofBounds]; // { c, r, rW, rH, bC, bR, bW, bH } per roofed building
     this.signLabels    = new Map(); // "col,row" → text label rendered on that SIGN tile
 
-    // Kingdom shop BARRELs sit on interior floor tiles — register ground so
-    // the PROP_TILES renderer draws the correct floor beneath them.
-    // Butcher (westC=479, bldR=200): barrels at row 205, cols 480 & 489
-    // Variety (westC=479, bldR+21=221): barrels at row 224, cols 480 & 489
-    for (const [c, r] of [[480, 205], [489, 205], [480, 224], [489, 224]])
-      this.propGroundMap.set(`${c},${r}`, TILES.WOOD_FLOOR);
+    // Merge prop ground mappings from kingdom shop interiors (props placed on
+    // known floor tiles — e.g. barrels on WOOD_FLOOR, armor stands on STONE_TILE).
+    if (_structures.propGroundMap) {
+      for (const [key, val] of _structures.propGroundMap)
+        this.propGroundMap.set(key, val);
+    }
 
     // Kingdom courtyard PROP_TILES (FLOWERS, FOUNTAIN, FIRE) all sit on stone.
     // Scan the interior of the outer wall and register any prop tile as STONE.

@@ -13,7 +13,6 @@ import { GEAR_BY_ID, meetsRequirements, getTotalStats } from './gear.js';
 import { MobManager, Mob } from './mobs.js';
 import { Combat } from './combat.js';
 import { ShopKeeper, SHOP_STOCK, SELL_PRICES, SHOP_PW, SHOP_HEADER_H, SHOP_TAB_H, SHOP_ROW_H, SHOP_PH,
-  HouseShopKeeper, HOUSE_SHOP_STOCK, HOUSE_SHOP_PW, HOUSE_SHOP_PH, HOUSE_SHOP_HEADER_H, HOUSE_SHOP_ROW_H,
   SmithyKeeper, SMITHY_STOCK,
   ButcherKeeper, BUTCHER_STOCK, BUTCHER_SELL_PRICES,
   WeaponKeeper,  WEAPON_SHOP_STOCK, WEAPON_SELL_PRICES,
@@ -32,7 +31,7 @@ import { findPath, nearestWalkableAdjacent } from './pathfinder.js';
 import { buildAllInteriors, buildPlayerHouse } from './interiors.js';
 import {
   HousingState, ROOM_DEFS, FURNITURE_DEFS,
-  getUnlockedRoomDefs, getUnlockedFurnitureDefs,
+  getUnlockedRoomDefs, furnitureForRoom,
   cellInnerOrigin, CELL_INNER,
   GRID_COLS, GRID_ROWS,
   BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
@@ -49,6 +48,9 @@ import {
 
 // Duration to cross one tile — remote players interpolate at the same speed as local
 const REMOTE_MOVE_TIME = TILE_SIZE / PLAYER_SPEED;
+
+// Max chars for a chat message (mirrors server/rooms.js cap; enforced on client too)
+const CHAT_MAX_LEN = 120;
 import {
   FishermanNPC, FISH_SPECIES, FISH_SHOP_STOCK, FISH_SELL_PRICES,
   FISH_PW, FISH_PH, FISH_HEADER_H, FISH_TAB_H, FISH_ROW_H,
@@ -62,7 +64,7 @@ import {
 import { DungeonMasterNPC } from './dungeonMaster.js';
 import { RaidInstance } from './raidInstance.js';
 import { RAID_DEFS, RAID_DIFFICULTIES } from './raids.js';
-import { FarmingState, SEED_DEFS, PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
+import { FarmingState, SEED_DEFS, PATCH_LOCAL_POSITIONS } from './farming.js';
 import { buildAllDungeons } from './dungeons.js';
 
 const TILE_TOOLTIPS = {
@@ -105,6 +107,13 @@ const TILE_TOOLTIPS = {
   [TILES.FARM_PATCH_SEEDED]:     'Crop planted — growing...',
   [TILES.FARM_PATCH_GROWING]:    'Crop growing — almost ready...',
   [TILES.FARM_PATCH_READY]:      'Crop ready! — click to harvest',
+  [TILES.FARM_POTATO_READY]:     'Potatoes ready! — click to harvest',
+  [TILES.FARM_BERRIES_READY]:    'Berries ready! — click to harvest',
+  [TILES.FARM_HERB_READY]:       'Herbs ready! — click to harvest',
+  [TILES.FARM_FLAX_READY]:       'Flax ready! — click to harvest',
+  [TILES.FARM_MAGIC_READY]:      'Magic herb ready! — click to harvest',
+  [TILES.FARM_BERRY_BUSH]:       'Berry Bush — click to pick berries',
+  [TILES.FARM_BERRY_EMPTY]:      'Berry Bush — regrowing...',
   [TILES.DUNGEON_ENTRANCE]: '⚠ Dungeon Entrance — DANGEROUS. Walk onto it to descend.',
 };
 
@@ -205,6 +214,12 @@ export class Game {
         this.notifications.add(`Logged out: ${reason}`, '#e74c3c');
         setTimeout(() => this._logout(), 1500);
       });
+      // Broadcast every 10th level (and level 100) to all connected players.
+      this.notifications.onLevelUp = (skill, level) => {
+        if (level === 100 || (level > 0 && level % 10 === 0)) {
+          this.network.sendLevelUpMilestone(skill, level);
+        }
+      };
       // Relay mob hits to the server so all clients see the same HP
       this.combat.onMobDamaged = (mob, damage) => {
         if (!this.inRaid && mob.id !== undefined) this.network.sendMobHit(mob.id, damage);
@@ -263,8 +278,6 @@ export class Game {
     this.weaponShopScroll  = 0;
     this.varietyShopScroll = 0;
     this.capeShopScroll    = 0;
-    this.houseShopOpen = false;
-    this.houseShopKeeper = new HouseShopKeeper();
     this.placingFurniture = null; // { item, slotIndex } when in furniture placement mode
     this.placingRotation  = 0;   // 0-3 (×90°) — cycled with R
 
@@ -372,6 +385,9 @@ export class Game {
       const target = this._getInventorySlotAt(sx, sy);
       if (target !== -1 && target !== this.dragSlot) {
         this.inventory.swap(this.dragSlot, target);
+        // Browsers fire `click` AFTER `mouseup` — suppress it so the trailing
+        // click doesn't also run slot handlers (e.g. eating food).
+        this.input.suppressNextClick();
         this.input.click = null;
       }
       this.dragSlot = -1;
@@ -478,6 +494,22 @@ export class Game {
       } else if (this.capeShopOpen) {
         e.preventDefault();
         this.capeShopScroll = Math.max(0, this.capeShopScroll + e.deltaY);
+      } else if (this.buildModeOpen) {
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? 1 : -1;
+        const _ROW_H = 52;
+        if (this.buildModeStep === 'pick_room') {
+          const allDefs = getUnlockedRoomDefs(99).filter(d => d.id !== 'starter');
+          const maxVis = Math.floor((BM_PH - BM_HEADER_H - 48 - 10) / _ROW_H);
+          this.buildModeRoomScroll = Math.max(0, Math.min(allDefs.length - maxVis, this.buildModeRoomScroll + delta));
+        } else if (this.buildModeStep === 'pick_furniture') {
+          const cell = this.housingState.getCell(this.buildModeSelGX, this.buildModeSelGY);
+          if (cell) {
+            const allFurn = furnitureForRoom(cell.typeId);
+            const maxVis = Math.floor((BM_PH - BM_HEADER_H - 48 - 100) / _ROW_H);
+            this.buildModeFurnScroll = Math.max(0, Math.min(allFurn.length - maxVis, this.buildModeFurnScroll + delta));
+          }
+        }
       } else {
         // Scroll the chat log (no panel open)
         const totalItems = this.notifications.messages.length + this.chatMessages.length;
@@ -678,11 +710,15 @@ export class Game {
     if (this.input.wasJustPressed('KeyG')) {
       this.adminEquipOpen = !this.adminEquipOpen;
     }
-    if (this.input.wasJustPressed('KeyR') && this.placingFurniture) {
-      this.placingRotation = (this.placingRotation + 1) & 3;
-    }
-    if (this.input.wasJustPressed('KeyR') && this.buildModeFurnPlacing) {
-      this.buildModeFurnPlacing = { ...this.buildModeFurnPlacing, rotation: (this.buildModeFurnPlacing.rotation + 1) & 3 };
+    if (this.input.wasJustPressed('KeyR')) {
+      if (this.placingFurniture) {
+        this.placingRotation = (this.placingRotation + 1) & 3;
+      } else if (this.buildModeFurnPlacing) {
+        const fd = FURNITURE_DEFS[this.buildModeFurnPlacing.defId];
+        if (fd && fd.rotatable) {
+          this.buildModeFurnPlacing = { ...this.buildModeFurnPlacing, rotation: (this.buildModeFurnPlacing.rotation + 1) & 3 };
+        }
+      }
     }
     // Build mode toggle (B key — only in player house)
     if (this.input.wasJustPressed('KeyB') && this.inInterior && this.activeMap.id === 'player_house' && !this.buildModeFurnPlacing) {
@@ -721,8 +757,6 @@ export class Game {
       } else if (this.chestOpen) {
         this.chestOpen = false;
         this.chestPos  = null;
-      } else if (this.houseShopOpen) {
-        this.houseShopOpen = false;
       } else if (this.smithyShopOpen) {
         this.smithyShopOpen = false;
       } else if (this.shopOpen) {
@@ -780,6 +814,20 @@ export class Game {
           return;
         }
       }
+      // Map button (under the minimap) — opens the world map
+      if (!this.inInterior && !this.inRaid && !this.inDungeon) {
+        const mb = this.renderer.getMapButtonRect();
+        if (click.screenX >= mb.x && click.screenX <= mb.x + mb.w &&
+            click.screenY >= mb.y && click.screenY <= mb.y + mb.h) {
+          this.showWorldMap = !this.showWorldMap;
+          if (this.showWorldMap) {
+            this._mapZoom = 1; this._mapPanX = 0; this._mapPanY = 0;
+          } else {
+            this.canvas.style.cursor = 'default';
+          }
+          return;
+        }
+      }
       if (this.buildModeOpen) {
         this._handleBuildModeClick(click.screenX, click.screenY);
         return;
@@ -807,8 +855,6 @@ export class Game {
         this._handleSmithClick(click.screenX, click.screenY);
       } else if (this.chestOpen) {
         this._handleChestClick(click.screenX, click.screenY);
-      } else if (this.houseShopOpen) {
-        this._handleHouseShopClick(click.screenX, click.screenY);
       } else if (this.smithyShopOpen) {
         this._handleSmithyShopClick(click.screenX, click.screenY);
       } else if (this.shopOpen) {
@@ -849,17 +895,6 @@ export class Game {
         // ── Furniture placement mode ──────────────────────
         if (this.placingFurniture) {
           this._placeFurniture(clickCol, clickRow);
-        // ── House shopkeeper (interior only) ──────────────
-        } else if (this.inInterior && this.activeMap.id === 'player_house' &&
-                   this.houseShopKeeper.containsWorld(worldPos.x, worldPos.y)) {
-          const npcCol = Math.floor((this.houseShopKeeper.x + this.houseShopKeeper.w / 2) / TILE_SIZE);
-          const npcRow = Math.floor((this.houseShopKeeper.y + this.houseShopKeeper.h / 2) / TILE_SIZE);
-          const adj = nearestWalkableAdjacent(this.activeMap, npcCol, npcRow, this.player.col, this.player.row);
-          if (adj) {
-            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, adj.col, adj.row));
-            this.pendingInteract = { type: 'house_shop', col: npcCol, row: npcRow };
-            this.clickDest = { col: npcCol, row: npcRow };
-          }
         // ── Check for ground item pickup first (world only) ─
         } else if (!this.inInterior && this.combat.tryPickup(worldPos.x, worldPos.y)) {
           // Picked up item — no movement needed
@@ -968,12 +1003,20 @@ export class Game {
         } else {
           // ── Interior: plain walk, farm patch, or furniture interaction ─
           const iTile = this.activeMap.getTile(clickCol, clickRow);
-          if (this.activeMap.id === 'player_house' &&
-              (iTile === TILES.FARM_PATCH || iTile === TILES.FARM_PATCH_SEEDED ||
-               iTile === TILES.FARM_PATCH_GROWING || iTile === TILES.FARM_PATCH_READY)) {
-            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, clickCol, clickRow));
+          const FARM_TILES = [TILES.FARM_PATCH, TILES.FARM_PATCH_SEEDED,
+            TILES.FARM_PATCH_GROWING, TILES.FARM_PATCH_READY,
+            TILES.FARM_POTATO_READY, TILES.FARM_BERRIES_READY,
+            TILES.FARM_HERB_READY, TILES.FARM_FLAX_READY, TILES.FARM_MAGIC_READY,
+            TILES.FARM_BERRY_BUSH, TILES.FARM_BERRY_EMPTY];
+          if (this.activeMap.id === 'player_house' && FARM_TILES.includes(iTile)) {
+            const isSolidFarm = iTile === TILES.FARM_BERRY_BUSH || iTile === TILES.FARM_BERRY_EMPTY;
+            const dest = isSolidFarm
+              ? nearestWalkableAdjacent(this.activeMap, clickCol, clickRow, this.player.col, this.player.row)
+              : { col: clickCol, row: clickRow };
+            if (!dest) { this.notifications.add("Can't reach that.", '#e74c3c'); return; }
+            this.player.setPath(findPath(this.activeMap, this.player.col, this.player.row, dest.col, dest.row));
             this.pendingInteract = { type: 'farm_patch', col: clickCol, row: clickRow };
-            this.clickDest = { col: clickCol, row: clickRow };
+            this.clickDest = { col: dest.col, row: dest.row };
           } else if (TILE_TOOLTIPS[iTile] !== undefined) {
             // Furniture or interactive tile inside interior — walk adjacent then interact
             const solid = this.activeMap.isSolid(clickCol, clickRow);
@@ -1092,6 +1135,8 @@ export class Game {
         this._exitDungeon();
       } else if (this.inInterior && tile === TILES.STAIRS) {
         this._beginTransition(() => this._exitToWorld());
+      } else if (this.inInterior && this.activeMap.id === 'player_house' && tile === TILES.DOOR) {
+        this._beginTransition(() => this._exitToWorld());
       }
     }
 
@@ -1104,10 +1149,7 @@ export class Game {
     if (this.pendingInteract && !this.player.moving && this.player.path.length === 0) {
       const pi = this.pendingInteract;
       this.pendingInteract = null;
-      if (pi.type === 'house_shop') {
-        const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
-        if (dist <= 2) this.houseShopOpen = true;
-      } else if (pi.type === 'dungeon_master') {
+      if (pi.type === 'dungeon_master') {
         const dist = Math.abs(this.player.col - pi.col) + Math.abs(this.player.row - pi.row);
         if (dist <= 2) this.raidMenuOpen = true;
       } else if (pi.type === 'shop') {
@@ -1467,6 +1509,10 @@ export class Game {
           }
         }
 
+        // Hide player shadow when tile below is a wall (prevents shadow bleeding onto walls)
+        const tileBelow = this.activeMap.getTile(this.player.col, this.player.row + 1);
+        this.player.hideShadow = tileBelow === TILES.WALL || tileBelow === TILES.FENCE || tileBelow === TILES.WOOD_FENCE_H || tileBelow === TILES.STEEL_FENCE_H || tileBelow === TILES.WOOD_FENCE_CORNER || tileBelow === TILES.STEEL_FENCE_CORNER;
+
         // Draw entities sorted by Y (painter's algorithm) — reuse array to avoid per-frame GC
         if (!this._entityBuf) this._entityBuf = [];
         const eb = this._entityBuf;
@@ -1496,18 +1542,12 @@ export class Game {
         // Roof overlays drawn last so they cover entities and hit splats inside buildings
         this.renderer.drawRoofOverlays(this.activeMap, this.camera.x, this.camera.y, this.player.col, this.player.row);
       } else {
-        // Interior: draw player + any interior-specific NPCs
-        const _intId = this.activeMap.id;
-        let _intNpc = null;
-        if (_intId === 'player_house') _intNpc = this.houseShopKeeper;
+        // Hide player shadow when tile below is a wall
+        const tileBelowInt = this.activeMap.getTile(this.player.col, this.player.row + 1);
+        this.player.hideShadow = tileBelowInt === TILES.WALL || tileBelowInt === TILES.FENCE || tileBelowInt === TILES.WOOD_FENCE_H || tileBelowInt === TILES.STEEL_FENCE_H || tileBelowInt === TILES.WOOD_FENCE_CORNER || tileBelowInt === TILES.STEEL_FENCE_CORNER;
 
-        if (_intNpc) {
-          const entities = [this.player, _intNpc];
-          entities.sort((a, b) => (a.y + a.h) - (b.y + b.h));
-          for (const e of entities) e.draw(ctx);
-        } else {
-          this.player.draw(ctx);
-        }
+        // Interior: draw player
+        this.player.draw(ctx);
         // Placement cursor (camera-space)
         if (this.placingFurniture) {
           const mw = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
@@ -1519,19 +1559,28 @@ export class Game {
         if (this.buildModeFurnPlacing) {
           const mw = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
           const fd = FURNITURE_DEFS[this.buildModeFurnPlacing.defId];
+          const { gx, gy } = this.buildModeFurnPlacing;
+          const io = cellInnerOrigin(gx, gy);
+          const cursorCol = Math.floor(mw.x / TILE_SIZE);
+          const cursorRow = Math.floor(mw.y / TILE_SIZE);
+          const localRow = cursorRow - io.row;
+          const wallInvalid = fd.wallMount === 'north' && localRow !== -1;
           this.renderer.drawBuildModeFurnCursor(
-            Math.floor(mw.x / TILE_SIZE), Math.floor(mw.y / TILE_SIZE),
-            this.elapsed, fd, this.buildModeFurnPlacing.rotation
+            cursorCol, cursorRow,
+            this.elapsed, fd, this.buildModeFurnPlacing.rotation, wallInvalid
           );
         }
       }
     this.camera.end(ctx);
 
-    // Dungeon darkness — radial vignette centred on player gives a torchlight feel
+    // Dungeon darkness — radial vignette centred on player gives a torchlight feel.
+    // These effects draw in screen-space (outside camera.begin), so we must
+    // multiply world→screen offsets by the camera zoom.
     if (this.inDungeon) {
       const cw = this.canvas.width, ch = this.canvas.height;
-      const pcx = this.player.cx - this.camera.x;
-      const pcy = this.player.cy - this.camera.y;
+      const Z = this.camera.zoom;
+      const pcx = (this.player.cx - this.camera.x) * Z;
+      const pcy = (this.player.cy - this.camera.y) * Z;
       const r0 = Math.min(cw, ch) * 0.18;
       const r1 = Math.min(cw, ch) * 0.72;
       const grad = ctx.createRadialGradient(pcx, pcy, r0, pcx, pcy, r1);
@@ -1542,18 +1591,19 @@ export class Game {
       ctx.fillRect(0, 0, cw, ch);
 
       // Fire glow — warm light pools around each campfire, additive over the vignette
+      const viewW = cw / Z, viewH = ch / Z;
       const startCol = Math.floor(this.camera.x / TILE_SIZE) - 2;
       const startRow = Math.floor(this.camera.y / TILE_SIZE) - 2;
-      const endCol   = startCol + Math.ceil(cw / TILE_SIZE) + 5;
-      const endRow   = startRow + Math.ceil(ch / TILE_SIZE) + 5;
+      const endCol   = startCol + Math.ceil(viewW / TILE_SIZE) + 5;
+      const endRow   = startRow + Math.ceil(viewH / TILE_SIZE) + 5;
       ctx.globalCompositeOperation = 'lighter';
       for (let row = startRow; row <= endRow; row++) {
         for (let col = startCol; col <= endCol; col++) {
           if (this.activeMap.getTile(col, row) !== TILES.FIRE) continue;
-          const scx = col * TILE_SIZE + TILE_SIZE / 2 - this.camera.x;
-          const scy = row * TILE_SIZE + TILE_SIZE / 2 - this.camera.y;
+          const scx = (col * TILE_SIZE + TILE_SIZE / 2 - this.camera.x) * Z;
+          const scy = (row * TILE_SIZE + TILE_SIZE / 2 - this.camera.y) * Z;
           const flicker = 0.88 + Math.sin(this.renderer.time * 2.5 + col * 2.3 + row * 1.7) * 0.12;
-          const glowR = TILE_SIZE * 8;
+          const glowR = TILE_SIZE * 8 * Z;
           const glow = ctx.createRadialGradient(scx, scy, 0, scx, scy, glowR);
           glow.addColorStop(0,   `rgba(255,180,60,${(0.32 * flicker).toFixed(3)})`);
           glow.addColorStop(0.35, `rgba(220,100,20,${(0.18 * flicker).toFixed(3)})`);
@@ -1566,9 +1616,10 @@ export class Game {
     }
 
     // Screen-space UI
-    if (!this.inInterior && !this.inRaid && !this.inDungeon) {
-      this.renderer.drawCircleMinimap(this.world, this.player);
-    }
+    // The minimap HUD panel always draws so the HP bar has its integrated frame;
+    // passing null for the world renders a dim "interior" placeholder inside the circle.
+    const mapWorld = (this.inInterior || this.inRaid || this.inDungeon) ? null : this.world;
+    this.renderer.drawCircleMinimap(mapWorld, this.player, this.mouseScreen.x, this.mouseScreen.y);
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
     this.renderer.drawBottomHUD(ctx, this.player);
     const hoverSlot = this.dragSlot !== -1
@@ -1580,6 +1631,7 @@ export class Game {
       this.dragSlot, hoverSlot,
       this.mouseScreen.x, this.mouseScreen.y,
       this.mouseScreen.x, this.mouseScreen.y,
+      !!this._saveToken,
     );
     if (this.smeltingAction) {
       this.renderer.drawSmeltingProgress(this.smeltingAction, this.elapsed);
@@ -1627,9 +1679,6 @@ export class Game {
     if (this.capeShopOpen) {
       this.renderer.drawShopPanel(this.capeShopTab, CAPE_STOCK, this.inventory, 'Cape Merchant', this.capeShopScroll);
     }
-    if (this.houseShopOpen) {
-      this.renderer.drawHouseShopPanel(HOUSE_SHOP_STOCK, this.inventory);
-    }
     if (this.makoverOpen) {
       this.renderer.drawMakeoverPanel(this.player.style);
     }
@@ -1663,14 +1712,15 @@ export class Game {
       return; // skip tooltip when map is open
     }
 
-    // Tooltip
-    let tooltip = null;
-    {
-      const invTooltip = this._getHoveredInventoryItem(this.mouseScreen.x, this.mouseScreen.y);
-      if (invTooltip) tooltip = invTooltip;
+    // Tooltip — inventory hover shows a rich item-lore card; everything else
+    // falls back to the simple string tooltip.
+    const hoveredItem = this._getHoveredInventoryItem(this.mouseScreen.x, this.mouseScreen.y);
+    if (hoveredItem) {
+      this.renderer.drawItemTooltip(hoveredItem, this.mouseScreen.x, this.mouseScreen.y);
     }
 
-    if (!tooltip) {
+    let tooltip = null;
+    if (!hoveredItem) {
       const worldPos = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
       if (this.shopKeeper.containsWorld(worldPos.x, worldPos.y)) {
         tooltip = 'Shopkeeper — click to trade';
@@ -1722,7 +1772,9 @@ export class Game {
       }
     }
 
-    this.renderer.drawTileTooltip(tooltip, this.mouseScreen.x, this.mouseScreen.y);
+    if (!hoveredItem) {
+      this.renderer.drawTileTooltip(tooltip, this.mouseScreen.x, this.mouseScreen.y);
+    }
 
     // Housing build mode panel
     if (this.buildModeOpen && this.inInterior && this.activeMap.id === 'player_house') {
@@ -1742,8 +1794,6 @@ export class Game {
       this.renderer.drawSkillInfoPopup(this.skillInfoSkill, this.skills, SKILL_UNLOCKS, this.skillInfoScroll);
     }
 
-    // Logout button (bottom-right, only when logged in)
-    if (this._saveToken) this._drawLogoutButton(ctx);
 
     // Chat box (bottom-left)
     this._drawChat(ctx);
@@ -1761,7 +1811,7 @@ export class Game {
   _getInventorySlotAt(sx, sy) {
     if (this.sidePanelTab !== 'inventory') return -1;
     const W = this.canvas.width, H = this.canvas.height;
-    const PW = 232, TAB_H = 28, CONTENT_H = 378, PH = TAB_H + CONTENT_H + 4;
+    const PW = 254, TAB_H = 28, CONTENT_H = 386, FOOTER_H = 30, PH = TAB_H + CONTENT_H + FOOTER_H + 4;
     const px = W - PW - 4;
     const py = H - PH - 4;
     const contentY = py + TAB_H + 4;
@@ -1785,7 +1835,7 @@ export class Game {
     if (idx === -1) return null;
     const slot = this.inventory.slots[idx];
     if (!slot) return null;
-    return slot.qty > 1 ? `${slot.item.name} (${slot.qty})` : slot.item.name;
+    return slot.item;
   }
 
   // ── Skills panel (K key) ─────────────────────────────────────────────────
@@ -1865,27 +1915,26 @@ export class Game {
     if (this.chestOpen)      return true;
     if (this.shopOpen)       return true;
     if (this.smithyShopOpen) return true;
-    if (this.houseShopOpen)  return true;
     if (this.makoverOpen)    return true;
     if (this.fishermanOpen)  return true;
     if (this.skillsOpen)     return true;
     if (this.dialogueOpen)   return true;
-    // Side panel (always present)
+    // Side panel (always present) — includes the attached footer/logout row.
     const W = this.canvas.width, H = this.canvas.height;
-    const PW = 232, PH = 28 + 378 + 4;
+    const PW = 254, PH = 28 + 386 + 30 + 4;
     const px = W - PW - 4, py = H - PH - 4;
     if (sx >= px && sx <= px + PW && sy >= py && sy <= py + PH) return true;
-    // Logout button
-    if (this._saveToken) {
-      const lb = this._logoutButtonRect();
-      if (sx >= lb.x && sx <= lb.x + lb.w && sy >= lb.y && sy <= lb.y + lb.h) return true;
-    }
+    // Minimap HUD panel (top-right) — always present; catches clicks on the
+    // map button, minimap circle, and HP bar so they don't leak to the world.
+    const HUD_PW = 246, HUD_PH = 262;
+    const hudX = W - HUD_PW - 4, hudY = 10;
+    if (sx >= hudX && sx <= hudX + HUD_PW && sy >= hudY && sy <= hudY + HUD_PH) return true;
     return false;
   }
 
   _clickOnSidePanel(sx, sy) {
     const W = this.canvas.width, H = this.canvas.height;
-    const PW = 232, TAB_H = 28, CONTENT_H = 378, PH = TAB_H + CONTENT_H + 4;
+    const PW = 254, TAB_H = 28, CONTENT_H = 386, FOOTER_H = 30, PH = TAB_H + CONTENT_H + FOOTER_H + 4;
     const px = W - PW - 4, py = H - PH - 4;
     if (sx < px || sx > px + PW || sy < py || sy > py + PH) return false;
 
@@ -1956,20 +2005,6 @@ export class Game {
     }
 
     return true; // consumed click even if no specific action
-  }
-
-  _handleHouseShopClick(sx, sy) {
-    const px = Math.floor((this.canvas.width  - HOUSE_SHOP_PW) / 2);
-    const py = Math.floor((this.canvas.height - HOUSE_SHOP_PH) / 2);
-    if (sx < px || sx > px + HOUSE_SHOP_PW || sy < py || sy > py + HOUSE_SHOP_PH) {
-      this.houseShopOpen = false;
-      return;
-    }
-    const contentY = py + HOUSE_SHOP_HEADER_H;
-    const row = Math.floor((sy - contentY) / HOUSE_SHOP_ROW_H);
-    const btnX = px + HOUSE_SHOP_PW - 64;
-    if (sx < btnX || row < 0 || row >= HOUSE_SHOP_STOCK.length) return;
-    this._buyItem(HOUSE_SHOP_STOCK[row]);
   }
 
   /* ── Forge helpers ───────────────────────────────────── */
@@ -2124,8 +2159,8 @@ export class Game {
   _getChestSlots(col, row) {
     const key = `${col},${row}`;
     if (!this.chestStorage.has(key)) {
-      // Large chest at interior (19,8) holds 4× normal capacity when unlocked
-      const isLargeChest = this.inInterior && col === 19 && row === 8
+      // Any chest inside the player house gets large capacity when unlocked
+      const isLargeChest = this.inInterior && this.activeMap.id === 'player_house'
         && this.housingState.hasLargeChest;
       const capacity = isLargeChest ? LARGE_CHEST_CAPACITY : 28;
       this.chestStorage.set(key, new Array(capacity).fill(null));
@@ -2222,6 +2257,11 @@ export class Game {
     }
     const { item, slotIndex } = this.placingFurniture;
     this.activeMap.setTile(col, row, item.furnitureTileId, this.placingRotation);
+    // Dirty neighbor tiles so connected visuals (e.g. rugs) update
+    for (const [dc, dr] of [[0,-1],[0,1],[-1,0],[1,0]]) {
+      if (this.activeMap.getTile(col+dc, row+dr) === item.furnitureTileId)
+        this.activeMap.changedTiles.push((col+dc) | ((row+dr) << 16));
+    }
     this.inventory.remove(slotIndex, 1);
     this.placingFurniture = null;
     this.notifications.add(`Placed ${item.name}.`, '#f1c40f');
@@ -2250,9 +2290,17 @@ export class Game {
     const farmLevel = this.skills.getLevel(SKILL_IDS.FARMING);
 
     if (stage === 0) {
-      const seedId = this._findFarmableSeed(farmLevel);
+      const effectiveLevel = this.isAdmin ? 99 : farmLevel;
+      const seedId = this._findFarmableSeed(effectiveLevel);
       if (!seedId) {
-        this.notifications.add('You have no seeds to plant here.', '#e74c3c');
+        // Check if player has seeds but lacks the level
+        const anySeeds = Object.values(SEED_DEFS).filter(d => this.inventory.has(d.id));
+        if (anySeeds.length > 0) {
+          const needed = Math.min(...anySeeds.map(d => d.levelReq));
+          this.notifications.add(`You need Farming level ${needed} to plant your seeds.`, '#e74c3c');
+        } else {
+          this.notifications.add('You have no seeds to plant here.', '#e74c3c');
+        }
         return;
       }
       this.inventory.remove(seedId, 1);
@@ -2262,12 +2310,17 @@ export class Game {
       this.skills.addXp(SKILL_IDS.FARMING, 5);
       const newLvl = this.skills.getLevel(SKILL_IDS.FARMING);
       this.notifications.add(`You plant a ${SEED_DEFS[seedId].name}. (+5 Farming XP)`, '#27ae60');
-      if (newLvl > prevLvl) this.notifications.add(`Farming level ${newLvl}!`, '#f1c40f');
+      if (newLvl > prevLvl) this.notifications.levelUp('Farming', newLvl);
       this._saveToServer();
     } else if (stage === 1 || stage === 2) {
       const def = SEED_DEFS[patch.seedId];
       const remaining = Math.max(1, Math.ceil((def.growTime - (Date.now() - patch.plantedAt)) / 60000));
       this.notifications.add(`Still growing... (~${remaining} min${remaining !== 1 ? 's' : ''} left)`, '#e67e22');
+    } else if (stage === 4) {
+      // perpetual crop picked — regrowing
+      const def = SEED_DEFS[patch.seedId];
+      const remaining = Math.max(1, Math.ceil(((def.regrowTime || def.growTime) - (Date.now() - patch.pickedAt)) / 60000));
+      this.notifications.add(`The bush is regrowing... (~${remaining} min${remaining !== 1 ? 's' : ''} left)`, '#e67e22');
     } else {
       // stage 3 — harvest
       if (this.inventory.isFull()) {
@@ -2278,7 +2331,11 @@ export class Game {
       const qty = def.harvestMin + Math.floor(Math.random() * (def.harvestMax - def.harvestMin + 1));
       const harvestItem = ITEM_BY_ID.get(def.harvestId);
       if (!harvestItem) return;
-      this.farmingState.harvestPatch(gx, gy, patchIndex);
+      if (def.perpetual) {
+        this.farmingState.pickPatch(gx, gy, patchIndex);
+      } else {
+        this.farmingState.harvestPatch(gx, gy, patchIndex);
+      }
       for (let i = 0; i < qty; i++) {
         if (!this.inventory.isFull()) this.inventory.add(harvestItem);
       }
@@ -2287,7 +2344,7 @@ export class Game {
       this.skills.addXp(SKILL_IDS.FARMING, def.xp);
       const newLvl = this.skills.getLevel(SKILL_IDS.FARMING);
       this.notifications.add(`You harvest ${qty}x ${harvestItem.name}! (+${def.xp} Farming XP)`, '#27ae60');
-      if (newLvl > prevLvl) this.notifications.add(`Farming level ${newLvl}!`, '#f1c40f');
+      if (newLvl > prevLvl) this.notifications.levelUp('Farming', newLvl);
       this._saveToServer();
     }
   }
@@ -2305,8 +2362,8 @@ export class Game {
     const io = cellInnerOrigin(gx, gy);
     const { localCol, localRow } = PATCH_LOCAL_POSITIONS[patchIndex];
     const patch = this.farmingState.getPatch(gx, gy, patchIndex);
-    const stage = this.farmingState.getPatchStage(patch);
-    this.activeMap.setTile(io.col + localCol, io.row + localRow, GROW_STAGES[stage].tile);
+    const tile = this.farmingState.getPatchTile(patch);
+    this.activeMap.setTile(io.col + localCol, io.row + localRow, tile);
   }
 
   _updateFarmingPatches() {
@@ -2326,7 +2383,7 @@ export class Game {
         const col = io.col + localCol;
         const row = io.row + localRow;
         const stage = this.farmingState.getPatchStage(patch);
-        const expectedTile = GROW_STAGES[stage].tile;
+        const expectedTile = this.farmingState.getPatchTile(patch);
         if (this.activeMap.getTile(col, row) !== expectedTile) {
           this.activeMap.setTile(col, row, expectedTile);
           if (stage === 3 && !readyNotified) {
@@ -2369,7 +2426,7 @@ export class Game {
 
   // ── Admin helper ────────────────────────────────────────────────────────
 
-  get isAdmin() { return this.player.name === '12345'; }
+  get isAdmin() { return this.player.name === 'kokaine'; }
 
   // ── Housing Build Mode ──────────────────────────────────────────────────
 
@@ -2438,7 +2495,9 @@ export class Game {
 
     if (this.buildModeStep === 'pick_room') {
       const defs = getUnlockedRoomDefs(99).filter(d => d.id !== 'starter');
-      const visible = defs.slice(this.buildModeRoomScroll, this.buildModeRoomScroll + 5);
+      const roomListH = py + BM_PH - 10 - listTop;
+      const maxVis = Math.floor(roomListH / ROW_H);
+      const visible = defs.slice(this.buildModeRoomScroll, this.buildModeRoomScroll + maxVis);
       for (let i = 0; i < visible.length; i++) {
         const rowY = listTop + i * ROW_H;
         if (sy < rowY || sy > rowY + ROW_H - ROW_PAD) continue;
@@ -2459,20 +2518,14 @@ export class Game {
         this._saveToServer();
         return;
       }
-      // Scroll arrows
-      const arrowY = listTop + 5 * ROW_H + 4;
-      if (sy >= arrowY && sy <= arrowY + 24) {
-        const mid = rox + (BM_PW - BM_SPLIT_X - 20) / 2;
-        if (sx < mid && this.buildModeRoomScroll > 0) this.buildModeRoomScroll--;
-        else if (sx >= mid && this.buildModeRoomScroll + 5 < defs.length) this.buildModeRoomScroll++;
-      }
     } else if (this.buildModeStep === 'pick_furniture') {
       const cell = this.housingState.getCell(this.buildModeSelGX, this.buildModeSelGY);
       if (!cell) return;
-      const roomDef = ROOM_DEFS[cell.typeId];
-      const defs = getUnlockedFurnitureDefs(this.isAdmin ? 99 : archLevel).filter(fd =>
-        fd.category === roomDef.category || fd.category === 'both');
-      const visible = defs.slice(this.buildModeFurnScroll, this.buildModeFurnScroll + 5);
+      const defs = furnitureForRoom(cell.typeId).filter(fd =>
+        (this.isAdmin ? 99 : archLevel) >= fd.levelReq);
+      const furnListH = py + BM_PH - 100 - listTop;
+      const maxVis = Math.floor(furnListH / ROW_H);
+      const visible = defs.slice(this.buildModeFurnScroll, this.buildModeFurnScroll + maxVis);
       for (let i = 0; i < visible.length; i++) {
         const rowY = listTop + i * ROW_H;
         if (sy < rowY || sy > rowY + ROW_H - ROW_PAD) continue;
@@ -2480,15 +2533,49 @@ export class Game {
         // Start furniture placement
         this.buildModeFurnPlacing = { gx: this.buildModeSelGX, gy: this.buildModeSelGY, defId: def.id, rotation: 0 };
         this.buildModeOpen = false;
-        this.notifications.add(`Click inside the room to place ${def.name}. [R] = rotate, [Esc] = cancel`, '#f1c40f');
+        const rotHint = def.rotatable ? ' [R] = rotate,' : '';
+        const wallHint = def.wallMount ? ` (${def.wallMount} wall only)` : '';
+        this.notifications.add(`Click inside the room to place ${def.name}.${rotHint}${wallHint} [Esc] = cancel`, '#f1c40f');
         return;
       }
-      // Scroll arrows
-      const arrowY = listTop + 5 * ROW_H + 4;
-      if (sy >= arrowY && sy <= arrowY + 24) {
-        const mid = rox + (BM_PW - BM_SPLIT_X - 20) / 2;
-        if (sx < mid && this.buildModeFurnScroll > 0) this.buildModeFurnScroll--;
-        else if (sx >= mid && this.buildModeFurnScroll + 5 < defs.length) this.buildModeFurnScroll++;
+
+      // Set Exit button
+      const rpW = BM_PW - BM_SPLIT_X - 20;
+      const exBtnX = rox, exBtnY = py + BM_PH - 66, exBtnW = rpW, exBtnH = 24;
+      if (sx >= exBtnX && sx <= exBtnX + exBtnW && sy >= exBtnY && sy <= exBtnY + exBtnH) {
+        const isExit = this.buildModeSelGX === this.housingState.exitGX &&
+                       this.buildModeSelGY === this.housingState.exitGY;
+        if (!isExit) {
+          const check = this.housingState.canSetExitCell(this.buildModeSelGX, this.buildModeSelGY);
+          if (!check.ok) {
+            this.notifications.add(check.reason, '#e74c3c');
+          } else {
+            this.housingState.setExitCell(this.buildModeSelGX, this.buildModeSelGY);
+            this.notifications.add('Exit moved to this room.', '#27ae60');
+            this._rebuildPlayerHouse();
+            this._saveToServer();
+          }
+        }
+        return;
+      }
+
+      // Remove Room button
+      const rmBtnX = rox, rmBtnY = py + BM_PH - 36, rmBtnW = rpW, rmBtnH = 24;
+      if (sx >= rmBtnX && sx <= rmBtnX + rmBtnW && sy >= rmBtnY && sy <= rmBtnY + rmBtnH) {
+        const check = this.housingState.canRemoveCell(this.buildModeSelGX, this.buildModeSelGY);
+        if (!check.ok) {
+          this.notifications.add(check.reason, '#e74c3c');
+          return;
+        }
+        const removedDef = ROOM_DEFS[cell.typeId];
+        this.housingState.removeCell(this.buildModeSelGX, this.buildModeSelGY);
+        this.notifications.add(`Removed ${removedDef?.name ?? 'room'}.`, '#e67e22');
+        this._rebuildPlayerHouse();
+        this.buildModeStep = 'grid';
+        this.buildModeSelGX = null;
+        this.buildModeSelGY = null;
+        this._saveToServer();
+        return;
       }
     }
   }
@@ -3614,30 +3701,13 @@ export class Game {
   }
 
   _logoutButtonRect() {
+    // Footer-attached logout button — matches renderer.drawSidePanel layout.
     const W = this.canvas.width, H = this.canvas.height;
-    const PW = 232, PH = 28 + 378 + 4;
+    const PW = 254, TAB_H = 28, CONTENT_H = 386, FOOTER_H = 30, PH = TAB_H + CONTENT_H + FOOTER_H + 4;
     const px = W - PW - 4;
-    // sit just below the side panel with a small gap
-    const by = H - PH - 4 - 26 - 4;
-    return { x: px, y: by, w: PW, h: 26 };
-  }
-
-  _drawLogoutButton(ctx) {
-    const r = this._logoutButtonRect();
-    const hover = this.mouseScreen.x >= r.x && this.mouseScreen.x <= r.x + r.w &&
-                  this.mouseScreen.y >= r.y && this.mouseScreen.y <= r.y + r.h;
-    ctx.fillStyle = hover ? '#4a1010' : '#2a0808';
-    ctx.fillRect(r.x, r.y, r.w, r.h);
-    // bevel border
-    ctx.strokeStyle = hover ? '#c05050' : '#7a2020';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-    ctx.fillStyle = '#e07070';
-    ctx.font = 'bold 12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('Log Out', r.x + r.w / 2, r.y + r.h / 2);
-    ctx.textAlign = 'left';
+    const py = H - PH - 4;
+    const footerY = py + TAB_H + CONTENT_H + 4;
+    return { x: px + 10, y: footerY + 5, w: PW - 20, h: 20 };
   }
 
   _logout() {
@@ -3707,13 +3777,13 @@ export class Game {
     if (!this._chatInput) {
       const input = document.createElement('input');
       input.type        = 'text';
-      input.maxLength   = 120;
-      input.placeholder = 'Press Enter to send, Esc to cancel';
+      input.maxLength   = CHAT_MAX_LEN;
+      input.placeholder = `Press Enter to send, Esc to cancel (max ${CHAT_MAX_LEN})`;
       input.style.cssText = [
         'position:fixed',
-        'bottom:10px',
-        'left:12px',
-        'width:324px',
+        'bottom:16px',
+        'left:16px',
+        'width:436px',
         'height:20px',
         'background:rgba(20,14,8,0.88)',
         'color:#f0e8d0',
@@ -3748,7 +3818,9 @@ export class Game {
 
   _submitChat() {
     if (!this._chatInput || !this.network) { this._closeChat(); return; }
-    const text = this._chatInput.value.trim();
+    // Defence in depth: the input's maxLength and server both cap at 120,
+    // but clamp here too in case either is bypassed.
+    const text = this._chatInput.value.trim().slice(0, CHAT_MAX_LEN);
     if (text) {
       this.network.sendChat(text);
       this._chatScrollOffset = 0; // snap to newest on send
@@ -3756,67 +3828,128 @@ export class Game {
     this._closeChat();
   }
 
+  /** Word-wrap `text` to `maxWidth` pixels. `firstLineReserve` is the width
+   *  already occupied on the first line (e.g. the "name: " prefix for chat). */
+  _wrapText(ctx, text, maxWidth, firstLineReserve = 0) {
+    if (!text) return [''];
+    const lines = [];
+    const words = text.split(/\s+/);
+    let current = '';
+    let available = maxWidth - firstLineReserve;
+    const pushLine = () => {
+      lines.push(current);
+      current = '';
+      available = maxWidth; // subsequent lines have the full width
+    };
+    for (const word of words) {
+      // Break words that are themselves wider than the line
+      if (ctx.measureText(word).width > available) {
+        if (current) pushLine();
+        let chunk = '';
+        for (const ch of word) {
+          if (ctx.measureText(chunk + ch).width > available && chunk) {
+            lines.push(chunk);
+            chunk = ch;
+            available = maxWidth;
+          } else {
+            chunk += ch;
+          }
+        }
+        current = chunk;
+        continue;
+      }
+      const candidate = current ? current + ' ' + word : word;
+      if (ctx.measureText(candidate).width > available) {
+        pushLine();
+        current = word;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current) lines.push(current);
+    return lines.length ? lines : [''];
+  }
+
   _drawChat(ctx) {
     const PAD      = 8;
     const LINE_H   = 16;
-    const MAX_LINES = 7;
-    const BOX_W    = 340;
+    const MAX_LINES = 10;                        // visible wrapped lines
+    const BOX_W    = 452;                        // ~33% wider than the old 340
     const HINT_H   = 24;
-    const MSG_H    = MAX_LINES * LINE_H + PAD * 2; // 128
-    const BOX_H    = MSG_H + HINT_H;               // 152
+    const MSG_H    = MAX_LINES * LINE_H + PAD * 2; // 176
+    const BOX_H    = MSG_H + HINT_H;               // 200
     const boxX     = 8;
-    const boxY     = this.canvas.height - 46 - BOX_H; // leave room for FPS/coords line below
-    // Panel background
-    ctx.save();
-    ctx.fillStyle = 'rgba(10,7,4,0.72)';
-    ctx.strokeStyle = 'rgba(139,105,20,0.55)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.roundRect(boxX, boxY, BOX_W, BOX_H, 3);
-    ctx.fill();
-    ctx.stroke();
-    ctx.restore();
+    const boxY     = this.canvas.height - 10 - BOX_H; // bottom-left; FPS/coords now live top-left
+    // Bronze HUD frame (same trim as the other panels) with subtle corner rivets.
+    this.renderer.drawBronzeFrame(ctx, boxX, boxY, BOX_W, BOX_H, { rivets: true });
 
-    // Merge notifications (game log) + player chat, sorted oldest→newest
-    const notifItems = this.notifications.messages.map(m => ({
-      text: m.text, color: m.color, time: m.time, isChat: false,
-    }));
+    // Merge notifications (game log) + player chat, sorted oldest→newest.
+    // Only level-ups are shown in chat; other notifications stay as transient UI feedback.
+    const notifItems = this.notifications.messages
+      .filter(m => m.category === 'levelup')
+      .map(m => ({
+        text: m.text, color: m.color, time: m.time, isChat: false,
+      }));
     const chatItems = this.chatMessages.map(m => ({
       name: m.name, text: m.text, color: '#f0e8d0', time: m.time, isChat: true,
     }));
-    const all   = [...notifItems, ...chatItems].sort((a, b) => a.time - b.time);
-    const total = all.length;
-    const maxOffset = Math.max(0, total - MAX_LINES);
-    // Clamp scroll in case messages expired
-    this._chatScrollOffset = Math.max(0, Math.min(maxOffset, this._chatScrollOffset));
-    const end   = total - this._chatScrollOffset;
-    const slice = all.slice(Math.max(0, end - MAX_LINES), end);
-    const hasMore = this._chatScrollOffset > 0; // older messages above current view
+    const all = [...notifItems, ...chatItems].sort((a, b) => a.time - b.time);
 
-    // Draw messages (oldest at top, newest at bottom)
     ctx.save();
     ctx.font = '12px monospace';
     ctx.textBaseline = 'top';
     const maxW = BOX_W - PAD * 2;
-    for (let i = 0; i < slice.length; i++) {
-      const msg = slice[i];
-      const y = boxY + PAD + i * LINE_H;
-      if (msg.isChat) {
-        const prefix = msg.name + ': ';
-        ctx.fillStyle = '#f1c40f';
-        ctx.fillText(prefix, boxX + PAD, y);
+
+    // Flatten each item into one or more wrapped visual lines. Long chat messages
+    // span multiple lines; the "name: " prefix is kept only on the first line.
+    const visualLines = [];
+    for (const item of all) {
+      if (item.isChat) {
+        const prefix = item.name + ': ';
         const prefixW = ctx.measureText(prefix).width;
-        ctx.fillStyle = '#f0e8d0';
-        let text = msg.text;
-        while (ctx.measureText(text).width > maxW - prefixW && text.length > 1) text = text.slice(0, -1);
-        ctx.fillText(text, boxX + PAD + prefixW, y);
+        const bodyLines = this._wrapText(ctx, item.text, maxW, prefixW);
+        for (let k = 0; k < bodyLines.length; k++) {
+          visualLines.push({
+            isChat: true,
+            name: item.name,
+            prefix: k === 0 ? prefix : '',
+            prefixW: k === 0 ? prefixW : 0,
+            body: bodyLines[k],
+            color: item.color,
+          });
+        }
       } else {
-        ctx.fillStyle = msg.color;
-        let text = msg.text;
-        while (ctx.measureText(text).width > maxW && text.length > 1) text = text.slice(0, -1);
-        ctx.fillText(text, boxX + PAD, y);
+        const lines = this._wrapText(ctx, item.text, maxW, 0);
+        for (const line of lines) {
+          visualLines.push({ isChat: false, body: line, color: item.color });
+        }
       }
     }
+
+    const totalLines = visualLines.length;
+    const maxOffset  = Math.max(0, totalLines - MAX_LINES);
+    this._chatScrollOffset = Math.max(0, Math.min(maxOffset, this._chatScrollOffset));
+    const endLine = totalLines - this._chatScrollOffset;
+    const slice   = visualLines.slice(Math.max(0, endLine - MAX_LINES), endLine);
+    const hasMore = this._chatScrollOffset > 0;
+
+    // Draw wrapped lines (oldest at top, newest at bottom)
+    for (let i = 0; i < slice.length; i++) {
+      const ln = slice[i];
+      const y = boxY + PAD + i * LINE_H;
+      if (ln.isChat) {
+        if (ln.prefix) {
+          ctx.fillStyle = '#f1c40f';
+          ctx.fillText(ln.prefix, boxX + PAD, y);
+        }
+        ctx.fillStyle = '#f0e8d0';
+        ctx.fillText(ln.body, boxX + PAD + ln.prefixW, y);
+      } else {
+        ctx.fillStyle = ln.color;
+        ctx.fillText(ln.body, boxX + PAD, y);
+      }
+    }
+
     // "Scroll up for more" indicator
     if (hasMore) {
       ctx.font = '10px monospace';
@@ -3826,16 +3959,13 @@ export class Game {
     }
     ctx.restore();
 
-    // Separator between messages and hint/input row
+    // Separator between messages and hint/input row — gold/dark double-rule
+    // matching the tab bar and minimap divider.
     const sepY = boxY + MSG_H;
-    ctx.save();
-    ctx.strokeStyle = 'rgba(139,105,20,0.3)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(boxX + PAD, sepY);
-    ctx.lineTo(boxX + BOX_W - PAD, sepY);
-    ctx.stroke();
-    ctx.restore();
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(boxX + PAD, sepY, BOX_W - PAD * 2, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(boxX + PAD, sepY + 1, BOX_W - PAD * 2, 1);
 
     // Hint row (when input not active)
     if (!this.chatInputActive && this.network) {
@@ -4018,6 +4148,10 @@ export class Game {
       if (this.chatMessages.length > 50) this.chatMessages.shift();
       if (this._chatScrollOffset === 0) return; // already at bottom
       // Keep scroll position so user doesn't lose their place (they can scroll back)
+    });
+
+    net.on('levelup_broadcast', ({ name, skill, level }) => {
+      this.notifications.add(`🎉 ${name} has reached ${skill} level ${level}!`, null, 'levelup');
     });
   }
 

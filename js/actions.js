@@ -430,7 +430,7 @@ export class Actions {
             this.notif.add(`You find a ${seedFound.name} while chopping!`, '#2ecc71');
           }
         }
-        if (res.result.leveled) this.notif.add(`🎉 Woodcutting level ${res.result.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.levelUp('Woodcutting', res.result.newLevel);
         const logsLeft = (a.logsLeft ?? 1) - 1;
         if (logsLeft > 0 && !this.inventory.isFull()) {
           const axeTier   = getAxeTier(this.inventory);
@@ -461,7 +461,7 @@ export class Actions {
         if (!oreInfo) break;
         this.inventory.add(oreInfo.item);
         const res = this._awardXp(SKILL_IDS.MINING, oreInfo.xp);
-        if (res.result.leveled) this.notif.add(`🎉 Mining level ${res.result.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.levelUp('Mining', res.result.newLevel);
         const oresLeft = (a.oresLeft ?? 1) - 1;
         if (oresLeft > 0 && !this.inventory.isFull()) {
           // Rock still has ore — keep mining
@@ -492,7 +492,7 @@ export class Actions {
         this.inventory.add(info.item, qty);
         const res = this._awardXp(SKILL_IDS.FARMING, info.xp);
         this.notif.add(info.msg, '#27ae60');
-        if (res.result.leveled) this.notif.add(`🎉 Farming level ${res.result.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.levelUp('Farming', res.result.newLevel);
         // Deplete — use depletedTile if set (e.g. empty bush), otherwise revert to ground
         this.world.setTile(a.col, a.row, info.depletedTile ?? info.ground);
         this.world.dirty = true;
@@ -534,7 +534,7 @@ export class Actions {
         this.inventory.add(makeFishItem(chosen, weight));
         const res = this._awardXp(SKILL_IDS.FISHING, chosen.xp);
         this.notif.add(`You catch a ${chosen.name}! (${weight}kg)`, '#3498db');
-        if (res.result.leveled) this.notif.add(`🎉 Fishing level ${res.result.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.levelUp('Fishing', res.result.newLevel);
 
         // Update fishing records
         if (this.fishingRecords) {
@@ -588,7 +588,7 @@ export class Actions {
         const res = this._awardXp(SKILL_IDS.FIREMAKING, xpAmt);
         const perkNote = logInfo.perk ? ` — ${_PERK_DESC[logInfo.perk]}` : '';
         this.notif.add(`The ${logInfo.name} fire catches!${perkNote}`, '#e67e22');
-        if (res.result.leveled) this.notif.add(`🎉 Firemaking level ${res.result.newLevel}!`, '#f1c40f');
+        if (res.result.leveled) this.notif.levelUp('Firemaking', res.result.newLevel);
         break;
       }
 
@@ -606,7 +606,7 @@ export class Actions {
           this.inventory.add(recipe.cooked);
           const res = this._awardXp(SKILL_IDS.COOKING, XP_REWARDS.COOK);
           this.notif.add(`You cook the ${rawItem.name} perfectly!`, '#e74c3c');
-          if (res.result.leveled) this.notif.add(`🎉 Cooking level ${res.result.newLevel}!`, '#f1c40f');
+          if (res.result.leveled) this.notif.levelUp('Cooking', res.result.newLevel);
         }
         break;
       }

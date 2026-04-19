@@ -19,7 +19,7 @@ export class Skills {
     return { leveled: newLevel > oldLevel, newLevel };
   }
 
-  /** Current level for a skill (1-99).
+  /** Current level for a skill (1-100).
    *  XP_TABLE[i] = XP threshold to reach level i+1, so we return i+1 on match. */
   getLevel(skillId) {
     const xp = this.xp[skillId];
@@ -32,7 +32,7 @@ export class Skills {
   /** XP needed for next level */
   xpToNext(skillId) {
     const lvl = this.getLevel(skillId);
-    if (lvl >= 99) return 0;
+    if (lvl >= 100) return 0;
     return XP_TABLE[lvl] - this.xp[skillId];
   }
 
@@ -41,7 +41,7 @@ export class Skills {
    *  XP_TABLE[lvl]   = floor XP for next level. */
   progressToNext(skillId) {
     const lvl = this.getLevel(skillId);
-    if (lvl >= 99) return 1;
+    if (lvl >= 100) return 1;
     const floorXp = XP_TABLE[lvl - 1];
     const ceilXp  = XP_TABLE[lvl];
     const needed  = ceilXp - floorXp;

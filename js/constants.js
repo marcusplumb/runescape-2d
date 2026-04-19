@@ -138,6 +138,27 @@ export const TILES = {
   SULFUR_ROCK:        96,  // sulfur crystal deposit — Volcanic only
   THORN_BUSH:         97,  // gnarled thorn bush — Danger zone only
   DESERT_FLOWER:      98,  // succulent bloom — Desert only
+  // Housing room fences (directional — perspective-aware)
+  WOOD_FENCE_H:      100,  // horizontal wood fence (taming pen) — solid
+  WOOD_FENCE_V:      101,  // vertical wood fence (taming pen) — solid
+  STEEL_FENCE_H:     102,  // horizontal steel fence (garden) — solid
+  STEEL_FENCE_V:     103,  // vertical steel fence (garden) — solid
+  WOOD_FENCE_CORNER: 104,  // wood fence corner post — solid
+  STEEL_FENCE_CORNER:105,  // steel fence corner post — solid
+  FARM_BERRY_BUSH:   106,  // berry bush on farm soil — solid, harvestable
+  FARM_BERRY_EMPTY:  107,  // picked berry bush on farm soil — solid, regrowing
+  FARM_POTATO_READY: 108,  // grown potato plant on soil
+  FARM_BERRIES_READY:109,  // grown berry plant on soil (small, one-time harvest)
+  FARM_HERB_READY:   110,  // grown herb plant on soil
+  FARM_FLAX_READY:   111,  // grown flax plant on soil
+  FARM_MAGIC_READY:  112,  // grown magic herb on soil (glowing)
+  // New housing furniture tiles
+  FURN_CAULDRON:     113,  // iron cauldron on tripod — solid
+  FURN_CANDELABRA:   114,  // standing candle holder — solid
+  FURN_TAPESTRY:     115,  // wall banner / tapestry — solid
+  FURN_WARDROBE:     116,  // wooden wardrobe / armoire — solid
+  FURN_HAY_BALE:     117,  // stacked hay bale — solid
+  FURN_SCARECROW:    118,  // scarecrow on stick — solid
 };
 
 // Which tiles block movement
@@ -221,6 +242,14 @@ export const SOLID_TILES = new Set([
   TILES.SULFUR_ROCK,
   TILES.THORN_BUSH,
   TILES.DESERT_FLOWER,
+  // Housing room fences
+  TILES.WOOD_FENCE_H, TILES.WOOD_FENCE_V, TILES.WOOD_FENCE_CORNER,
+  TILES.STEEL_FENCE_H, TILES.STEEL_FENCE_V, TILES.STEEL_FENCE_CORNER,
+  // Farm berry bushes
+  TILES.FARM_BERRY_BUSH, TILES.FARM_BERRY_EMPTY,
+  // New housing furniture
+  TILES.FURN_CAULDRON, TILES.FURN_CANDELABRA, TILES.FURN_TAPESTRY,
+  TILES.FURN_WARDROBE, TILES.FURN_HAY_BALE, TILES.FURN_SCARECROW,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -342,6 +371,28 @@ export const TILE_COLORS = {
   [TILES.SULFUR_ROCK]:      '#3a2a2a',  // volcanic rock base
   [TILES.THORN_BUSH]:       '#8a7a50',  // dead grass base
   [TILES.DESERT_FLOWER]:    '#b8a060',  // sand dark base
+  // Housing room fences
+  [TILES.WOOD_FENCE_H]:     '#7a5028',
+  [TILES.WOOD_FENCE_V]:     '#7a5028',
+  [TILES.STEEL_FENCE_H]:    '#6a7a8a',
+  [TILES.STEEL_FENCE_V]:    '#6a7a8a',
+  [TILES.WOOD_FENCE_CORNER]:'#7a5028',
+  [TILES.STEEL_FENCE_CORNER]:'#6a7a8a',
+  // Farm berry bushes
+  [TILES.FARM_BERRY_BUSH]:  '#6b4e2a',  // soil base
+  [TILES.FARM_BERRY_EMPTY]: '#6b4e2a',  // soil base
+  [TILES.FARM_POTATO_READY]: '#6b4e2a',
+  [TILES.FARM_BERRIES_READY]:'#6b4e2a',
+  [TILES.FARM_HERB_READY]:   '#6b4e2a',
+  [TILES.FARM_FLAX_READY]:   '#6b4e2a',
+  [TILES.FARM_MAGIC_READY]:  '#6b4e2a',
+  // New housing furniture
+  [TILES.FURN_CAULDRON]:     '#3a3a3a',
+  [TILES.FURN_CANDELABRA]:   '#4a3a20',
+  [TILES.FURN_TAPESTRY]:     '#4a2020',
+  [TILES.FURN_WARDROBE]:     '#5a3a18',
+  [TILES.FURN_HAY_BALE]:     '#8a7a30',
+  [TILES.FURN_SCARECROW]:    '#4a8a3a',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -402,13 +453,24 @@ export const TILE_HAS_DETAIL = new Set([
   TILES.SULFUR_ROCK,
   TILES.THORN_BUSH,
   TILES.DESERT_FLOWER,
+  // Housing room fences
+  TILES.WOOD_FENCE_H, TILES.WOOD_FENCE_V, TILES.WOOD_FENCE_CORNER,
+  TILES.STEEL_FENCE_H, TILES.STEEL_FENCE_V, TILES.STEEL_FENCE_CORNER,
+  // Farm berry bushes
+  TILES.FARM_BERRY_BUSH, TILES.FARM_BERRY_EMPTY,
+  // Farm crop ready tiles
+  TILES.FARM_POTATO_READY, TILES.FARM_BERRIES_READY,
+  TILES.FARM_HERB_READY, TILES.FARM_FLAX_READY, TILES.FARM_MAGIC_READY,
+  // New housing furniture
+  TILES.FURN_CAULDRON, TILES.FURN_CANDELABRA, TILES.FURN_TAPESTRY,
+  TILES.FURN_WARDROBE, TILES.FURN_HAY_BALE, TILES.FURN_SCARECROW,
 ]);
 
 // ── Inventory ────────────────────────────────────────────
 export const INV_COLS = 4;
 export const INV_ROWS = 7;
 export const INV_SLOTS = INV_COLS * INV_ROWS;
-export const INV_CELL = 40;
+export const INV_CELL = 48;
 export const INV_PAD = 6;
 
 // ── Skills ───────────────────────────────────────────────
@@ -629,7 +691,7 @@ export const SKILL_COLORS = ['#27ae60', '#e67e22', '#3498db', '#e74c3c', '#c0392
 // XP table — Runescape-inspired curve
 export const XP_TABLE = (() => {
   const table = [0];
-  for (let lvl = 2; lvl <= 99; lvl++) {
+  for (let lvl = 2; lvl <= 100; lvl++) {
     let total = 0;
     for (let i = 1; i < lvl; i++) {
       total += Math.floor(i + 300 * Math.pow(2, i / 7));
