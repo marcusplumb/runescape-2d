@@ -6,11 +6,12 @@
  *
  * ── Tuning cheat-sheet ────────────────────────────────────────────────────
  *   RAID_XP.PER_KILL     — raiding XP = mob.maxHp × PER_KILL × diff.xpMult
- *   RAID_XP.PER_FLOOR    — flat XP added when a floor is cleared
- *   RAID_XP.COMPLETION   — bonus XP on finishing all floors
+ *   RAID_XP.PER_ROOM     — flat XP added when a room is cleared
+ *   RAID_XP.COMPLETION   — bonus XP on clearing the final (boss) room
  *   difficulty.hpMult    — scales enemy max HP  (1.0 = baseline)
  *   difficulty.damageMult— scales enemy attack + strength levels
- *   difficulty.countMult — multiplies spawn count per floor entry
+ *   difficulty.countMult — multiplies spawn count per mob room
+ *   difficulty.roomCount — total rooms in the dungeon (boss room included)
  *   difficulty.xpMult    — multiplies all raiding XP earned
  *   difficulty.goldMult  — used by loot roller for gold quantity scaling
  *   difficulty.tokenMult — base raid tokens awarded at end
@@ -24,9 +25,11 @@ import { ITEMS } from './items.js';
 // Tune these to adjust how fast the raiding skill levels up.
 export const RAID_XP = {
   PER_KILL:   5,    // XP per HP of mob max-health (before difficulty mult)
-  PER_FLOOR:  200,  // flat XP per floor cleared
-  COMPLETION: 500,  // bonus XP for clearing all floors
+  PER_ROOM:   200,  // flat XP per room cleared
+  COMPLETION: 500,  // bonus XP for clearing the boss room
 };
+// Backwards-compat alias for any external callers.
+RAID_XP.PER_FLOOR = RAID_XP.PER_ROOM;
 
 // ── Score / rank thresholds ───────────────────────────────────────────────────
 // Score is calculated by calcScore() below.  Higher difficulty xpMult pushes
@@ -49,10 +52,10 @@ export const SCORE_RANKS = [
  * @param {number} deaths
  * @param {object} difficultyDef  — must have .xpMult
  */
-export function calcScore(floorsCleared, totalFloors, timeTaken, damageTaken, deaths, difficultyDef) {
+export function calcScore(roomsCleared, totalRooms, timeTaken, damageTaken, deaths, difficultyDef) {
   let score = 0;
-  score += floorsCleared * 50;                              // floor progress
-  if (floorsCleared >= totalFloors) score += 100;           // full clear bonus
+  score += roomsCleared * 50;                              // room progress
+  if (roomsCleared >= totalRooms) score += 100;            // full clear bonus
   score += Math.max(0, Math.floor((300 - timeTaken) / 3)); // speed bonus (up to 100)
   score += Math.max(0, 50 - Math.floor(damageTaken));       // low-damage bonus
   score -= deaths * 100;                                    // death penalty
@@ -75,42 +78,42 @@ export const RAID_DIFFICULTIES = [
   {
     id: 'novice', name: 'Novice', color: '#7cb36a',
     unlockReq: null,
-    hpMult: 1.0, damageMult: 1.0, countMult: 1.0,
+    hpMult: 1.0, damageMult: 1.0, countMult: 1.0, roomCount: 3,
     xpMult: 1.0, goldMult: 1.0, tokenMult: 1,
     recLevel: 1,
-    description: 'Gentle introduction. Reduced enemy stats.',
+    description: 'Gentle introduction. 3 rooms.',
   },
   {
     id: 'adept', name: 'Adept', color: '#e8d44d',
     unlockReq: { type: 'skill', skillId: 11 /* RAIDING */, level: 5 },
-    hpMult: 1.5, damageMult: 1.3, countMult: 1.2,
+    hpMult: 1.5, damageMult: 1.3, countMult: 1.2, roomCount: 4,
     xpMult: 2.0, goldMult: 1.8, tokenMult: 2,
     recLevel: 15,
-    description: 'Tougher enemies, better rewards.',
+    description: 'Tougher enemies. 4 rooms.',
   },
   {
     id: 'veteran', name: 'Veteran', color: '#e8943b',
     unlockReq: { type: 'skill', skillId: 11 /* RAIDING */, level: 20 },
-    hpMult: 2.2, damageMult: 1.8, countMult: 1.5,
+    hpMult: 2.2, damageMult: 1.8, countMult: 1.5, roomCount: 5,
     xpMult: 3.5, goldMult: 3.0, tokenMult: 4,
     recLevel: 35,
-    description: 'Hardened enemies. Bring good gear.',
+    description: 'Hardened enemies. 5 rooms. Bring good gear.',
   },
   {
     id: 'elite', name: 'Elite', color: '#c050e8',
     unlockReq: { type: 'skill', skillId: 11 /* RAIDING */, level: 45 },
-    hpMult: 3.5, damageMult: 2.5, countMult: 2.0,
+    hpMult: 3.5, damageMult: 2.5, countMult: 2.0, roomCount: 6,
     xpMult: 6.0, goldMult: 5.0, tokenMult: 8,
     recLevel: 60,
-    description: 'Only skilled raiders survive. Rare drops improved.',
+    description: 'Only skilled raiders survive. 6 rooms. Rare drops improved.',
   },
   {
     id: 'master', name: 'Master', color: '#e83b3b',
     unlockReq: { type: 'skill', skillId: 11 /* RAIDING */, level: 70 },
-    hpMult: 6.0, damageMult: 4.0, countMult: 2.5,
+    hpMult: 6.0, damageMult: 4.0, countMult: 2.5, roomCount: 7,
     xpMult: 10.0, goldMult: 8.0, tokenMult: 15,
     recLevel: 80,
-    description: 'The ultimate challenge. Top-tier loot exclusively here.',
+    description: 'The ultimate challenge. 7 rooms. Top-tier loot exclusively here.',
   },
 ];
 
@@ -210,9 +213,17 @@ export function rollLoot(tableId, difficultyIndex, rankLabel, goldMult = 1) {
 }
 
 // ── Raid definitions ──────────────────────────────────────────────────────────
-// floors: array of floor objects:
-//   mobs: [{ type: '<MOB_DEFS key>', count: N }]
-//   boss: true  — shown as "BOSS" indicator in UI
+// Room-based model: the raid instance generates a sequence of rooms on entry.
+// The number of rooms comes from difficulty.roomCount. Every raid ends in a
+// boss room. Non-boss rooms are randomised across types weighted by
+// `roomTypeWeights` (mob / puzzle / resource).
+//
+// mobPool       — mob types drawn from for each "mob" room.
+// mobsPerRoom   — [min, max] count picked per mob room (before countMult).
+// bossType      — the single mob spawned in the final room.
+// bossHpMult    — extra HP multiplier on the boss (stacks with difficulty.hpMult).
+// roomTypeWeights — { mob, puzzle, resource } integer weights for non-boss rooms.
+// resourceLoot  — loot table for a resource room's mid-raid chest.
 //
 // Mob types available (from mobs.js MOB_DEFS):
 //   chicken, cow, sheep, goblin, orc, troll, demon, frog, deer, fox,
@@ -220,13 +231,18 @@ export function rollLoot(tableId, difficultyIndex, rankLabel, goldMult = 1) {
 //   magma_golem, swamp_stalker, desert_sprite
 export const RAID_DEFS = [
   {
-    id:          'goblin_cave',
-    name:        'Goblin Cave',
-    description: 'Goblins have overrun this cave. Clear them out before their chief rallies the horde.',
-    floors: [
-      { mobs: [{ type: 'goblin', count: 3 }] },
-      { mobs: [{ type: 'goblin', count: 4 }, { type: 'wolf', count: 1 }] },
-      { mobs: [{ type: 'troll', count: 1 }], boss: true },
+    id:          'goblin_warrens',
+    name:        'Goblin Warrens',
+    description: 'Goblins have dug a warren beneath the hills. Cut through their patrols, outwit their traps, and take down the warchief at the bottom.',
+    mobPool:     ['goblin', 'wolf'],
+    mobsPerRoom: [3, 5],
+    bossType:    'troll',
+    bossHpMult:  2.5,
+    roomTypeWeights: { mob: 5, puzzle: 2, resource: 2 },
+    resourceLoot: [
+      { item: () => ITEMS.GOLD_COIN,  chance: 1.0, qty: 15 },
+      { item: () => ITEMS.ORE_COAL,   chance: 0.7, qty: 2  },
+      { item: () => ITEMS.RAID_TOKEN, chance: 0.5, qty: 1  },
     ],
     lootTable: 'basic',
     iconColor:  '#7cb36a',
@@ -236,11 +252,15 @@ export const RAID_DEFS = [
     id:          'dungeon_depths',
     name:        'Dungeon Depths',
     description: 'Ancient chambers teeming with orcs and their warlord. Clear each room.',
-    floors: [
-      { mobs: [{ type: 'goblin', count: 3 }, { type: 'orc', count: 1 }] },
-      { mobs: [{ type: 'orc', count: 3 }, { type: 'wolf', count: 2 }] },
-      { mobs: [{ type: 'orc', count: 2 }, { type: 'troll', count: 1 }] },
-      { mobs: [{ type: 'demon', count: 1 }], boss: true },
+    mobPool:     ['goblin', 'orc', 'wolf'],
+    mobsPerRoom: [3, 5],
+    bossType:    'demon',
+    bossHpMult:  3.0,
+    roomTypeWeights: { mob: 5, puzzle: 2, resource: 2 },
+    resourceLoot: [
+      { item: () => ITEMS.GOLD_COIN,  chance: 1.0, qty: 40 },
+      { item: () => ITEMS.ORE_COAL,   chance: 0.8, qty: 3  },
+      { item: () => ITEMS.RAID_TOKEN, chance: 0.7, qty: 2  },
     ],
     lootTable: 'dungeon',
     iconColor:  '#c87941',
@@ -250,15 +270,45 @@ export const RAID_DEFS = [
     id:          'abyssal_sanctum',
     name:        'Abyssal Sanctum',
     description: 'Void demons have broken through to this plane. Purge the sanctum before they spread.',
-    floors: [
-      { mobs: [{ type: 'demon', count: 2 }] },
-      { mobs: [{ type: 'demon', count: 2 }, { type: 'troll', count: 2 }] },
-      { mobs: [{ type: 'demon', count: 3 }, { type: 'orc', count: 2 }] },
-      { mobs: [{ type: 'demon', count: 2 }, { type: 'troll', count: 2 }] },
-      { mobs: [{ type: 'demon', count: 3 }], boss: true },
+    mobPool:     ['demon', 'troll', 'orc'],
+    mobsPerRoom: [3, 5],
+    bossType:    'demon',
+    bossHpMult:  4.0,
+    roomTypeWeights: { mob: 6, puzzle: 2, resource: 2 },
+    resourceLoot: [
+      { item: () => ITEMS.GOLD_COIN,       chance: 1.0, qty: 80 },
+      { item: () => ITEMS.CHAOS_FRAGMENT,  chance: 0.8, qty: 1  },
+      { item: () => ITEMS.RAID_TOKEN,      chance: 0.8, qty: 3  },
     ],
     lootTable: 'abyss',
     iconColor:  '#9b23c8',
     recLevel:   45,
   },
 ];
+
+/** Pick a room type (non-boss) by weight. */
+export function pickRoomType(weights, rand = Math.random) {
+  const entries = Object.entries(weights).filter(([, w]) => w > 0);
+  const total   = entries.reduce((a, [, w]) => a + w, 0);
+  let r = rand() * total;
+  for (const [type, w] of entries) {
+    r -= w;
+    if (r <= 0) return type;
+  }
+  return entries[0][0];
+}
+
+/** Roll simple loot for a resource-room chest (not a full run). */
+export function rollResourceLoot(raidDef, goldMult = 1) {
+  const results = [];
+  for (const entry of raidDef.resourceLoot || []) {
+    if (Math.random() >= Math.min(1, entry.chance)) continue;
+    const itemDef = entry.item();
+    let qty = entry.qty;
+    if (itemDef.id === 'gold_coin' || itemDef.id === 'raid_token') {
+      qty = Math.max(1, Math.round(qty * goldMult));
+    }
+    results.push({ item: itemDef, qty });
+  }
+  return results;
+}

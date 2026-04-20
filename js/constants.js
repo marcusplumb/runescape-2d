@@ -159,6 +159,33 @@ export const TILES = {
   FURN_WARDROBE:     116,  // wooden wardrobe / armoire — solid
   FURN_HAY_BALE:     117,  // stacked hay bale — solid
   FURN_SCARECROW:    118,  // scarecrow on stick — solid
+  FURN_STOOL:        119,  // small wooden stool — walkable
+  FURN_THRONE:       120,  // ornate high-backed chair — solid
+  FURN_PAINTING:     121,  // framed wall painting — solid, wall-mount north
+  FURN_VASE:         122,  // decorative floor vase — solid
+  FURN_NIGHTSTAND:   123,  // small bedside table — solid
+  FURN_FLOWER_PATCH: 124,  // cluster of garden flowers — solid
+  FURN_CLOCK:        125,  // grandfather clock — solid
+  FURN_LANTERN:      126,  // standing iron lantern — solid
+  // Interactive prestige / display furniture — click to assign content.
+  FURN_WEAPON_CASE:     127,  // glass-fronted case displaying a single weapon — solid
+  FURN_FISH_MOUNT:      128,  // mounted fish plaque on the wall — solid, wall-mount north
+  FURN_TROPHY_PLAQUE:   129,  // engraved wooden plaque with player text — solid, wall-mount north
+  FURN_RELIC_SHELF:     130,  // small shelf displaying a single collectible item — solid
+  FURN_ACHIEVEMENTS_BOOK:131, // open tome on a pedestal — click to open achievements panel — solid
+  // Outdoor (garden / taming plot) decorations.
+  FURN_GARDEN_ROCK:     132,  // decorative boulder — solid
+  FURN_POND_WATER:      133,  // water patch for building ponds — solid, animated
+  FURN_TRAIL_DIRT:      134,  // packed earth path — walkable
+  FURN_TRAIL_STONE:     135,  // cobblestone path — walkable
+  FURN_TRAIL_GRAVEL:    136,  // loose gravel path — walkable
+  FURN_TRAIL_FLAGSTONE: 137,  // flagstone slab path — walkable
+  // Misc new furniture
+  FURN_FISH_TANK:       138,  // glass aquarium with fish — solid, animated
+  FURN_ALCHEMY_TABLE:   139,  // table with bubbling alembic — solid
+  FURN_ARCHERY_TARGET:  140,  // round straw target — solid
+  FURN_WINE_CASK:       141,  // wooden cask with tap — solid
+  FURN_LOOM:            142,  // weaving loom — solid
 };
 
 // Which tiles block movement
@@ -250,6 +277,17 @@ export const SOLID_TILES = new Set([
   // New housing furniture
   TILES.FURN_CAULDRON, TILES.FURN_CANDELABRA, TILES.FURN_TAPESTRY,
   TILES.FURN_WARDROBE, TILES.FURN_HAY_BALE, TILES.FURN_SCARECROW,
+  TILES.FURN_THRONE, TILES.FURN_PAINTING, TILES.FURN_VASE,
+  TILES.FURN_NIGHTSTAND, TILES.FURN_FLOWER_PATCH, TILES.FURN_CLOCK,
+  TILES.FURN_LANTERN,
+  // Interactive display furniture
+  TILES.FURN_WEAPON_CASE, TILES.FURN_FISH_MOUNT, TILES.FURN_TROPHY_PLAQUE,
+  TILES.FURN_RELIC_SHELF, TILES.FURN_ACHIEVEMENTS_BOOK,
+  // Garden rock + pond block movement. Trails are walkable (not listed here).
+  TILES.FURN_GARDEN_ROCK, TILES.FURN_POND_WATER,
+  // New misc furniture (all solid)
+  TILES.FURN_FISH_TANK, TILES.FURN_ALCHEMY_TABLE,
+  TILES.FURN_ARCHERY_TARGET, TILES.FURN_WINE_CASK, TILES.FURN_LOOM,
 ]);
 
 /** All tile IDs that are choppable trees (used for depth-sort and action detection). */
@@ -393,6 +431,18 @@ export const TILE_COLORS = {
   [TILES.FURN_WARDROBE]:     '#5a3a18',
   [TILES.FURN_HAY_BALE]:     '#8a7a30',
   [TILES.FURN_SCARECROW]:    '#4a8a3a',
+  // Garden / taming plot decorations
+  [TILES.FURN_GARDEN_ROCK]:     '#6a6a6a',
+  [TILES.FURN_POND_WATER]:      '#3272a8',
+  [TILES.FURN_TRAIL_DIRT]:      '#8b7355',
+  [TILES.FURN_TRAIL_STONE]:     '#7a7a7a',
+  [TILES.FURN_TRAIL_GRAVEL]:    '#908880',
+  [TILES.FURN_TRAIL_FLAGSTONE]: '#8a8070',
+  [TILES.FURN_FISH_TANK]:       '#3272a8',
+  [TILES.FURN_ALCHEMY_TABLE]:   '#5a3418',
+  [TILES.FURN_ARCHERY_TARGET]:  '#d8c890',
+  [TILES.FURN_WINE_CASK]:       '#6a3818',
+  [TILES.FURN_LOOM]:            '#7a5028',
 };
 
 // ── Tile detail overlays ─────────────────────────────────
@@ -464,6 +514,20 @@ export const TILE_HAS_DETAIL = new Set([
   // New housing furniture
   TILES.FURN_CAULDRON, TILES.FURN_CANDELABRA, TILES.FURN_TAPESTRY,
   TILES.FURN_WARDROBE, TILES.FURN_HAY_BALE, TILES.FURN_SCARECROW,
+  TILES.FURN_STOOL,
+  TILES.FURN_THRONE, TILES.FURN_PAINTING, TILES.FURN_VASE,
+  TILES.FURN_NIGHTSTAND, TILES.FURN_FLOWER_PATCH, TILES.FURN_CLOCK,
+  TILES.FURN_LANTERN,
+  // Interactive display furniture
+  TILES.FURN_WEAPON_CASE, TILES.FURN_FISH_MOUNT, TILES.FURN_TROPHY_PLAQUE,
+  TILES.FURN_RELIC_SHELF, TILES.FURN_ACHIEVEMENTS_BOOK,
+  // Garden / taming plot decorations
+  TILES.FURN_GARDEN_ROCK, TILES.FURN_POND_WATER,
+  TILES.FURN_TRAIL_DIRT, TILES.FURN_TRAIL_STONE,
+  TILES.FURN_TRAIL_GRAVEL, TILES.FURN_TRAIL_FLAGSTONE,
+  // Misc new furniture
+  TILES.FURN_FISH_TANK, TILES.FURN_ALCHEMY_TABLE,
+  TILES.FURN_ARCHERY_TARGET, TILES.FURN_WINE_CASK, TILES.FURN_LOOM,
 ]);
 
 // ── Inventory ────────────────────────────────────────────
@@ -669,7 +733,7 @@ export const SKILL_UNLOCKS = [
   ],
   // 11 — Raiding
   [
-    { level:  1, text: 'Goblin Cave — Novice difficulty unlocked',        icon: null },
+    { level:  1, text: 'Goblin Warrens — Novice difficulty unlocked',     icon: null },
     { level:  5, text: 'Adept difficulty unlocked',                       icon: null },
     { level: 20, text: 'Veteran difficulty + Dungeon Depths unlocked',    icon: null },
     { level: 45, text: 'Elite difficulty + Abyssal Sanctum unlocked',     icon: null },

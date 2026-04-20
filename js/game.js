@@ -31,7 +31,7 @@ import { findPath, nearestWalkableAdjacent } from './pathfinder.js';
 import { buildAllInteriors, buildPlayerHouse } from './interiors.js';
 import {
   HousingState, ROOM_DEFS, FURNITURE_DEFS,
-  getUnlockedRoomDefs, furnitureForRoom,
+  getUnlockedRoomDefs, furnitureForRoom, sortedFurnitureEntries,
   cellInnerOrigin, CELL_INNER,
   GRID_COLS, GRID_ROWS,
   BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
@@ -43,7 +43,7 @@ import { getBiome } from './biomes.js';
 import {
   TILE_SIZE, PLAYER_SPEED, TILES, TREE_TILES,
   INV_COLS, INV_ROWS, INV_CELL, INV_PAD, SKILL_IDS, SKILL_NAMES, SKILL_UNLOCKS,
-  TILE_COLORS,
+  TILE_COLORS, XP_TABLE,
 } from './constants.js';
 
 // Duration to cross one tile — remote players interpolate at the same speed as local
@@ -54,7 +54,7 @@ const CHAT_MAX_LEN = 120;
 import {
   FishermanNPC, FISH_SPECIES, FISH_SHOP_STOCK, FISH_SELL_PRICES,
   FISH_PW, FISH_PH, FISH_HEADER_H, FISH_TAB_H, FISH_ROW_H,
-  FISH_TAB_KEYS, FISH_TAB_LABELS, makeFishingRecords,
+  FISH_TAB_KEYS, FISH_TAB_LABELS, makeFishingRecords, makeFishItem,
 } from './fishing.js';
 import {
   SMELT_RECIPES, SMITH_RECIPES,
@@ -103,6 +103,12 @@ const TILE_TOOLTIPS = {
   [TILES.ANVIL]:                 'Anvil — smith bars into equipment',
   [TILES.FURN_CHEST]:            'Chest — click to open storage',
   [TILES.FURN_BED]:              'Bed — click to rest and restore HP',
+  [TILES.FURN_WEAPON_CASE]:      'Weapon Display — click to showcase a weapon',
+  [TILES.ARMOR_STAND]:           'Armour Stand — click to equip with armour',
+  [TILES.FURN_FISH_MOUNT]:       'Mounted Fish — click to mount a catch',
+  [TILES.FURN_TROPHY_PLAQUE]:    'Trophy Plaque — click to inscribe',
+  [TILES.FURN_RELIC_SHELF]:      'Relic Shelf — click to display a collectible',
+  [TILES.FURN_ACHIEVEMENTS_BOOK]:'Achievements Book — click to review your milestones',
   [TILES.FARM_PATCH]:            'Empty soil patch — click to plant a seed',
   [TILES.FARM_PATCH_SEEDED]:     'Crop planted — growing...',
   [TILES.FARM_PATCH_GROWING]:    'Crop growing — almost ready...',
@@ -311,8 +317,20 @@ export class Game {
     // TODO: update this.lastActiveSkill = skillIndex whenever skills.addXp(skillIndex, ...) is called
     this.smeltingAction = null;  // { recipe, progress, duration } — animated smelting
     this.smithingAction = null;  // { recipe, progress, duration } — animated smithing
-    this.showAdminTp   = false;
+    this.showAdminMenu      = false;
+    this.adminMenuTab       = 'teleport';  // 'teleport' | 'items' | 'skills'
+    this._adminTpScroll     = 0;
+    this._adminItemsScroll  = 0;
+    this._adminSkillsScroll = 0;
     this.adminEquipOpen  = false;
+
+    // ── Display furniture pickers ──────────────────────────────────
+    // displayPicker: panel to pick an inventory item for a display piece.
+    //   { displayKind, gx, gy, index, col, row, scroll, currentContent }
+    this.displayPicker     = null;
+    // achievementsOpen: open Achievements Book panel (read-only summary).
+    this.achievementsOpen  = false;
+    this._achievementsScroll = 0;
 
     // ── Raid system state ──────────────────────────────────────────
     this.raidMenuOpen      = false;
@@ -359,6 +377,10 @@ export class Game {
       const sx = e.clientX - rect.left;
       const sy = e.clientY - rect.top;
       if (this.showWorldMap) {
+        // Don't start a pan when the mousedown is on the close (✕) button —
+        // let the click event close the overlay instead.
+        const cr = this._worldMapCloseRect();
+        if (sx >= cr.x && sx <= cr.x + cr.w && sy >= cr.y && sy <= cr.y + cr.h) return;
         this._mapDragging   = true;
         this._mapDragStart  = { x: sx, y: sy, panX: this._mapPanX, panY: this._mapPanY };
         canvas.style.cursor = 'grabbing';
@@ -395,6 +417,15 @@ export class Game {
 
     // World map zoom — scroll wheel zooms around the mouse cursor
     canvas.addEventListener('wheel', e => {
+      // Admin menu scroll (takes priority when menu is open)
+      if (this.showAdminMenu) {
+        e.preventDefault();
+        const dir = Math.sign(e.deltaY) * 2;
+        if (this.adminMenuTab === 'teleport')    this._adminTpScroll     = Math.max(0, this._adminTpScroll     + dir);
+        else if (this.adminMenuTab === 'items')  this._adminItemsScroll  = Math.max(0, this._adminItemsScroll  + dir);
+        else if (this.adminMenuTab === 'skills') this._adminSkillsScroll = Math.max(0, this._adminSkillsScroll + dir);
+        return;
+      }
       if (!this.showWorldMap) return;
       e.preventDefault();
       const rect    = canvas.getBoundingClientRect();
@@ -697,7 +728,7 @@ export class Game {
       this.contextMenu = null;
     }
     if (this.input.wasJustPressed('Backquote')) {
-      this.showAdminTp = !this.showAdminTp;
+      this.showAdminMenu = !this.showAdminMenu;
     }
     if (this.input.wasJustPressed('KeyM')) {
       this.showWorldMap = !this.showWorldMap;
@@ -722,10 +753,7 @@ export class Game {
     }
     // Build mode toggle (B key — only in player house)
     if (this.input.wasJustPressed('KeyB') && this.inInterior && this.activeMap.id === 'player_house' && !this.buildModeFurnPlacing) {
-      this.buildModeOpen = !this.buildModeOpen;
-      this.buildModeStep = 'grid';
-      this.buildModeSelGX = null;
-      this.buildModeSelGY = null;
+      this._toggleBuildMode();
     }
     // Escape closes panels / cancels action / drops combat
     if (this.input.wasJustPressed('Escape')) {
@@ -736,8 +764,10 @@ export class Game {
         this.contextMenu = null;
       } else if (this.adminEquipOpen) {
         this.adminEquipOpen = false;
-      } else if (this.showAdminTp) {
-        this.showAdminTp = false;
+      } else if (this.showAdminMenu) {
+        this.showAdminMenu = false;
+      } else if (this.paintPicker) {
+        this.paintPicker = null;
       } else if (this.buildModeFurnPlacing) {
         this.buildModeFurnPlacing = null;
         this.buildModeOpen = true;
@@ -757,6 +787,10 @@ export class Game {
       } else if (this.chestOpen) {
         this.chestOpen = false;
         this.chestPos  = null;
+      } else if (this.displayPicker) {
+        this.displayPicker = null;
+      } else if (this.achievementsOpen) {
+        this.achievementsOpen = false;
       } else if (this.smithyShopOpen) {
         this.smithyShopOpen = false;
       } else if (this.shopOpen) {
@@ -796,7 +830,23 @@ export class Game {
     }
 
     const dir = this.input.getDirection();
-    const click = this.showWorldMap ? (this.input.consumeClick(), null) : this.input.consumeClick();
+    // While the world map is open, consume clicks up front but first route
+    // them to the close button so the player can dismiss the overlay.
+    let click;
+    if (this.showWorldMap) {
+      const raw = this.input.consumeClick();
+      if (raw) {
+        const cr = this._worldMapCloseRect();
+        if (raw.screenX >= cr.x && raw.screenX <= cr.x + cr.w &&
+            raw.screenY >= cr.y && raw.screenY <= cr.y + cr.h) {
+          this.showWorldMap = false;
+          this.canvas.style.cursor = 'default';
+        }
+      }
+      click = null;
+    } else {
+      click = this.input.consumeClick();
+    }
 
     // Keyboard movement cancels queued interaction and click marker
     if (dir.x !== 0 || dir.y !== 0) {
@@ -828,6 +878,26 @@ export class Game {
           return;
         }
       }
+      // Build button — only inside the player house
+      if (this.inInterior && this.activeMap?.id === 'player_house' && !this.buildModeFurnPlacing) {
+        const bb = this.renderer.getBuildButtonRect();
+        if (click.screenX >= bb.x && click.screenX <= bb.x + bb.w &&
+            click.screenY >= bb.y && click.screenY <= bb.y + bb.h) {
+          this._toggleBuildMode();
+          return;
+        }
+      }
+      // Skill info popup — click outside OR on the ✕ close button closes it.
+      if (this.skillInfoSkill !== null) {
+        const r = this._skillInfoPopupRect();
+        const outside = click.screenX < r.px || click.screenX > r.px + r.PW ||
+                        click.screenY < r.py || click.screenY > r.py + r.PH;
+        if (outside || this._isCloseClick(click.screenX, click.screenY, r.px, r.py, r.PW)) {
+          this.skillInfoSkill  = null;
+          this.skillInfoScroll = 0;
+        }
+        return;
+      }
       if (this.buildModeOpen) {
         this._handleBuildModeClick(click.screenX, click.screenY);
         return;
@@ -845,8 +915,8 @@ export class Game {
         return;
       } else if (this.adminEquipOpen) {
         this._handleAdminEquipClick(click.screenX, click.screenY);
-      } else if (this.showAdminTp) {
-        this._handleAdminTpClick(click.screenX, click.screenY);
+      } else if (this.showAdminMenu) {
+        this._handleAdminMenuClick(click.screenX, click.screenY);
       } else if (this.playerViewOpen) {
         this._handlePlayerViewClick(click.screenX, click.screenY);
       } else if (this.forgeOpen) {
@@ -855,6 +925,12 @@ export class Game {
         this._handleSmithClick(click.screenX, click.screenY);
       } else if (this.chestOpen) {
         this._handleChestClick(click.screenX, click.screenY);
+      } else if (this.displayPicker) {
+        this._handleDisplayPickerClick(click.screenX, click.screenY);
+        return;
+      } else if (this.achievementsOpen) {
+        this._handleAchievementsClick(click.screenX, click.screenY);
+        return;
       } else if (this.smithyShopOpen) {
         this._handleSmithyShopClick(click.screenX, click.screenY);
       } else if (this.shopOpen) {
@@ -1188,6 +1264,32 @@ export class Game {
             this.smithOpen = true;
             return;
           } else if (tileAtTarget === TILES.FURN_CHEST) {
+            // Raid chest: resource-room chests give mid-raid loot, boss-room
+            // reward chest opens the summary screen.
+            if (this.inRaid && this.activeRaid) {
+              const res = this.activeRaid.onChestClicked(pi.col, pi.row);
+              if (res?.kind === 'resource') {
+                for (const { item, qty } of res.loot) {
+                  if (!this.inventory.isFull() || this.inventory.has(item.id)) {
+                    this.inventory.add(item, qty);
+                  } else {
+                    this.combat.spawnGroundItem(
+                      item, qty, pi.col * TILE_SIZE + TILE_SIZE / 2, pi.row * TILE_SIZE + TILE_SIZE / 2,
+                    );
+                  }
+                }
+                this.notifications.add('Supplies collected!', '#27ae60');
+                return;
+              }
+              if (res?.kind === 'reward') {
+                // RaidInstance already set complete=true and pre-rolled the loot.
+                this.notifications.add('Raid complete! Claim your reward.', '#f1c40f');
+                this.combat.clearTarget();
+                return;
+              }
+              // Chest already consumed — ignore further clicks.
+              return;
+            }
             this.chestOpen = true;
             this.chestPos  = { col: pi.col, row: pi.row };
             return;
@@ -1198,6 +1300,14 @@ export class Game {
             } else {
               this.notifications.add('You are already at full health.', '#aaa');
             }
+            return;
+          } else if (tileAtTarget === TILES.FURN_WEAPON_CASE ||
+                     tileAtTarget === TILES.FURN_FISH_MOUNT ||
+                     tileAtTarget === TILES.FURN_TROPHY_PLAQUE ||
+                     tileAtTarget === TILES.FURN_RELIC_SHELF ||
+                     tileAtTarget === TILES.FURN_ACHIEVEMENTS_BOOK ||
+                     tileAtTarget === TILES.ARMOR_STAND) {
+            this._handleDisplayInteract(pi.col, pi.row);
             return;
           }
           const triggered = this.actions.tryAction(pi.worldX, pi.worldY);
@@ -1413,28 +1523,59 @@ export class Game {
         }
       }
 
-      // Floor-clear detection: all mobs dead → start advance delay
-      const liveMobCount = raid.mobContainer.mobs.filter(m => !m.dead).length;
-      if (!raid._floorAdvancing && raid.mobContainer.mobs.length > 0 && liveMobCount === 0) {
-        raid._floorAdvancing    = true;
-        raid._floorAdvanceTimer = 1.5;
-        this.notifications.add(`Floor ${raid.currentFloorIdx + 1} cleared!`, '#f1c40f');
+      raid.update(dt, this.player); // mob AI + per-room state + timer
+
+      // Announce the boss-room reward chest once.
+      if (raid.isBossRoom && raid.chest && !raid._chestPrompted) {
+        raid._chestPrompted = true;
+        this.notifications.add('Boss defeated! Click the chest to claim your reward.', '#f1c40f');
       }
 
-      raid.update(dt, this.player); // mob AI + timer countdown
+      // Announce each room's "cleared" state once, so the player knows the
+      // north door is unlocked. Boss-room clear is announced via chest prompt above.
+      if (raid.roomCleared && !raid.currentRoom._announcedCleared && !raid.isBossRoom) {
+        raid.currentRoom._announcedCleared = true;
+        this.notifications.add(
+          `Room ${raid.currentRoomIdx + 1} cleared! Step north to continue.`,
+          '#27ae60',
+        );
+      }
 
-      // Floor advance when delay timer expires
-      if (raid._floorAdvancing && raid._floorAdvanceTimer <= 0) {
-        raid._floorAdvancing = false;
-        const done = raid.advanceFloor();
-        if (done) {
-          this.notifications.add('Raid complete! Check your results.', '#27ae60');
-          this.combat.clearTarget();
-        } else {
-          this.combat.mobManager = raid.mobContainer;
-          this.notifications.add(
-            `Floor ${raid.currentFloorIdx + 1} / ${raid.totalFloors}`, '#a855f7'
-          );
+      // Door detection — if the player is standing on a DOOR tile, try to
+      // transition to the adjacent room. The RaidInstance enforces its own
+      // cooldown so this doesn't retrigger on the entry tile.
+      if (!this.transitionCooldown || this.transitionCooldown <= 0) {
+        const pr = this.player.row;
+        const pc = this.player.col;
+        const tileHere = raid.arenaMap.getTile(pc, pr);
+        if (tileHere === TILES.DOOR) {
+          // North door = row 0; south door = row ROWS-1.
+          const side = pr === 0 ? 'N' : (pr === raid.arenaMap.rows - 1 ? 'S' : null);
+          if (side) {
+            const res = raid.tryEnterDoor(side);
+            if (res?.locked) {
+              this.notifications.add(res.reason || 'Door is locked.', '#e67e22');
+              // Nudge the player off the door tile so the message doesn't spam.
+              raid._doorCooldown = 0.6;
+            } else if (res?.moved) {
+              // Move the player to the new room's entry position.
+              const a = raid.arenaMap;
+              this.player.col       = a.entryCol;
+              this.player.row       = a.entryRow;
+              this.player.x         = a.entryCol * TILE_SIZE + 4;
+              this.player.y         = a.entryRow * TILE_SIZE;
+              this.player.path      = [];
+              this.player.moving    = false;
+              this.player.targetCol = null;
+              this.player.targetRow = null;
+              this.combat.mobManager = raid.mobContainer;
+              this.combat.clearTarget();
+              this.notifications.add(
+                `Room ${raid.currentRoomIdx + 1} / ${raid.totalRooms} — ${raid.currentRoom.type}`,
+                '#a855f7',
+              );
+            }
+          }
         }
       }
     }
@@ -1527,6 +1668,9 @@ export class Game {
         for (const m of _mobSrc) eb.push(m);
         if (!this.inRaid && !this.inDungeon) eb.push(this.shopKeeper, this.smithyKeeper, this.makoverNpc, this.dungeonMaster, this.butcherKeeper, this.fishermanNpc, this.weaponKeeper, this.varietyKeeper, this.capeKeeper);
         for (const t of treeSortables) eb.push(t);
+        // Overhang furniture (e.g. grandfather clock) — depth-sorted with
+        // entities so a player north of the base draws behind the crown.
+        this.renderer.collectOverhangSortables(this.activeMap, sc, sr, ec, er, eb);
         eb.sort((a, b) => (a.y + a.h) - (b.y + b.h));
         for (let ei = 0; ei < eb.length; ei++) eb[ei].draw(ctx);
 
@@ -1546,8 +1690,26 @@ export class Game {
         const tileBelowInt = this.activeMap.getTile(this.player.col, this.player.row + 1);
         this.player.hideShadow = tileBelowInt === TILES.WALL || tileBelowInt === TILES.FENCE || tileBelowInt === TILES.WOOD_FENCE_H || tileBelowInt === TILES.STEEL_FENCE_H || tileBelowInt === TILES.WOOD_FENCE_CORNER || tileBelowInt === TILES.STEEL_FENCE_CORNER;
 
-        // Interior: draw player
-        this.player.draw(ctx);
+        // Interior: depth-sort the player with any overhang furniture
+        // (e.g. grandfather clock) so standing north of the clock puts
+        // the player behind its crown, while standing south keeps them in front.
+        if (!this._entityBufInt) this._entityBufInt = [];
+        const ebi = this._entityBufInt;
+        ebi.length = 0;
+        ebi.push(this.player);
+        const _mobSrcInt = this.inRaid && this.activeRaid
+          ? this.activeRaid.mobContainer.mobs
+          : this.inDungeon && this.activeDungeon
+            ? this.activeDungeon.mobContainer.mobs
+            : null;
+        if (_mobSrcInt) { for (const m of _mobSrcInt) ebi.push(m); }
+        const iSc = Math.max(0, Math.floor(this.camera.x / TILE_SIZE) - 1);
+        const iSr = Math.max(0, Math.floor(this.camera.y / TILE_SIZE) - 1);
+        const iEc = iSc + Math.ceil(this.canvas.width  / TILE_SIZE) + 3;
+        const iEr = iSr + Math.ceil(this.canvas.height / TILE_SIZE) + 3;
+        this.renderer.collectOverhangSortables(this.activeMap, iSc, iSr, iEc, iEr, ebi);
+        ebi.sort((a, b) => (a.y + a.h) - (b.y + b.h));
+        for (let ei = 0; ei < ebi.length; ei++) ebi[ei].draw(ctx);
         // Placement cursor (camera-space)
         if (this.placingFurniture) {
           const mw = this.camera.screenToWorld(this.mouseScreen.x, this.mouseScreen.y);
@@ -1565,9 +1727,13 @@ export class Game {
           const cursorRow = Math.floor(mw.y / TILE_SIZE);
           const localRow = cursorRow - io.row;
           const wallInvalid = fd.wallMount === 'north' && localRow !== -1;
+          const vId = this.buildModeFurnPlacing.variantId;
+          const tint = (vId && fd.variants)
+            ? fd.variants.find(v => v.id === vId)?.tint ?? null
+            : null;
           this.renderer.drawBuildModeFurnCursor(
             cursorCol, cursorRow,
-            this.elapsed, fd, this.buildModeFurnPlacing.rotation, wallInvalid
+            this.elapsed, fd, this.buildModeFurnPlacing.rotation, wallInvalid, tint
           );
         }
       }
@@ -1617,8 +1783,13 @@ export class Game {
 
     // Screen-space UI
     // The minimap HUD panel always draws so the HP bar has its integrated frame;
-    // passing null for the world renders a dim "interior" placeholder inside the circle.
-    const mapWorld = (this.inInterior || this.inRaid || this.inDungeon) ? null : this.world;
+    // inside the player house the local interior map is shown (so players can
+    // orient themselves in their own rooms); raids/dungeons still render the
+    // dim "interior" placeholder.
+    const insideHouse = this.inInterior && this.activeMap?.id === 'player_house';
+    const mapWorld    = insideHouse ? this.activeMap
+                      : (this.inInterior || this.inRaid || this.inDungeon) ? null
+                      : this.world;
     this.renderer.drawCircleMinimap(mapWorld, this.player, this.mouseScreen.x, this.mouseScreen.y);
     this.renderer.drawHUD(this.player, this.fps, this.xpFlashes);
     this.renderer.drawBottomHUD(ctx, this.player);
@@ -1685,8 +1856,8 @@ export class Game {
     if (this.fishermanOpen) {
       this._drawFishermanPanel(ctx);
     }
-    if (this.showAdminTp) {
-      this._drawAdminTpPanel(ctx);
+    if (this.showAdminMenu) {
+      this._drawAdminMenu(ctx);
     }
     if (this.adminEquipOpen) {
       this._drawAdminEquipPanel(ctx);
@@ -1704,6 +1875,12 @@ export class Game {
     }
     if (this.dialogueOpen && this.dialogueData) {
       this.renderer.drawDialoguePanel(ctx, this.dialogueData, this.canvas);
+    }
+    if (this.displayPicker) {
+      this._drawDisplayPicker(ctx);
+    }
+    if (this.achievementsOpen) {
+      this._drawAchievementsPanel(ctx);
     }
 
     // World map overlay (drawn last — covers everything)
@@ -1764,6 +1941,25 @@ export class Game {
                 'dungeon_ancient_mines': '⚠ Ancient Mines — DANGEROUS (levels 50–80). Walk onto it to descend.',
               };
               tooltip = (dungeonId && DUNGEON_LABELS[dungeonId]) || TILE_TOOLTIPS[TILES.DUNGEON_ENTRANCE];
+            } else if (hoverTile === TILES.FURN_FISH_MOUNT) {
+              // Dynamic tooltip: if a fish is mounted, show its species,
+              // weight and rarity via the same item-tooltip card used for
+              // inventory items. Fall back to the generic tile tooltip.
+              const entry = this.activeMap.displayContent?.get(`${hoverCol},${hoverRow}`);
+              const content = entry?.content;
+              let richDrawn = false;
+              if (content?.itemId) {
+                const species = this._fishSpeciesByItemId().get(content.itemId);
+                if (species) {
+                  const w = typeof content.weight === 'number' ? content.weight : 0;
+                  // Reuse makeFishItem shape so getItemLore treats it as a caught fish
+                  const fakeItem = makeFishItem(species, w);
+                  this.renderer.drawItemTooltip(fakeItem, this.mouseScreen.x, this.mouseScreen.y);
+                  tooltip = null;  // suppress the single-line fallback below
+                  richDrawn = true;
+                }
+              }
+              if (!richDrawn) tooltip = TILE_TOOLTIPS[hoverTile] || null;
             } else {
               tooltip = TILE_TOOLTIPS[hoverTile] || null;
             }
@@ -1787,6 +1983,17 @@ export class Game {
         archLevel, this.inventory,
         this.canvas.width, this.canvas.height
       );
+      // Paint picker overlay sits on top of the build panel
+      if (this.paintPicker) {
+        const sel = this.housingState.getCell(this.buildModeSelGX, this.buildModeSelGY);
+        const curId = this.paintPicker === 'wall'
+          ? (sel?.wallTintId || 'natural')
+          : (sel?.floorTintId || 'natural');
+        this._paintPickerRects = this.renderer.drawPaintPicker(
+          this.paintPicker, this.inventory, curId,
+          this.mouseScreen.x, this.mouseScreen.y
+        );
+      }
     }
 
     // Skill info popup
@@ -1849,6 +2056,22 @@ export class Game {
     this.dialogueOpen = true;
   }
 
+  /** Rect mirroring Renderer.drawSkillInfoPopup — used for outside-click close. */
+  _skillInfoPopupRect() {
+    const W = this.canvas.width, H = this.canvas.height;
+    const skillId = this.skillInfoSkill ?? 0;
+    const unlocks = SKILL_UNLOCKS[skillId] || [];
+    const hasSub  = unlocks.some(u => u.sub);
+    const ROW_H   = hasSub ? 62 : 48;
+    const HDR_H   = 92;
+    const FOOT_H  = 26;
+    const PW      = Math.min(480, W - 32);
+    const PH      = Math.min(H - 48, HDR_H + unlocks.length * ROW_H + FOOT_H);
+    const px      = Math.round((W - PW) / 2);
+    const py      = Math.round((H - PH) / 2);
+    return { px, py, PW, PH };
+  }
+
   _handleSkillsPanelClick(sx, sy) {
     const cw = this.canvas.width;
     const ch = this.canvas.height;
@@ -1856,8 +2079,9 @@ export class Game {
     const px = Math.floor((cw - PW) / 2);
     const py = Math.floor((ch - PH) / 2);
 
-    // Close if click is outside the panel rect
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+    // Close if click is outside the panel rect or on the ✕ button
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
       this.skillsOpen = false;
       return;
     }
@@ -1882,8 +2106,9 @@ export class Game {
     const px = Math.floor((cw - PW) / 2);
     const py = ch - PH - 20;
 
-    // Close if click outside panel
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+    // Close if click outside panel OR on the ✕ close button
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
       this.dialogueOpen  = false;
       this.dialogueData  = null;
       return;
@@ -1907,12 +2132,14 @@ export class Game {
   _clickOnUI(sx, sy) {
     if (this.contextMenu)    return true;
     if (this.adminEquipOpen) return true;
-    if (this.showAdminTp)    return true;
+    if (this.showAdminMenu)    return true;
     if (this.playerViewOpen) return true;
     if (this.forgeOpen)      return true;
     if (this.smithOpen)      return true;
     if (this.smithingAction) return true;
     if (this.chestOpen)      return true;
+    if (this.displayPicker)  return true;
+    if (this.achievementsOpen) return true;
     if (this.shopOpen)       return true;
     if (this.smithyShopOpen) return true;
     if (this.makoverOpen)    return true;
@@ -1925,8 +2152,11 @@ export class Game {
     const px = W - PW - 4, py = H - PH - 4;
     if (sx >= px && sx <= px + PW && sy >= py && sy <= py + PH) return true;
     // Minimap HUD panel (top-right) — always present; catches clicks on the
-    // map button, minimap circle, and HP bar so they don't leak to the world.
-    const HUD_PW = 246, HUD_PH = 262;
+    // map button, minimap circle, HP bar, and (in the house) BUILD button so
+    // they don't leak to the world. Panel grows when inside the player house.
+    const HUD_PW = 246;
+    const insideHouseHud = this.inInterior && this.activeMap?.id === 'player_house';
+    const HUD_PH = this.renderer.getMinimapPanelHeight(insideHouseHud ? this.activeMap : null);
     const hudX = W - HUD_PW - 4, hudY = 10;
     if (sx >= hudX && sx <= hudX + HUD_PW && sy >= hudY && sy <= hudY + HUD_PH) return true;
     return false;
@@ -2038,7 +2268,8 @@ export class Game {
     const PW = 660, PH = 530;
     const px = Math.floor((this.canvas.width  - PW) / 2);
     const py = Math.floor((this.canvas.height - PH) / 2);
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
       this.playerViewOpen = false;
     }
   }
@@ -2046,7 +2277,8 @@ export class Game {
   _handleSmeltClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - FORGE_PW) / 2);
     const py = Math.floor((this.canvas.height - SMELT_PH) / 2);
-    if (sx < px || sx > px + FORGE_PW || sy < py || sy > py + SMELT_PH) {
+    if (this._isCloseClick(sx, sy, px, py, FORGE_PW) ||
+        sx < px || sx > px + FORGE_PW || sy < py || sy > py + SMELT_PH) {
       this.forgeOpen = false;
       return;
     }
@@ -2106,7 +2338,8 @@ export class Game {
   _handleSmithClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - FORGE_PW) / 2);
     const py = Math.floor((this.canvas.height - SMITH_PH) / 2);
-    if (sx < px || sx > px + FORGE_PW || sy < py || sy > py + SMITH_PH) {
+    if (this._isCloseClick(sx, sy, px, py, FORGE_PW) ||
+        sx < px || sx > px + FORGE_PW || sy < py || sy > py + SMITH_PH) {
       this.smithOpen = false;
       return;
     }
@@ -2177,8 +2410,9 @@ export class Game {
     const px = Math.floor((W - CHEST_PW) / 2);
     const py = Math.floor((H - CHEST_PH) / 2);
 
-    // Close if outside panel
-    if (sx < px || sx > px + CHEST_PW || sy < py || sy > py + CHEST_PH) {
+    // Close if outside panel OR on the ✕ button
+    if (this._isCloseClick(sx, sy, px, py, CHEST_PW) ||
+        sx < px || sx > px + CHEST_PW || sy < py || sy > py + CHEST_PH) {
       this.chestOpen = false;
       this.chestPos  = null;
       return;
@@ -2240,6 +2474,525 @@ export class Game {
           return;
         }
       }
+    }
+  }
+
+  // ── Prestige Display Furniture ────────────────────────────
+  /** Map<fishItemId, species> — cached lookup for fish-mount picker + admin. */
+  _fishSpeciesByItemId() {
+    if (!this._fishSpeciesCache) {
+      this._fishSpeciesCache = new Map();
+      for (const sp of FISH_SPECIES) {
+        const it = sp.item;
+        if (it) this._fishSpeciesCache.set(it.id, sp);
+      }
+    }
+    return this._fishSpeciesCache;
+  }
+
+  /** Set of fish item ids — used to filter inventory for the fish-mount picker. */
+  _fishItemIdSet() {
+    if (!this._fishIdCache) {
+      this._fishIdCache = new Set(this._fishSpeciesByItemId().keys());
+    }
+    return this._fishIdCache;
+  }
+
+  /** Roll a plausible random weight for a species (same skew as fishing). */
+  _rollFishWeight(species) {
+    const t = Math.pow(Math.random(), 1.5);  // skew toward lighter
+    return parseFloat((species.wMin + t * (species.wMax - species.wMin)).toFixed(2));
+  }
+
+  /** Click on a prestige display tile — dispatch based on displayKind. */
+  _handleDisplayInteract(col, row) {
+    const entry = this.activeMap?.displayContent?.get(`${col},${row}`);
+    if (!entry) return;
+    const { displayKind, gx, gy, index, content } = entry;
+
+    if (displayKind === 'achievements') {
+      this.achievementsOpen = true;
+      this._achievementsScroll = 0;
+      return;
+    }
+
+    if (displayKind === 'text') {
+      // Trophy plaque — single-line inscription via prompt.
+      const cur = (content && content.text) || '';
+      const next = window.prompt('Inscribe your trophy (max 24 chars):', cur);
+      if (next === null) return; // cancelled
+      const trimmed = next.trim().slice(0, 24);
+      if (trimmed === '') {
+        this.housingState.setFurnitureContent(gx, gy, index, null);
+        this.notifications.add('Inscription cleared.', '#aaa');
+      } else {
+        this.housingState.setFurnitureContent(gx, gy, index, { text: trimmed });
+        this.notifications.add(`Inscribed: "${trimmed}"`, '#f1c40f');
+      }
+      this._rebuildPlayerHouse();
+      this._saveToServer();
+      return;
+    }
+
+    // Item-based displays — open the picker filtered by kind.
+    let filterFn = () => true;
+    let title    = 'Choose an Item';
+    let hint     = '';
+    if (displayKind === 'weapon') {
+      filterFn = (item) => item?.equipSlot === 'weapon';
+      title    = 'Display Weapon';
+      hint     = 'Pick a weapon to showcase behind glass.';
+    } else if (displayKind === 'fish') {
+      const fishIds = this._fishItemIdSet();
+      filterFn = (item) => item && fishIds.has(item.id);
+      title    = 'Mount a Fish';
+      hint     = 'Pick a raw fish from your inventory.';
+    } else if (displayKind === 'relic') {
+      // Anything except raw resources (logs, ores, bars) and food staples
+      filterFn = (item) => !!item && !item.stackable;
+      title    = 'Display a Relic';
+      hint     = 'Pick an item to place on the shelf.';
+    } else if (displayKind === 'armor') {
+      // Armour stand accepts helmet, chestplate, and leggings only.
+      filterFn = (item) => item?.equipSlot === 'helmet' ||
+                           item?.equipSlot === 'chestplate' ||
+                           item?.equipSlot === 'leggings';
+      title    = 'Equip the Armour Stand';
+      hint     = 'Pick a helmet, chestplate, or leggings.';
+    }
+
+    // For multi-slot displays (armor), `hasContent` is true when ANY slot
+    // is populated so the "Remove Display" button appears.
+    const hasAny = !!content && (displayKind === 'armor'
+      ? Object.values(content).some(v => !!v)
+      : true);
+
+    this.displayPicker = {
+      displayKind, gx, gy, index, col, row,
+      scroll: 0, filterFn, title, hint,
+      hasContent: hasAny,
+      currentContent: content || null,
+    };
+  }
+
+  _displayPickerRect() {
+    const PW = 440, PH = 420;
+    const px = Math.floor((this.canvas.width  - PW) / 2);
+    const py = Math.floor((this.canvas.height - PH) / 2);
+    return { px, py, PW, PH };
+  }
+
+  _displayPickerFilteredSlots() {
+    const dp = this.displayPicker;
+    if (!dp) return [];
+    const out = [];
+    for (let i = 0; i < this.inventory.slots.length; i++) {
+      const s = this.inventory.slots[i];
+      if (s && dp.filterFn(s.item)) out.push({ item: s.item, qty: s.qty, invIndex: i });
+    }
+    return out;
+  }
+
+  _drawDisplayPicker(ctx) {
+    const dp = this.displayPicker;
+    if (!dp) return;
+    const r = this.renderer;
+    const { px, py, PW, PH } = this._displayPickerRect();
+    const W = this.canvas.width, H = this.canvas.height;
+
+    // Dim overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+
+    r.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    r.drawCloseButton(ctx, px, py, PW, this.mouseScreen.x, this.mouseScreen.y);
+
+    // Header
+    ctx.fillStyle = '#f0d090';
+    ctx.font = 'bold 15px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(dp.title, px + 14, py + 28);
+    ctx.fillStyle = '#8a7050';
+    ctx.font = '10px monospace';
+    ctx.fillText(dp.hint, px + 14, py + 44);
+
+    // Divider
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 8, py + 51, PW - 16, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(px + 8, py + 52, PW - 16, 1);
+
+    // Remove / clear button (if a piece is currently assigned)
+    const CLEAR_W = 110, CLEAR_H = 24;
+    const clearX = px + PW - CLEAR_W - 14;
+    const clearY = py + 60;
+    if (dp.hasContent) {
+      const mx = this.mouseScreen.x, my = this.mouseScreen.y;
+      const hover = mx >= clearX && mx <= clearX + CLEAR_W &&
+                    my >= clearY && my <= clearY + CLEAR_H;
+      ctx.fillStyle = hover ? '#5a1e10' : '#2e1208';
+      ctx.fillRect(clearX, clearY, CLEAR_W, CLEAR_H);
+      ctx.fillStyle = hover ? '#b06040' : '#7a3018';
+      ctx.fillRect(clearX, clearY, CLEAR_W, 1);
+      ctx.fillRect(clearX, clearY, 1, CLEAR_H);
+      ctx.fillStyle = '#1a0604';
+      ctx.fillRect(clearX, clearY + CLEAR_H - 1, CLEAR_W, 1);
+      ctx.fillRect(clearX + CLEAR_W - 1, clearY, 1, CLEAR_H);
+      ctx.fillStyle = hover ? '#ffd0a0' : '#e8a070';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('Remove Display', clearX + CLEAR_W / 2, clearY + 16);
+      ctx.textAlign = 'left';
+    }
+
+    // Grid
+    const CELL = 44, PAD = 6, COLS = 7;
+    const GRID_W = COLS * CELL + (COLS - 1) * PAD;
+    const gridX = px + Math.floor((PW - GRID_W) / 2);
+    const gridY = py + 94;
+
+    const slots = this._displayPickerFilteredSlots();
+    if (slots.length === 0) {
+      ctx.fillStyle = '#8a7050';
+      ctx.font = 'italic 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('No matching items in your inventory.', px + PW / 2, py + PH / 2);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    const ROWS_VIS = 5;
+    const first = Math.max(0, dp.scroll);
+    const last  = Math.min(slots.length, first + ROWS_VIS * COLS);
+    for (let k = first; k < last; k++) {
+      const rel = k - first;
+      const c = rel % COLS;
+      const rr = Math.floor(rel / COLS);
+      const cx = gridX + c * (CELL + PAD);
+      const cy = gridY + rr * (CELL + PAD);
+      // Cell bg — dark inset
+      ctx.fillStyle = '#1a110a';
+      ctx.fillRect(cx, cy, CELL, CELL);
+      ctx.fillStyle = '#3a2818';
+      ctx.fillRect(cx, cy, CELL, 1);
+      ctx.fillRect(cx, cy, 1, CELL);
+      ctx.fillStyle = '#5a3810';
+      ctx.fillRect(cx, cy + CELL - 1, CELL, 1);
+      ctx.fillRect(cx + CELL - 1, cy, 1, CELL);
+
+      const slot = slots[k];
+      slot.item.draw(ctx, cx + 4, cy + 4, CELL - 8);
+      if (slot.qty > 1) {
+        ctx.fillStyle = '#f1c40f';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+        ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+        ctx.strokeText(slot.qty, cx + 3, cy + 13);
+        ctx.fillText(slot.qty, cx + 3, cy + 13);
+      }
+    }
+
+    // Tooltip: item name under hovered cell
+    const mx = this.mouseScreen.x, my = this.mouseScreen.y;
+    for (let k = first; k < last; k++) {
+      const rel = k - first;
+      const c = rel % COLS;
+      const rr = Math.floor(rel / COLS);
+      const cx = gridX + c * (CELL + PAD);
+      const cy = gridY + rr * (CELL + PAD);
+      if (mx >= cx && mx < cx + CELL && my >= cy && my < cy + CELL) {
+        const name = slots[k].item.name || slots[k].item.id;
+        ctx.fillStyle = '#120a04';
+        ctx.fillRect(cx, cy + CELL + 2, Math.max(80, name.length * 7 + 10), 16);
+        ctx.fillStyle = '#f0d090';
+        ctx.font = 'bold 10px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(name, cx + 5, cy + CELL + 14);
+        break;
+      }
+    }
+  }
+
+  /** Collect item IDs currently stored in a display's content, keyed by the
+   *  logical slot they occupy. Returns {} for text / achievements / empty. */
+  _displayedItemsBySlot(displayKind, content) {
+    if (!content) return {};
+    if (displayKind === 'armor') {
+      const out = {};
+      for (const k of ['helmet', 'chestplate', 'leggings']) {
+        if (content[k]) out[k] = content[k];
+      }
+      return out;
+    }
+    if (displayKind === 'weapon' || displayKind === 'fish' || displayKind === 'relic') {
+      return content.itemId ? { main: content.itemId } : {};
+    }
+    return {};
+  }
+
+  /** True if `itemIds` can all be added to the inventory without overflow.
+   *  Accounts for stackable items merging with existing stacks, and
+   *  duplicate stackables collapsing into a single new slot. */
+  _canFitItems(itemIds) {
+    if (!itemIds.length) return true;
+    const empty = this.inventory.slots.filter(s => s === null).length;
+    const stackableNewTypes = new Set();
+    let nonStackableCount = 0;
+    for (const id of itemIds) {
+      const def = ITEM_BY_ID.get(id);
+      if (!def) continue;
+      if (def.stackable) {
+        if (!this.inventory.has(id)) stackableNewTypes.add(id);
+      } else {
+        nonStackableCount++;
+      }
+    }
+    return empty >= nonStackableCount + stackableNewTypes.size;
+  }
+
+  _handleDisplayPickerClick(sx, sy) {
+    const dp = this.displayPicker;
+    if (!dp) return;
+    const { px, py, PW, PH } = this._displayPickerRect();
+
+    // Outside click or ✕ closes
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this.displayPicker = null;
+      return;
+    }
+
+    // Remove Display button — returns every currently-displayed item to the
+    // player's inventory (or refuses if there's not enough room for them all).
+    if (dp.hasContent) {
+      const CLEAR_W = 110, CLEAR_H = 24;
+      const clearX = px + PW - CLEAR_W - 14;
+      const clearY = py + 60;
+      if (sx >= clearX && sx <= clearX + CLEAR_W && sy >= clearY && sy <= clearY + CLEAR_H) {
+        const displayed = this._displayedItemsBySlot(dp.displayKind, dp.currentContent);
+        const ids = Object.values(displayed);
+        if (!this._canFitItems(ids)) {
+          this.notifications.add('Not enough inventory space to reclaim the display.', '#e74c3c');
+          return;
+        }
+        for (const id of ids) {
+          const def = ITEM_BY_ID.get(id);
+          if (def) this.inventory.add(def);
+        }
+        this.housingState.setFurnitureContent(dp.gx, dp.gy, dp.index, null);
+        const label = ids.length === 1
+          ? (ITEM_BY_ID.get(ids[0])?.name || ids[0])
+          : `${ids.length} pieces`;
+        this.notifications.add(`Returned ${label} to your inventory.`, '#27ae60');
+        this.displayPicker = null;
+        this._rebuildPlayerHouse();
+        this._saveToServer();
+        return;
+      }
+    }
+
+    // Grid — commit a pick. The picked item is CONSUMED from the inventory,
+    // and any previously-displayed item in that slot is returned in its place.
+    const CELL = 44, PAD = 6, COLS = 7, ROWS_VIS = 5;
+    const GRID_W = COLS * CELL + (COLS - 1) * PAD;
+    const gridX = px + Math.floor((PW - GRID_W) / 2);
+    const gridY = py + 94;
+
+    const slots = this._displayPickerFilteredSlots();
+    const first = Math.max(0, dp.scroll);
+    const last  = Math.min(slots.length, first + ROWS_VIS * COLS);
+    for (let k = first; k < last; k++) {
+      const rel = k - first;
+      const c = rel % COLS;
+      const rr = Math.floor(rel / COLS);
+      const cx = gridX + c * (CELL + PAD);
+      const cy = gridY + rr * (CELL + PAD);
+      if (sx >= cx && sx < cx + CELL && sy >= cy && sy < cy + CELL) {
+        const picked = slots[k];
+        // Figure out which stored slot this pick replaces, if any.
+        let replacedId = null;
+        let slotKey;
+        if (dp.displayKind === 'armor') {
+          slotKey = picked.item.equipSlot;
+          if (dp.currentContent?.[slotKey]) replacedId = dp.currentContent[slotKey];
+        } else {
+          slotKey = 'main';
+          if (dp.currentContent?.itemId) replacedId = dp.currentContent.itemId;
+        }
+
+        // Remove the picked item from the inventory FIRST (frees a slot for
+        // any returned item), then add the replaced item back.
+        this.inventory.remove(picked.item.id, 1);
+        if (replacedId) {
+          const def = ITEM_BY_ID.get(replacedId);
+          if (def) this.inventory.add(def);
+        }
+
+        // Write the new content
+        let nextContent;
+        if (dp.displayKind === 'armor') {
+          nextContent = { ...(dp.currentContent || {}), [slotKey]: picked.item.id };
+        } else if (dp.displayKind === 'fish') {
+          // Fish mount needs species color + weight so the renderer can
+          // draw the actual fish and its plaque. Caught fish already carry
+          // their own weight; admin-given fish fall back to a rolled weight.
+          const species = this._fishSpeciesByItemId().get(picked.item.id);
+          const weight  = typeof picked.item.weight === 'number'
+            ? picked.item.weight
+            : (species ? this._rollFishWeight(species) : null);
+          nextContent = {
+            itemId: picked.item.id,
+            color:  species?.color || '#b0b0b0',
+            name:   species?.name  || picked.item.name,
+            weight,
+          };
+        } else {
+          nextContent = { itemId: picked.item.id };
+        }
+        this.housingState.setFurnitureContent(dp.gx, dp.gy, dp.index, nextContent);
+        const replacedName = replacedId ? (ITEM_BY_ID.get(replacedId)?.name || replacedId) : null;
+        const msg = replacedName
+          ? `Displayed ${picked.item.name || picked.item.id}. ${replacedName} returned to inventory.`
+          : `Displayed ${picked.item.name || picked.item.id}.`;
+        this.notifications.add(msg, '#f1c40f');
+        this.displayPicker = null;
+        this._rebuildPlayerHouse();
+        this._saveToServer();
+        return;
+      }
+    }
+  }
+
+  // ── Achievements Book Panel ───────────────────────────────
+  _achievementsPanelRect() {
+    const PW = 520, PH = 500;
+    const px = Math.floor((this.canvas.width  - PW) / 2);
+    const py = Math.floor((this.canvas.height - PH) / 2);
+    return { px, py, PW, PH };
+  }
+
+  _drawAchievementsPanel(ctx) {
+    const r = this.renderer;
+    const { px, py, PW, PH } = this._achievementsPanelRect();
+    const W = this.canvas.width, H = this.canvas.height;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+    r.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    r.drawCloseButton(ctx, px, py, PW, this.mouseScreen.x, this.mouseScreen.y);
+
+    // Header
+    ctx.fillStyle = '#f0d090';
+    ctx.font = 'bold 17px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('⟡ Book of Achievements ⟡', px + PW / 2, py + 30);
+    ctx.fillStyle = '#8a7050';
+    ctx.font = 'italic 10px monospace';
+    ctx.fillText(`— ${this.player.name} —`, px + PW / 2, py + 46);
+
+    // Divider
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 16, py + 54, PW - 32, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(px + 16, py + 55, PW - 32, 1);
+
+    // Summary stats
+    const combatLvl = this.player.combatLevel || 1;
+    const totalLvl  = this.skills.totalLevel;
+    const totalXp   = this.skills.xp.reduce((a, b) => a + b, 0);
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#e8c878';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(`Combat Level: ${combatLvl}`, px + 24, py + 78);
+    ctx.fillText(`Total Level : ${totalLvl}`,   px + 24, py + 96);
+    ctx.fillText(`Total XP    : ${totalXp.toLocaleString()}`, px + 24, py + 114);
+
+    // Milestones (right column)
+    const levelsAt50 = this.skills.xp.reduce((n, _, i) => n + (this.skills.getLevel(i) >= 50 ? 1 : 0), 0);
+    const levelsAt99 = this.skills.xp.reduce((n, _, i) => n + (this.skills.getLevel(i) >= 99 ? 1 : 0), 0);
+    const maxed      = this.skills.xp.reduce((n, _, i) => n + (this.skills.getLevel(i) >= 100 ? 1 : 0), 0);
+    ctx.fillStyle = '#b8a060';
+    ctx.fillText(`Skills @ 50+ : ${levelsAt50}`, px + 280, py + 78);
+    ctx.fillText(`Skills @ 99+ : ${levelsAt99}`, px + 280, py + 96);
+    ctx.fillText(`Skills maxed : ${maxed}`,      px + 280, py + 114);
+
+    // Skill list — one line per skill with level + xp bar
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 16, py + 128, PW - 32, 1);
+
+    ctx.fillStyle = '#f0d090';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText('Skill Mastery', px + 24, py + 148);
+
+    const listX  = px + 24;
+    let   listY  = py + 168;
+    const rowH   = 22;
+    const rowW   = PW - 48;
+    const labelW = 110;
+    const barW   = 200;
+
+    for (let i = 0; i < SKILL_NAMES.length; i++) {
+      const lvl = this.skills.getLevel(i);
+      const prog = this.skills.progressToNext(i);
+      const xp = this.skills.xp[i];
+
+      // Row bg stripe
+      if (i % 2 === 0) {
+        ctx.fillStyle = 'rgba(200,144,48,0.07)';
+        ctx.fillRect(listX - 4, listY - 13, rowW + 8, rowH - 4);
+      }
+
+      // Skill name
+      ctx.fillStyle = '#e8c878';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(SKILL_NAMES[i], listX, listY);
+
+      // Level
+      const lvlColor = lvl >= 100 ? '#f1c40f' : lvl >= 99 ? '#e8b040' : lvl >= 50 ? '#c8a860' : '#a89060';
+      ctx.fillStyle = lvlColor;
+      ctx.font = 'bold 11px monospace';
+      ctx.fillText(`Lv ${lvl}`, listX + labelW, listY);
+
+      // Progress bar
+      const barX = listX + labelW + 50;
+      const barY = listY - 9;
+      const barH = 9;
+      ctx.fillStyle = '#1a110a';
+      ctx.fillRect(barX, barY, barW, barH);
+      ctx.fillStyle = '#3a2818';
+      ctx.fillRect(barX, barY, barW, 1);
+      ctx.fillStyle = lvl >= 100 ? '#f1c40f' : '#8a5020';
+      ctx.fillRect(barX + 1, barY + 1, Math.floor((barW - 2) * prog), barH - 2);
+      if (lvl < 100) {
+        ctx.fillStyle = '#c8a860';
+        ctx.fillRect(barX + 1 + Math.floor((barW - 2) * prog), barY + 1, 1, barH - 2);
+      }
+
+      // XP label
+      ctx.fillStyle = '#8a7050';
+      ctx.font = '10px monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(xp.toLocaleString() + ' xp', listX + rowW, listY);
+
+      listY += rowH;
+    }
+
+    // Footer
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#8a7050';
+    ctx.font = 'italic 10px monospace';
+    ctx.fillText('Click outside or the ✕ to close', px + PW / 2, py + PH - 14);
+    ctx.textAlign = 'left';
+  }
+
+  _handleAchievementsClick(sx, sy) {
+    const { px, py, PW, PH } = this._achievementsPanelRect();
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this.achievementsOpen = false;
     }
   }
 
@@ -2403,7 +3156,11 @@ export class Game {
       const io = cellInnerOrigin(gx, gy);
       const localCol = col - io.col;
       const localRow = row - io.row;
-      if (localCol < 0 || localRow < 0 || localCol >= CELL_INNER || localRow >= CELL_INNER) continue;
+      // Allow localRow === -1 so wall-mounted items (fireplace, painting,
+      // fish mount, trophy plaque, meat hooks) on the north wall can be
+      // right-clicked and removed — their wall row sits one row above the
+      // cell's inner floor.
+      if (localCol < 0 || localRow < -1 || localCol >= CELL_INNER || localRow >= CELL_INNER) continue;
       const found = this.housingState.furnitureAt(gx, gy, localCol, localRow);
       if (!found) continue;
       const fd = FURNITURE_DEFS[found.entry.defId];
@@ -2413,6 +3170,33 @@ export class Game {
         options: [{
           label: `Remove ${fd.name}`,
           cb: () => {
+            // If this is a display piece holding stored items (weapon case,
+            // fish mount, relic shelf, armour stand), return them to the
+            // player's inventory first. Refuse the removal if there's not
+            // enough room — same guard as the picker's Remove Display.
+            if (fd.displayKind && found.entry.content) {
+              const storedIds = Object.values(
+                this._displayedItemsBySlot(fd.displayKind, found.entry.content)
+              );
+              if (storedIds.length > 0) {
+                if (!this._canFitItems(storedIds)) {
+                  this.notifications.add(
+                    `Free up inventory space before removing the ${fd.name}.`,
+                    '#e74c3c',
+                  );
+                  this.contextMenu = null;
+                  return;
+                }
+                for (const id of storedIds) {
+                  const def = ITEM_BY_ID.get(id);
+                  if (def) this.inventory.add(def);
+                }
+                const label = storedIds.length === 1
+                  ? (ITEM_BY_ID.get(storedIds[0])?.name || storedIds[0])
+                  : `${storedIds.length} pieces`;
+                this.notifications.add(`Returned ${label} to your inventory.`, '#27ae60');
+              }
+            }
             this.housingState.removeFurniture(gx, gy, found.index);
             this._rebuildPlayerHouse();
             this._saveToServer();
@@ -2429,6 +3213,45 @@ export class Game {
   get isAdmin() { return this.player.name === 'kokaine'; }
 
   // ── Housing Build Mode ──────────────────────────────────────────────────
+
+  /** (gx, gy) of the cell the player is currently standing in, or null if
+   *  they're not inside the player house or the tile doesn't map to an owned cell. */
+  _playerCurrentCell() {
+    if (!this.inInterior || this.activeMap?.id !== 'player_house') return null;
+    const CELL_STRIDE = 12;
+    const gx = Math.floor((this.player.col - 1) / CELL_STRIDE);
+    const gy = Math.floor((this.player.row - 1) / CELL_STRIDE);
+    if (gx < 0 || gy < 0) return null;
+    if (!this.housingState.cells.has(`${gx},${gy}`)) return null;
+    return { gx, gy };
+  }
+
+  // Paint picker state — null when closed, 'floor'|'wall' while choosing
+  // a room-wide tint for the currently-selected build-mode cell.
+  get paintPicker() { return this._paintPicker ?? null; }
+  set paintPicker(v) { this._paintPicker = v; }
+
+  /** Open / close build mode. When opening, default the cell selection to
+   *  the room the player is currently standing in so they can jump straight
+   *  into furniture placement for that room. */
+  _toggleBuildMode() {
+    if (this.buildModeOpen) {
+      this.buildModeOpen = false;
+      return;
+    }
+    this.buildModeOpen = true;
+    const cur = this._playerCurrentCell();
+    if (cur) {
+      this.buildModeSelGX = cur.gx;
+      this.buildModeSelGY = cur.gy;
+      this.buildModeStep  = 'pick_furniture';  // skip straight to furniture picker
+      this.buildModeFurnScroll = 0;
+    } else {
+      this.buildModeSelGX = null;
+      this.buildModeSelGY = null;
+      this.buildModeStep  = 'grid';
+    }
+  }
 
   _rebuildPlayerHouse() {
     const house = buildPlayerHouse(this.housingState, this.farmingState);
@@ -2451,6 +3274,46 @@ export class Game {
     const cw = this.canvas.width, ch = this.canvas.height;
     const px = Math.floor((cw - BM_PW) / 2);
     const py = Math.floor((ch - BM_PH) / 2);
+
+    // ── Paint picker overlay takes priority while open ──
+    if (this.paintPicker) {
+      const r = this.renderer.paintPickerRect();
+      // Close button or outside click
+      if (this.renderer.closeButtonRect(r.px, r.py, r.PW).x <= sx &&
+          sx <= this.renderer.closeButtonRect(r.px, r.py, r.PW).x + 22 &&
+          this.renderer.closeButtonRect(r.px, r.py, r.PW).y <= sy &&
+          sy <= this.renderer.closeButtonRect(r.px, r.py, r.PW).y + 22) {
+        this.paintPicker = null;
+        return;
+      }
+      if (sx < r.px || sx > r.px + r.PW || sy < r.py || sy > r.py + r.PH) {
+        this.paintPicker = null;
+        return;
+      }
+      // Click a tint row → apply
+      const rects = this._paintPickerRects || [];
+      for (const rr of rects) {
+        if (sx >= rr.x && sx <= rr.x + rr.w && sy >= rr.y && sy <= rr.y + rr.h) {
+          const res = this.housingState.setCellTint(
+            this.buildModeSelGX, this.buildModeSelGY,
+            this.paintPicker, rr.id, this.inventory, this.isAdmin,
+          );
+          if (!res.ok) {
+            this.notifications.add(res.reason, '#e74c3c');
+          } else {
+            this.notifications.add(
+              `${this.paintPicker === 'wall' ? 'Walls' : 'Floor'} set to ${rr.id}.`,
+              '#27ae60',
+            );
+            this.paintPicker = null;
+            this._rebuildPlayerHouse();
+            this._saveToServer();
+          }
+          return;
+        }
+      }
+      return;
+    }
 
     // Close if click is outside the panel
     if (sx < px || sx > px + BM_PW || sy < py || sy > py + BM_PH) {
@@ -2521,22 +3384,47 @@ export class Game {
     } else if (this.buildModeStep === 'pick_furniture') {
       const cell = this.housingState.getCell(this.buildModeSelGX, this.buildModeSelGY);
       if (!cell) return;
-      const defs = furnitureForRoom(cell.typeId).filter(fd =>
-        (this.isAdmin ? 99 : archLevel) >= fd.levelReq);
+      // Same sorted list the renderer shows (craftable-now first, then by level).
+      const entries = sortedFurnitureEntries(
+        furnitureForRoom(cell.typeId), this.inventory, this.isAdmin ? 99 : archLevel,
+      ).filter(({ def }) => (this.isAdmin ? 99 : archLevel) >= def.levelReq);
       const furnListH = py + BM_PH - 100 - listTop;
       const maxVis = Math.floor(furnListH / ROW_H);
-      const visible = defs.slice(this.buildModeFurnScroll, this.buildModeFurnScroll + maxVis);
+      const visible = entries.slice(this.buildModeFurnScroll, this.buildModeFurnScroll + maxVis);
       for (let i = 0; i < visible.length; i++) {
         const rowY = listTop + i * ROW_H;
         if (sy < rowY || sy > rowY + ROW_H - ROW_PAD) continue;
-        const def = visible[i];
-        // Start furniture placement
-        this.buildModeFurnPlacing = { gx: this.buildModeSelGX, gy: this.buildModeSelGY, defId: def.id, rotation: 0 };
+        const { def, variant } = visible[i];
+        // Start furniture placement, preserving the variant choice so the
+        // placer can deduct the right recipe and tint the final sprite.
+        this.buildModeFurnPlacing = {
+          gx: this.buildModeSelGX,
+          gy: this.buildModeSelGY,
+          defId: def.id,
+          variantId: variant?.id ?? null,
+          rotation: 0,
+        };
         this.buildModeOpen = false;
         const rotHint = def.rotatable ? ' [R] = rotate,' : '';
         const wallHint = def.wallMount ? ` (${def.wallMount} wall only)` : '';
-        this.notifications.add(`Click inside the room to place ${def.name}.${rotHint}${wallHint} [Esc] = cancel`, '#f1c40f');
+        const placedName = variant ? `${variant.name} ${def.name}` : def.name;
+        this.notifications.add(`Click inside the room to place ${placedName}.${rotHint}${wallHint} [Esc] = cancel`, '#f1c40f');
         return;
+      }
+
+      // Paint buttons — rects were stored during render
+      const pr = this.renderer._paintBtnRects;
+      if (pr) {
+        if (sx >= pr.floor.x && sx <= pr.floor.x + pr.floor.w &&
+            sy >= pr.floor.y && sy <= pr.floor.y + pr.floor.h) {
+          this.paintPicker = 'floor';
+          return;
+        }
+        if (sx >= pr.wall.x && sx <= pr.wall.x + pr.wall.w &&
+            sy >= pr.wall.y && sy <= pr.wall.y + pr.wall.h) {
+          this.paintPicker = 'wall';
+          return;
+        }
       }
 
       // Set Exit button
@@ -2581,21 +3469,23 @@ export class Game {
   }
 
   _placeBuildModeFurniture(col, row) {
-    const { gx, gy, defId, rotation } = this.buildModeFurnPlacing;
+    const { gx, gy, defId, rotation, variantId = null } = this.buildModeFurnPlacing;
     const io = cellInnerOrigin(gx, gy);
     const localCol = col - io.col;
     const localRow = row - io.row;
 
     const check = this.housingState.canPlaceFurniture(
-      gx, gy, defId, localCol, localRow, rotation, this.inventory, this.skills, this.isAdmin);
+      gx, gy, defId, localCol, localRow, rotation, this.inventory, this.skills, this.isAdmin, variantId);
     if (!check.ok) {
       this.notifications.add(check.reason, '#e74c3c');
       return;
     }
-    this.housingState.placeFurniture(gx, gy, defId, localCol, localRow, rotation, this.inventory, this.isAdmin);
+    this.housingState.placeFurniture(gx, gy, defId, localCol, localRow, rotation, this.inventory, this.isAdmin, variantId);
     const fd = FURNITURE_DEFS[defId];
+    const variant = variantId && fd.variants ? fd.variants.find(v => v.id === variantId) : null;
+    const placedName = variant ? `${variant.name} ${fd.name}` : fd.name;
     this.skills.addXp(SKILL_IDS.ARCHITECT, 10 + fd.levelReq * 2);
-    this.notifications.add(`Placed ${fd.name}! (+Architect XP)`, '#f1c40f');
+    this.notifications.add(`Placed ${placedName}! (+Architect XP)`, '#f1c40f');
     this.buildModeFurnPlacing = null;
     this.buildModeOpen = true;
     this._rebuildPlayerHouse();
@@ -2605,7 +3495,8 @@ export class Game {
   _handleShopClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
-    if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
+    if (this._isCloseClick(sx, sy, px, py, SHOP_PW) ||
+        sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
       this.shopOpen = false; this.shopScroll = 0;
       return;
     }
@@ -2632,7 +3523,8 @@ export class Game {
   _handleSmithyShopClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
-    if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
+    if (this._isCloseClick(sx, sy, px, py, SHOP_PW) ||
+        sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
       this.smithyShopOpen = false; this.smithyShopScroll = 0;
       return;
     }
@@ -2667,7 +3559,8 @@ export class Game {
     if (!cfg) return;
     const px = Math.floor((this.canvas.width  - SHOP_PW) / 2);
     const py = Math.floor((this.canvas.height - SHOP_PH) / 2);
-    if (sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
+    if (this._isCloseClick(sx, sy, px, py, SHOP_PW) ||
+        sx < px || sx > px + SHOP_PW || sy < py || sy > py + SHOP_PH) {
       this[cfg.openFlag] = false; this[cfg.scrollFlag] = 0;
       return;
     }
@@ -2702,7 +3595,8 @@ export class Game {
   _handleMakeoverClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - MO_PW) / 2);
     const py = Math.floor((this.canvas.height - MO_PH) / 2);
-    if (sx < px || sx > px + MO_PW || sy < py || sy > py + MO_PH) {
+    if (this._isCloseClick(sx, sy, px, py, MO_PW) ||
+        sx < px || sx > px + MO_PW || sy < py || sy > py + MO_PH) {
       this.makoverOpen = false;
       return;
     }
@@ -2748,7 +3642,8 @@ export class Game {
   _handleFishermanClick(sx, sy) {
     const px = Math.floor((this.canvas.width  - FISH_PW) / 2);
     const py = Math.floor((this.canvas.height - FISH_PH) / 2);
-    if (sx < px || sx > px + FISH_PW || sy < py || sy > py + FISH_PH) {
+    if (this._isCloseClick(sx, sy, px, py, FISH_PW) ||
+        sx < px || sx > px + FISH_PW || sy < py || sy > py + FISH_PH) {
       this.fishermanOpen = false;
       return;
     }
@@ -2809,14 +3704,9 @@ export class Game {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel background
-    ctx.fillStyle = 'rgba(8,18,30,0.97)';
-    r._roundRect(ctx, px, py, FISH_PW, FISH_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#2980b9';
-    ctx.lineWidth = 2;
-    r._roundRect(ctx, px, py, FISH_PW, FISH_PH, 8);
-    ctx.stroke();
+    // Panel background — shared bronze frame + ✕ close button
+    r.drawBronzeFrame(ctx, px, py, FISH_PW, FISH_PH, { rivets: true });
+    r.drawCloseButton(ctx, px, py, FISH_PW);
 
     // Header
     ctx.fillStyle = '#3498db';
@@ -3131,14 +4021,23 @@ export class Game {
     ];
   }
 
-  _adminTpPanelRect() {
-    const ROW_H = 28;
-    const PW = 240;
-    const dests = this._getTpDestinations();
-    const PH = 36 + dests.length * ROW_H + 8;
-    const px = Math.floor((this.canvas.width - PW) / 2);
+  /** True if (sx,sy) hits the standard ✕ close button of a panel at (px,py,PW). */
+  _isCloseClick(sx, sy, px, py, PW) {
+    const r = this.renderer.closeButtonRect(px, py, PW);
+    return sx >= r.x && sx <= r.x + r.w && sy >= r.y && sy <= r.y + r.h;
+  }
+
+  // ── Unified Admin Menu (backtick) ─────────────────────────
+  _adminMenuRect() {
+    const PW = 620, PH = 560;
+    const TITLE_H = 30, TAB_H = 34;
+    const px = Math.floor((this.canvas.width  - PW) / 2);
     const py = Math.floor((this.canvas.height - PH) / 2);
-    return { px, py, PW, PH, ROW_H };
+    return {
+      px, py, PW, PH, TITLE_H, TAB_H,
+      contentX: px + 6, contentY: py + TITLE_H + TAB_H + 4,
+      contentW: PW - 12, contentH: PH - TITLE_H - TAB_H - 10,
+    };
   }
 
   // ── Admin Equip Panel ────────────────────────────────────
@@ -3162,15 +4061,12 @@ export class Game {
   _drawAdminEquipPanel(ctx) {
     const { px, py, PW, PH, BTN_W, BTN_H, BTN_GAP, BTNS_PER_ROW, LABEL_W, PAD, SLOT_PAD_TOP, slotHeights } = this._adminEquipPanelRect();
 
-    // Background
-    ctx.fillStyle = 'rgba(10,10,20,0.92)';
-    ctx.fillRect(px, py, PW, PH);
-    ctx.strokeStyle = '#e67e22';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, PW, PH);
+    // Background — shared bronze frame + ✕ close button
+    this.renderer.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    this.renderer.drawCloseButton(ctx, px, py, PW);
 
     // Title
-    ctx.fillStyle = '#e67e22';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('ADMIN EQUIP  [G]', px + PW / 2, py + 22);
@@ -3231,7 +4127,8 @@ export class Game {
 
   _handleAdminEquipClick(sx, sy) {
     const { px, py, PW, PH, BTN_W, BTN_H, BTN_GAP, BTNS_PER_ROW, LABEL_W, PAD, SLOT_PAD_TOP, slotHeights } = this._adminEquipPanelRect();
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
       this.adminEquipOpen = false;
       return;
     }
@@ -3251,58 +4148,342 @@ export class Game {
     });
   }
 
-  _drawAdminTpPanel(ctx) {
-    const { px, py, PW, PH, ROW_H } = this._adminTpPanelRect();
+  _drawAdminMenu(ctx) {
+    const R = this._adminMenuRect();
 
-    // Background
-    ctx.fillStyle = 'rgba(0,0,0,0.85)';
-    ctx.fillRect(px, py, PW, PH);
-    ctx.strokeStyle = '#f1c40f';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, PW, PH);
+    // Dim background + bronze-framed panel to match the rest of the HUD.
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.renderer.drawBronzeFrame(ctx, R.px, R.py, R.PW, R.PH, { rivets: true });
+    this.renderer.drawCloseButton(ctx, R.px, R.py, R.PW);
 
     // Title
-    ctx.fillStyle = '#f1c40f';
-    ctx.font = 'bold 13px monospace';
+    ctx.fillStyle = '#f0d090';
+    ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText('ADMIN TELEPORT  [`]', px + PW / 2, py + 18);
+    ctx.textBaseline = 'middle';
+    ctx.fillText('ADMIN MENU   [`] to close', R.px + R.PW / 2, R.py + R.TITLE_H / 2 + 2);
 
-    ctx.font = '12px monospace';
-    ctx.textAlign = 'left';
+    // Tabs
+    const TABS = [
+      { key: 'teleport', label: 'Teleport' },
+      { key: 'items',    label: 'Items'    },
+      { key: 'skills',   label: 'Skills'   },
+    ];
+    const tabW = Math.floor((R.PW - 12) / TABS.length);
+    for (let i = 0; i < TABS.length; i++) {
+      const t = TABS[i];
+      const tx = R.px + 6 + i * tabW;
+      const ty = R.py + R.TITLE_H;
+      const tw = (i === TABS.length - 1) ? (R.PW - 6) - (tx - R.px) : tabW;
+      const active = this.adminMenuTab === t.key;
+      const hover  = this.mouseScreen.x >= tx && this.mouseScreen.x < tx + tw &&
+                     this.mouseScreen.y >= ty && this.mouseScreen.y < ty + R.TAB_H;
+      ctx.fillStyle = active ? '#3a2410' : (hover ? '#2a1c0a' : '#18110a');
+      ctx.fillRect(tx, ty, tw, R.TAB_H);
+      if (active) { ctx.fillStyle = '#c89030'; ctx.fillRect(tx + 1, ty, tw - 2, 2); }
+      ctx.fillStyle = active ? '#f0d060' : (hover ? '#c0a060' : '#7a5c20');
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(t.label, tx + tw / 2, ty + R.TAB_H / 2 + 1);
+    }
+    // Double rule below the tab bar
+    ctx.fillStyle = '#c89030'; ctx.fillRect(R.px + 4, R.py + R.TITLE_H + R.TAB_H, R.PW - 8, 1);
+    ctx.fillStyle = '#080503'; ctx.fillRect(R.px + 4, R.py + R.TITLE_H + R.TAB_H + 1, R.PW - 8, 1);
 
-    const TYPE_COLOR = {
-      spawn: '#f1c40f', village: '#27ae60', kingdom: '#e74c3c', watchtower: '#e67e22',
-      outpost: '#9b59b6', ruins: '#95a5a6', dungeon: '#a855f7',
-    };
+    ctx.textBaseline = 'alphabetic';
 
-    this._getTpDestinations().forEach((node, i) => {
-      const ry = py + 32 + i * ROW_H;
-      const hover = this.mouseScreen.y >= ry && this.mouseScreen.y < ry + ROW_H
-                 && this.mouseScreen.x >= px  && this.mouseScreen.x < px + PW;
-      if (hover) {
-        ctx.fillStyle = 'rgba(255,255,255,0.1)';
-        ctx.fillRect(px + 2, ry, PW - 4, ROW_H);
-      }
-      ctx.fillStyle = TYPE_COLOR[node.type] ?? '#fff';
-      ctx.fillText(`${node.id}`, px + 12, ry + 17);
-      ctx.fillStyle = '#aaa';
-      ctx.fillText(`(${node.c}, ${node.r})`, px + 160, ry + 17);
-    });
+    // Tab content
+    if (this.adminMenuTab === 'teleport') this._drawAdminMenuTeleport(ctx, R);
+    else if (this.adminMenuTab === 'items') this._drawAdminMenuItems(ctx, R);
+    else if (this.adminMenuTab === 'skills') this._drawAdminMenuSkills(ctx, R);
   }
 
-  _handleAdminTpClick(sx, sy) {
-    const { px, py, PW, PH, ROW_H } = this._adminTpPanelRect();
-    // Click outside closes panel
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
-      this.showAdminTp = false;
+  _drawAdminMenuTeleport(ctx, R) {
+    const dests = this._getTpDestinations();
+    const ROW_H = 26;
+    const COLS  = 2;
+    const COL_W = Math.floor(R.contentW / COLS);
+    const ROWS_VIS = Math.floor(R.contentH / ROW_H);
+    const startIdx = this._adminTpScroll * COLS;
+    const TYPE_COLOR = {
+      spawn: '#f1c40f', village: '#4caf50', kingdom: '#ff6b6b', watchtower: '#e67e22',
+      outpost: '#9b59b6', ruins: '#95a5a6', dungeon: '#c06aff',
+    };
+
+    ctx.textAlign = 'left';
+    ctx.font = '12px monospace';
+    for (let i = 0; i < ROWS_VIS * COLS; i++) {
+      const idx = startIdx + i;
+      if (idx >= dests.length) break;
+      const node = dests[idx];
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const rx = R.contentX + col * COL_W;
+      const ry = R.contentY + row * ROW_H;
+      const hover = this.mouseScreen.x >= rx && this.mouseScreen.x < rx + COL_W &&
+                    this.mouseScreen.y >= ry && this.mouseScreen.y < ry + ROW_H;
+      if (hover) {
+        ctx.fillStyle = 'rgba(200,144,48,0.20)';
+        ctx.fillRect(rx + 2, ry + 1, COL_W - 4, ROW_H - 2);
+      }
+      ctx.fillStyle = TYPE_COLOR[node.type] ?? '#f0d090';
+      ctx.fillText(node.id, rx + 10, ry + ROW_H / 2 + 4);
+      ctx.fillStyle = '#8a7050';
+      ctx.fillText(`(${node.c}, ${node.r})`, rx + COL_W - 100, ry + ROW_H / 2 + 4);
+    }
+
+    this._drawAdminMenuScrollHint(ctx, R, Math.ceil(dests.length / COLS), ROWS_VIS, this._adminTpScroll);
+  }
+
+  _drawAdminMenuItems(ctx, R) {
+    const items = Object.values(ITEMS);
+    const CELL = 52;
+    const PAD  = 4;
+    const COLS = Math.floor((R.contentW + PAD) / (CELL + PAD));
+    const ROWS_VIS = Math.floor((R.contentH + PAD) / (CELL + PAD));
+    const startIdx = this._adminItemsScroll * COLS;
+
+    // Grid origin centred horizontally
+    const gridW = COLS * (CELL + PAD) - PAD;
+    const originX = R.contentX + Math.floor((R.contentW - gridW) / 2);
+
+    let hoveredItem = null;
+    for (let i = 0; i < ROWS_VIS * COLS; i++) {
+      const idx = startIdx + i;
+      if (idx >= items.length) break;
+      const item = items[idx];
+      const col = i % COLS;
+      const row = Math.floor(i / COLS);
+      const cx = originX + col * (CELL + PAD);
+      const cy = R.contentY + row * (CELL + PAD);
+      const hover = this.mouseScreen.x >= cx && this.mouseScreen.x < cx + CELL &&
+                    this.mouseScreen.y >= cy && this.mouseScreen.y < cy + CELL;
+
+      ctx.fillStyle = hover ? '#a8a8a8' : '#8e8e8e';
+      ctx.fillRect(cx, cy, CELL, CELL);
+      ctx.fillStyle = 'rgba(255,255,255,0.35)'; ctx.fillRect(cx, cy, CELL, 1); ctx.fillRect(cx, cy, 1, CELL);
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';       ctx.fillRect(cx, cy + CELL - 1, CELL, 1); ctx.fillRect(cx + CELL - 1, cy, 1, CELL);
+      ctx.strokeStyle = hover ? '#f1c40f' : '#2a1a08';
+      ctx.lineWidth = hover ? 2 : 1;
+      ctx.strokeRect(cx, cy, CELL, CELL);
+
+      if (item.draw) item.draw(ctx, cx + 4, cy + 4, CELL - 8);
+      if (hover) hoveredItem = item;
+    }
+
+    // Footer hint
+    ctx.fillStyle = '#a08848';
+    ctx.font = '11px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('Click = +1    Shift-click = +100    (wheel to scroll)',
+      R.px + R.PW / 2, R.py + R.PH - 10);
+
+    // Rich hover tooltip — reuses the inventory item-lore card
+    if (hoveredItem) {
+      this.renderer.drawItemTooltip(hoveredItem, this.mouseScreen.x, this.mouseScreen.y);
+    }
+
+    this._drawAdminMenuScrollHint(ctx, R, Math.ceil(items.length / COLS), ROWS_VIS, this._adminItemsScroll);
+  }
+
+  _drawAdminMenuSkills(ctx, R) {
+    const ROW_H = 32;
+    const BTN_W = 44, BTN_H = 22, BTN_GAP = 6;
+    const ROWS_VIS = Math.floor(R.contentH / ROW_H);
+    const startIdx = this._adminSkillsScroll;
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+
+    for (let i = 0; i < ROWS_VIS; i++) {
+      const skillId = startIdx + i;
+      if (skillId >= SKILL_NAMES.length) break;
+      const ry = R.contentY + i * ROW_H;
+      const level = this.skills.getLevel(skillId);
+
+      // Skill name + level
+      ctx.fillStyle = '#e8b858';
+      ctx.font = 'bold 12px monospace';
+      ctx.fillText(SKILL_NAMES[skillId], R.contentX + 10, ry + ROW_H / 2);
+
+      ctx.fillStyle = '#f0d090';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText(`Lv ${level}`, R.contentX + 140, ry + ROW_H / 2);
+
+      // Action buttons
+      const actions = [
+        { label: '-1',  op: 'dec'  },
+        { label: '+1',  op: 'inc'  },
+        { label: '+10', op: 'inc10'},
+        { label: 'Max', op: 'max'  },
+        { label: 'Reset', op: 'reset', wide: true },
+      ];
+      let bx = R.contentX + 220;
+      for (const a of actions) {
+        const w = a.wide ? 60 : BTN_W;
+        const by = ry + (ROW_H - BTN_H) / 2;
+        const hover = this.mouseScreen.x >= bx && this.mouseScreen.x < bx + w &&
+                      this.mouseScreen.y >= by && this.mouseScreen.y < by + BTN_H;
+        ctx.fillStyle = hover ? '#4a3414' : '#2a1c08';
+        ctx.fillRect(bx, by, w, BTN_H);
+        ctx.fillStyle = hover ? '#c89040' : '#8a5c20';
+        ctx.fillRect(bx, by, w, 1);
+        ctx.fillRect(bx, by, 1, BTN_H);
+        ctx.fillStyle = '#1a0e04';
+        ctx.fillRect(bx, by + BTN_H - 1, w, 1);
+        ctx.fillRect(bx + w - 1, by, 1, BTN_H);
+        ctx.fillStyle = hover ? '#fff1c0' : '#f0d090';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(a.label, bx + w / 2, by + BTN_H / 2 + 1);
+        ctx.textAlign = 'left';
+        bx += w + BTN_GAP;
+      }
+    }
+
+    ctx.textBaseline = 'alphabetic';
+    this._drawAdminMenuScrollHint(ctx, R, SKILL_NAMES.length, ROWS_VIS, this._adminSkillsScroll);
+  }
+
+  _drawAdminMenuScrollHint(ctx, R, totalRows, visRows, offset) {
+    if (totalRows <= visRows) return;
+    ctx.fillStyle = 'rgba(200,180,120,0.5)';
+    ctx.font = '10px monospace';
+    ctx.textAlign = 'right';
+    const more = Math.max(0, totalRows - visRows - offset);
+    if (offset > 0) ctx.fillText(`▲ ${offset}`, R.px + R.PW - 12, R.py + R.TITLE_H + R.TAB_H + 14);
+    if (more > 0)   ctx.fillText(`▼ ${more}`,  R.px + R.PW - 12, R.py + R.PH - 14);
+  }
+
+  _handleAdminMenuClick(sx, sy) {
+    const R = this._adminMenuRect();
+    // Click outside or on the ✕ close button closes the panel.
+    if (this._isCloseClick(sx, sy, R.px, R.py, R.PW) ||
+        sx < R.px || sx > R.px + R.PW || sy < R.py || sy > R.py + R.PH) {
+      this.showAdminMenu = false;
       return;
     }
-    const listY = py + 32;
-    const dests = this._getTpDestinations();
-    const idx = Math.floor((sy - listY) / ROW_H);
-    if (idx < 0 || idx >= dests.length) return;
+    // Tab bar
+    const ty = R.py + R.TITLE_H;
+    if (sy >= ty && sy < ty + R.TAB_H) {
+      const TABS = ['teleport', 'items', 'skills'];
+      const tabW = Math.floor((R.PW - 12) / TABS.length);
+      const i = Math.floor((sx - (R.px + 6)) / tabW);
+      if (i >= 0 && i < TABS.length) this.adminMenuTab = TABS[i];
+      return;
+    }
+    // Content routing
+    if (this.adminMenuTab === 'teleport')    this._handleAdminTeleportClick(sx, sy, R);
+    else if (this.adminMenuTab === 'items')  this._handleAdminItemsClick(sx, sy, R);
+    else if (this.adminMenuTab === 'skills') this._handleAdminSkillsClick(sx, sy, R);
+  }
 
-    const node = dests[idx];
+  _handleAdminTeleportClick(sx, sy, R) {
+    const dests = this._getTpDestinations();
+    const ROW_H = 26, COLS = 2;
+    const COL_W = Math.floor(R.contentW / COLS);
+    const ROWS_VIS = Math.floor(R.contentH / ROW_H);
+    if (sx < R.contentX || sy < R.contentY) return;
+    const col = Math.floor((sx - R.contentX) / COL_W);
+    const row = Math.floor((sy - R.contentY) / ROW_H);
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS_VIS) return;
+    const idx = this._adminTpScroll * COLS + row * COLS + col;
+    if (idx < 0 || idx >= dests.length) return;
+    this._teleportToNode(dests[idx]);
+  }
+
+  _handleAdminItemsClick(sx, sy, R) {
+    const items = Object.values(ITEMS);
+    const CELL = 52, PAD = 4;
+    const COLS = Math.floor((R.contentW + PAD) / (CELL + PAD));
+    const ROWS_VIS = Math.floor((R.contentH + PAD) / (CELL + PAD));
+    const gridW = COLS * (CELL + PAD) - PAD;
+    const originX = R.contentX + Math.floor((R.contentW - gridW) / 2);
+    if (sx < originX || sy < R.contentY) return;
+    const col = Math.floor((sx - originX) / (CELL + PAD));
+    const row = Math.floor((sy - R.contentY) / (CELL + PAD));
+    if (col < 0 || col >= COLS || row < 0 || row >= ROWS_VIS) return;
+    // Reject clicks in the PAD gap between cells
+    if ((sx - originX) % (CELL + PAD) >= CELL) return;
+    if ((sy - R.contentY) % (CELL + PAD) >= CELL) return;
+    const idx = this._adminItemsScroll * COLS + row * COLS + col;
+    if (idx < 0 || idx >= items.length) return;
+    const item = items[idx];
+    const qty = this.input.isShiftHeld() ? 100 : 1;
+    // Raw fish are per-instance items with their own weight. Admin gives base
+    // ITEMS.RAW_* defs with no weight, so roll one per fish to match the feel
+    // of a real catch (and so the fish mount / fishing records work).
+    const fishSpecies = this._fishSpeciesByItemId().get(item.id);
+    if (fishSpecies) {
+      let added = 0;
+      for (let n = 0; n < qty; n++) {
+        const w = this._rollFishWeight(fishSpecies);
+        if (!this.inventory.add(makeFishItem(fishSpecies, w))) break;
+        added++;
+      }
+      if (added > 0) {
+        const label = added === 1 ? item.name : `${item.name} x${added}`;
+        this.notifications.add(`+${label}`, '#f1c40f');
+      } else {
+        this.notifications.add('Inventory full!', '#e74c3c');
+      }
+      return;
+    }
+    const ok = this.inventory.add(item, qty);
+    if (ok) this.notifications.add(`+${qty} ${item.name}`, '#f1c40f');
+    else    this.notifications.add('Inventory full!', '#e74c3c');
+  }
+
+  _handleAdminSkillsClick(sx, sy, R) {
+    const ROW_H = 32, BTN_W = 44, BTN_H = 22, BTN_GAP = 6;
+    const ROWS_VIS = Math.floor(R.contentH / ROW_H);
+    if (sy < R.contentY) return;
+    const row = Math.floor((sy - R.contentY) / ROW_H);
+    if (row < 0 || row >= ROWS_VIS) return;
+    const skillId = this._adminSkillsScroll + row;
+    if (skillId < 0 || skillId >= SKILL_NAMES.length) return;
+    const ry = R.contentY + row * ROW_H;
+    const by = ry + (ROW_H - BTN_H) / 2;
+    if (sy < by || sy > by + BTN_H) return;
+
+    const actions = [
+      { label: '-1',    op: 'dec',   wide: false },
+      { label: '+1',    op: 'inc',   wide: false },
+      { label: '+10',   op: 'inc10', wide: false },
+      { label: 'Max',   op: 'max',   wide: false },
+      { label: 'Reset', op: 'reset', wide: true  },
+    ];
+    let bx = R.contentX + 220;
+    for (const a of actions) {
+      const w = a.wide ? 60 : BTN_W;
+      if (sx >= bx && sx < bx + w) {
+        this._applySkillAction(skillId, a.op);
+        return;
+      }
+      bx += w + BTN_GAP;
+    }
+  }
+
+  _applySkillAction(skillId, op) {
+    const cur = this.skills.getLevel(skillId);
+    let target = cur;
+    if (op === 'inc')   target = Math.min(100, cur + 1);
+    if (op === 'inc10') target = Math.min(100, cur + 10);
+    if (op === 'dec')   target = Math.max(1, cur - 1);
+    if (op === 'max')   target = 100;
+    if (op === 'reset') target = 1;
+    this._setSkillLevel(skillId, target);
+    this.notifications.add(`${SKILL_NAMES[skillId]} set to level ${target}.`, '#f1c40f');
+  }
+
+  /** Set a skill's XP to the minimum for a given level (1..100). */
+  _setSkillLevel(skillId, level) {
+    const lvl = Math.max(1, Math.min(100, Math.floor(level)));
+    this.skills.xp[skillId] = XP_TABLE[lvl - 1] || 0;
+  }
+
+  _teleportToNode(node) {
 
     // Exit any sub-map so teleport always lands in the overworld
     if (this.inDungeon) {
@@ -3344,7 +4525,7 @@ export class Game {
     this.player.actionLocked = false;
     this.transitionCooldown = 1.0; // prevent immediate portal/dungeon entry
     this.camera.snapTo(this.player.cx, this.player.cy);
-    this.showAdminTp = false;
+    this.showAdminMenu = false;
     this.notifications.add(`Teleported to ${node.id}.`, '#f1c40f');
   }
 
@@ -3524,6 +4705,8 @@ export class Game {
     this.activeMap     = interior;
     this.player.world  = interior;
     this.actions.world = interior;
+    // Invalidate the minimap cache so it rebuilds against the new map
+    this.renderer.minimapDirty = true;
 
     // Place player at interior entry point
     this.player.col       = interior.entryCol;
@@ -3561,6 +4744,8 @@ export class Game {
     this.activeMap     = this.world;
     this.player.world  = this.world;
     this.actions.world = this.world;
+    // Invalidate the minimap cache so it rebuilds against the overworld
+    this.renderer.minimapDirty = true;
 
     // Return to saved position (one tile south of door)
     const rc = this.returnPos ?? { col: Math.floor(1024 / 2), row: Math.floor(768 / 2) + 6 };
@@ -4182,9 +5367,16 @@ export class Game {
       this.actions.cancel();
       this.player.actionLocked = false;
 
-      this.activeRaid.startFloor();
+      // Install room 0 — this also sets arena.entryCol/Row to the south-door area.
+      this.activeRaid.startRoom(0);
+      const a = this.activeRaid.arenaMap;
+      this.player.col = a.entryCol;
+      this.player.row = a.entryRow;
+      this.player.x   = a.entryCol * TILE_SIZE + 4;
+      this.player.y   = a.entryRow * TILE_SIZE;
+      this.camera.snapTo(this.player.cx, this.player.cy);
       this.notifications.add(
-        `Entering ${raidDef.name} — ${diffDef.name}  ·  Floor 1/${raidDef.floors.length}`,
+        `Entering ${raidDef.name} — ${diffDef.name}  ·  ${this.activeRaid.totalRooms} rooms`,
         '#a855f7'
       );
     });
@@ -4427,6 +5619,23 @@ export class Game {
     ctx.fillStyle = 'rgba(255,255,255,0.45)'; ctx.font = '10px monospace';
     ctx.textAlign = 'right'; ctx.textBaseline = 'top';
     ctx.fillText('Scroll to zoom  •  Drag to pan  •  [M] / [Esc] to close', mx + mw - 2, my + mh + 4);
+
+    // ── Close (X) button ───────────────────────────────────────────────────
+    const cr = this._worldMapCloseRect();
+    const hoverClose = this.mouseScreen.x >= cr.x && this.mouseScreen.x <= cr.x + cr.w &&
+                       this.mouseScreen.y >= cr.y && this.mouseScreen.y <= cr.y + cr.h;
+    this.renderer.drawBronzeFrame(ctx, cr.x, cr.y, cr.w, cr.h);
+    ctx.fillStyle = hoverClose ? '#ffb0b0' : '#e07070';
+    ctx.font = 'bold 16px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✕', cr.x + cr.w / 2, cr.y + cr.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  _worldMapCloseRect() {
+    const W = 32, H = 32;
+    return { x: this.canvas.width - W - 12, y: 12, w: W, h: H };
   }
 
   _exitDungeon() {
@@ -4475,20 +5684,16 @@ export class Game {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = 'rgba(15,8,30,0.97)';
-    r._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#8b3fc8';
-    ctx.lineWidth = 2;
-    r._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.stroke();
+    // Shared bronze frame + ✕ close button
+    r.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    r.drawCloseButton(ctx, px, py, PW);
 
     // Header
-    ctx.fillStyle = '#c9a227';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 16px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('DUNGEON MASTER', px + PW / 2, py + 26);
-    ctx.fillStyle = '#777';
+    ctx.fillStyle = '#a08848';
     ctx.font = '11px monospace';
     ctx.fillText('Select a raid and difficulty, then press Start', px + PW / 2, py + 44);
 
@@ -4544,7 +5749,7 @@ export class Game {
       ctx.fillText(rd.name, px + 32, ry + raidRowH / 2 - 5);
       ctx.fillStyle = '#555';
       ctx.font = '10px monospace';
-      ctx.fillText(`${rd.floors.length} floors  Lv.${rd.recLevel}+`, px + 32, ry + raidRowH / 2 + 9);
+      ctx.fillText(`Lv.${rd.recLevel}+ · rooms scale with difficulty`, px + 32, ry + raidRowH / 2 + 9);
     }
 
     // ── Difficulty list ──
@@ -4611,7 +5816,8 @@ export class Game {
 
   _handleRaidMenuClick(sx, sy) {
     const { px, py, PW, PH } = this._raidMenuPanelRect();
-    if (sx < px || sx > px + PW || sy < py || sy > py + PH) {
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
       this.raidMenuOpen = false;
       return;
     }
@@ -4679,13 +5885,11 @@ export class Game {
     ctx.fillStyle = 'rgba(0,0,0,0.72)';
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = 'rgba(8,12,24,0.97)';
-    r._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = rank.color;
-    ctx.lineWidth = 2;
-    r._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.stroke();
+    // Shared bronze frame + rank-colored accent line on top + ✕ close button
+    r.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    ctx.fillStyle = rank.color;
+    ctx.fillRect(px + 4, py + 3, PW - 8, 1);
+    r.drawCloseButton(ctx, px, py, PW);
 
     // Header
     ctx.fillStyle = rank.color;
@@ -4693,7 +5897,7 @@ export class Game {
     ctx.textAlign = 'center';
     const outcome = raid.failed ? 'RAID FAILED' : 'RAID COMPLETE';
     ctx.fillText(`${outcome} — ${rank.label} RANK`, px + PW / 2, py + 28);
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = '#a08848';
     ctx.font = '11px monospace';
     ctx.fillText(`${raid.raidDef.name}  ·  ${raid.diff.name}`, px + PW / 2, py + 46);
 
@@ -4706,7 +5910,7 @@ export class Game {
     const mins   = Math.floor(raid.timer / 60);
     const secs   = Math.floor(raid.timer % 60);
     const stats  = [
-      ['Floors Cleared',  `${raid.floorsCleared} / ${raid.totalFloors}`],
+      ['Rooms Cleared',   `${raid.roomsCleared} / ${raid.totalRooms}`],
       ['Time',            `${mins}m ${secs}s`],
       ['Kills',           String(raid.killCount)],
       ['Damage Taken',    String(Math.round(raid.damageTaken))],
@@ -4784,6 +5988,12 @@ export class Game {
     const PW = 440, PH = 490;
     const px = Math.floor((this.canvas.width  - PW) / 2);
     const py = Math.floor((this.canvas.height - PH) / 2);
+    // ✕ or click outside both close the summary and claim loot.
+    if (this._isCloseClick(sx, sy, px, py, PW) ||
+        sx < px || sx > px + PW || sy < py || sy > py + PH) {
+      this._exitRaid();
+      return;
+    }
     const btnW = 150, btnH = 34;
     const btnX = px + Math.floor((PW - btnW) / 2);
     const btnY = py + PH - btnH - 14;
@@ -4797,10 +6007,11 @@ export class Game {
   _drawRaidFloorHUD(ctx) {
     const raid = this.activeRaid;
     if (!raid) return;
-    const W        = this.canvas.width;
-    const panW     = 200, panH = 40;
-    const panX     = Math.floor((W - panW) / 2);
-    const panY     = 12;
+    const W      = this.canvas.width;
+    const panW   = 240, panH = 44;
+    const panX   = Math.floor((W - panW) / 2);
+    const panY   = 12;
+    const room   = raid.currentRoom;
     const liveMobs = raid.mobContainer.mobs.filter(m => !m.dead).length;
 
     ctx.save();
@@ -4812,19 +6023,65 @@ export class Game {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    ctx.fillStyle = '#a855f7';
+    // Room progress + type label (boss rooms render in red for emphasis).
+    const isBoss = room && room.type === 'boss';
+    ctx.fillStyle = isBoss ? '#e74c3c' : '#a855f7';
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'center';
-    ctx.fillText(`Floor ${raid.currentFloorIdx + 1} / ${raid.totalFloors}`, panX + panW / 2, panY + 16);
-
-    ctx.fillStyle = liveMobs > 0 ? '#e74c3c' : '#27ae60';
-    ctx.font = '10px monospace';
     ctx.fillText(
-      liveMobs > 0
-        ? `${liveMobs} enem${liveMobs === 1 ? 'y' : 'ies'} remaining`
-        : raid._floorAdvancing ? 'Next floor incoming...' : 'Floor cleared!',
-      panX + panW / 2, panY + 31
+      `Room ${raid.currentRoomIdx + 1} / ${raid.totalRooms}  ·  ${room ? room.type.toUpperCase() : ''}`,
+      panX + panW / 2, panY + 16
     );
+
+    // Status line varies per room type. Rooms no longer auto-advance —
+    // cleared non-boss rooms prompt the player to walk through the north door.
+    let status = '';
+    let statusColor = '#ccc';
+    if (!room) {
+      status = '';
+    } else if (room.type === 'mob') {
+      if (liveMobs > 0) {
+        status = `${liveMobs} enem${liveMobs === 1 ? 'y' : 'ies'} remaining`;
+        statusColor = '#e74c3c';
+      } else {
+        status = 'Room cleared — north door unlocked';
+        statusColor = '#27ae60';
+      }
+    } else if (room.type === 'puzzle') {
+      if (room.puzzleType === 'plates') {
+        const lit = raid.plates.filter(p => p.active).length;
+        status = room.cleared ? 'Plates aligned — north door unlocked'
+                              : `Pressure plates: ${lit} / ${raid.plates.length}`;
+      } else if (room.puzzleType === 'braziers') {
+        const lit = raid.braziers.filter(b => b.lit).length;
+        status = room.cleared ? 'All braziers lit — north door unlocked'
+                              : `Braziers lit: ${lit} / ${raid.braziers.length}`;
+      } else if (room.puzzleType === 'sequence') {
+        const seq = room.sequence;
+        status = room.cleared ? 'Sequence complete — north door unlocked'
+                              : `Step on plate ${seq ? seq.order[seq.index] + 1 : '?'} next`;
+      }
+      statusColor = room.cleared ? '#27ae60' : '#e8d44d';
+    } else if (room.type === 'resource') {
+      status = room.cleared
+        ? 'Supplies claimed — north door unlocked'
+        : 'Click the supply chest to gather loot';
+      statusColor = room.cleared ? '#27ae60' : '#9ac7ff';
+    } else if (room.type === 'boss') {
+      if (liveMobs > 0) {
+        status = `Boss: ${raid.mobs[0]?.name ?? 'Boss'}`;
+        statusColor = '#e74c3c';
+      } else {
+        status = raid.chest && !raid.chest.consumed
+          ? 'Click the chest to claim your reward'
+          : 'Victory!';
+        statusColor = '#f1c40f';
+      }
+    }
+
+    ctx.fillStyle = statusColor;
+    ctx.font = '10px monospace';
+    ctx.fillText(status, panX + panW / 2, panY + 34);
     ctx.restore();
   }
 

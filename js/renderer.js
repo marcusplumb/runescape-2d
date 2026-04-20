@@ -18,6 +18,7 @@ import {
   MO_PALETTES, MO_STYLE_ROWS,
 } from './makeover.js';
 import { drawHairStyle, drawBodyStyle } from './player.js';
+import { drawHelmet, drawChestplate, drawLeggings } from './equipment.js';
 import {
   FORGE_PW, FORGE_HEADER_H, FORGE_TAB_H, FORGE_ROW_H,
   SMELT_PH, SMITH_PH, SMITH_CONTENT_H,
@@ -26,7 +27,9 @@ import { EQUIP_ID_TO_ITEM } from './items.js';
 import { GEAR_BY_ID } from './gear.js';
 import {
   ROOM_DEFS, getUnlockedRoomDefs, furnitureForRoom,
+  flattenFurnitureVariants, sortedFurnitureEntries,
   rotatedFootprint,
+  FLOOR_TINT_OPTIONS, WALL_TINT_OPTIONS,
   GRID_COLS, GRID_ROWS,
   BM_PW, BM_PH, BM_HEADER_H, BM_GRID_CELL, BM_GRID_OFF, BM_GRID_TOP, BM_SPLIT_X,
 } from './housing.js';
@@ -38,6 +41,22 @@ const ANIMATED_TILES = new Set([
   TILES.FIRE, TILES.PORTAL,
   TILES.FOUNTAIN,
   TILES.HEARTH, TILES.FURN_CANDELABRA,
+  TILES.FURN_POND_WATER,
+  TILES.FURN_FISH_TANK,
+]);
+// Tiles whose sprite extends visually beyond their own tile bounds (e.g. a tall
+// grandfather clock spanning into the tile above). Skipped from the chunk
+// cache and drawn fresh each frame in a post-pass so the overhang isn't
+// clipped at chunk boundaries.
+const OVERHANG_TILES = new Set([
+  TILES.FURN_CLOCK,
+  TILES.FURN_WARDROBE,
+  TILES.FURN_BOOKSHELF,
+  TILES.ARMOR_STAND,
+  TILES.FURN_THRONE,
+  TILES.FURN_LANTERN,
+  TILES.FURN_VASE,
+  TILES.FURN_WEAPON_CASE,
 ]);
 // Prop tiles that don't fill their cell — rendered on top of the underlying ground tile
 const PROP_TILES = new Set([
@@ -49,6 +68,19 @@ const PROP_TILES = new Set([
   TILES.FURN_BED, TILES.FURN_BENCH,
   TILES.FURN_CAULDRON, TILES.FURN_CANDELABRA, TILES.FURN_TAPESTRY,
   TILES.FURN_WARDROBE, TILES.FURN_HAY_BALE, TILES.FURN_SCARECROW,
+  TILES.FURN_STOOL, TILES.FURN_THRONE, TILES.FURN_PAINTING,
+  TILES.FURN_VASE, TILES.FURN_NIGHTSTAND, TILES.FURN_FLOWER_PATCH,
+  TILES.FURN_CLOCK, TILES.FURN_LANTERN,
+  // Interactive display furniture
+  TILES.FURN_WEAPON_CASE, TILES.FURN_FISH_MOUNT, TILES.FURN_TROPHY_PLAQUE,
+  TILES.FURN_RELIC_SHELF, TILES.FURN_ACHIEVEMENTS_BOOK,
+  // Garden / taming plot decorations
+  TILES.FURN_GARDEN_ROCK, TILES.FURN_POND_WATER,
+  TILES.FURN_TRAIL_DIRT, TILES.FURN_TRAIL_STONE,
+  TILES.FURN_TRAIL_GRAVEL, TILES.FURN_TRAIL_FLAGSTONE,
+  // Misc new furniture
+  TILES.FURN_FISH_TANK, TILES.FURN_ALCHEMY_TABLE,
+  TILES.FURN_ARCHERY_TARGET, TILES.FURN_WINE_CASK, TILES.FURN_LOOM,
   // Kingdom shop interior props
   TILES.HEARTH, TILES.BUTCHER_BLOCK, TILES.MEAT_HOOK,
   TILES.WEAPON_RACK, TILES.ARMOR_STAND, TILES.DISPLAY_SHELF,
@@ -204,6 +236,94 @@ export class Renderer {
     this._itemById = new Map(Object.values(ITEMS).map(item => [item.id, item]));
   }
 
+  /** Parse a #rrggbb hex string to [r, g, b] (0..255). */
+  static _parseHex(hex) {
+    const h = hex.replace('#', '');
+    return [
+      parseInt(h.slice(0, 2), 16),
+      parseInt(h.slice(2, 4), 16),
+      parseInt(h.slice(4, 6), 16),
+    ];
+  }
+
+  /** Shift a colour's lightness by `amt` (−1..1). Positive = lighter. */
+  static shadeHex(hex, amt) {
+    const [r, g, b] = Renderer._parseHex(hex);
+    const f = amt > 0 ? (255 - 0) : 0;
+    const k = amt > 0 ? amt : -amt;
+    const adj = (c) => {
+      const target = amt > 0 ? 255 : 0;
+      return Math.max(0, Math.min(255, Math.round(c + (target - c) * k))) | 0;
+    };
+    return `#${adj(r).toString(16).padStart(2, '0')}${adj(g).toString(16).padStart(2, '0')}${adj(b).toString(16).padStart(2, '0')}`;
+    void f;
+  }
+
+  /** Blend two #rrggbb colours; t=0 → a, t=1 → b. */
+  static mixHex(a, b, t) {
+    const [ar, ag, ab] = Renderer._parseHex(a);
+    const [br, bg, bb] = Renderer._parseHex(b);
+    const r = Math.round(ar + (br - ar) * t);
+    const g = Math.round(ag + (bg - ag) * t);
+    const bl = Math.round(ab + (bb - ab) * t);
+    return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${bl.toString(16).padStart(2, '0')}`;
+  }
+
+  /** Derive a 5-tone wood palette from a primary tint.
+   *  Used by variant-aware furniture sprites so all shades stay consistent
+   *  when the player picks oak / yew / magic / maple / etc. */
+  static woodPalette(tint) {
+    const base = tint || '#5a3418';
+    return {
+      dk:   Renderer.shadeHex(base, -0.35),  // deepest shadow
+      mid:  base,
+      lt:   Renderer.shadeHex(base, +0.18),
+      hi:   Renderer.shadeHex(base, +0.35),  // top highlight
+      shdw: Renderer.shadeHex(base, -0.55),  // drop shadow
+    };
+  }
+
+  /** Derive a 4-tone fabric palette (rug / cushion / tapestry). */
+  static fabricPalette(tint) {
+    const base = tint || '#8a4a40';
+    return {
+      dk:  Renderer.shadeHex(base, -0.30),
+      mid: base,
+      lt:  Renderer.shadeHex(base, +0.20),
+      hi:  Renderer.shadeHex(base, +0.38),
+    };
+  }
+
+  /** Rect of the shared top-right ✕ close button, relative to a panel.
+   *  Match this in every modal's click handler so the X consistently closes. */
+  closeButtonRect(panelX, panelY, panelW) {
+    const SZ = 22, INSET = 8;
+    return { x: panelX + panelW - SZ - INSET, y: panelY + INSET, w: SZ, h: SZ };
+  }
+
+  /** Draw the shared top-right ✕ close button on a panel. */
+  drawCloseButton(ctx, panelX, panelY, panelW, mouseX = -1, mouseY = -1) {
+    const r = this.closeButtonRect(panelX, panelY, panelW);
+    const hover = mouseX >= r.x && mouseX <= r.x + r.w && mouseY >= r.y && mouseY <= r.y + r.h;
+    // Oxblood button body with a bronze-style bevel
+    ctx.fillStyle = hover ? '#5a1010' : '#2a0808';
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+    ctx.fillStyle = hover ? '#b04040' : '#7a2020';
+    ctx.fillRect(r.x, r.y, r.w, 1);
+    ctx.fillRect(r.x, r.y, 1, r.h);
+    ctx.fillStyle = '#1a0404';
+    ctx.fillRect(r.x, r.y + r.h - 1, r.w, 1);
+    ctx.fillRect(r.x + r.w - 1, r.y, 1, r.h);
+    ctx.fillStyle = hover ? '#ffd0d0' : '#e07070';
+    ctx.font = 'bold 13px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✕', r.x + r.w / 2, r.y + r.h / 2 + 1);
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    return r;
+  }
+
   /** Shared bronze-trim HUD frame — matches the side panel and minimap panel.
    *  Pass `rivets: true` for the 5×5 corner rivets (used on larger panels). */
   drawBronzeFrame(ctx, x, y, w, h, { rivets = false } = {}) {
@@ -331,6 +451,11 @@ export class Renderer {
         }
       }
     }
+
+    // Overhang tiles (e.g. grandfather clock) are NOT drawn here — the caller
+    // pushes them into its entity-sort buffer via collectOverhangSortables so
+    // they interleave correctly with players/mobs (entities north of a clock
+    // draw behind its crown, entities south draw in front).
 
     // Evict chunks far from the viewport to bound memory (~90 chunks max kept)
     const BORDER = 2;
@@ -467,10 +592,18 @@ export class Renderer {
           } else if (STRUCTURE_DOOR_TILES.has(groundId)) {
             groundColor = _palette.door;
           }
+          // Player-house paint override — replaces the base fill on floor tiles
+          // so prop sprites (e.g. furniture) sit on the tinted floor.
+          const floorTintU = world.floorTints?.get(`${col},${row}`);
+          if (floorTintU) groundColor = floorTintU;
           ctx.fillStyle = groundColor;
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
           if (TILE_HAS_DETAIL.has(groundId) && !ANIMATED_TILES.has(groundId))
             this._drawTileDetail(ctx, groundId, px, py, col, row, world);
+          // OVERHANG_TILES: skip baking the furniture sprite into the chunk
+          // cache — the caller depth-sorts it via collectOverhangSortables
+          // so entities get correct front/back occlusion against the sprite.
+          if (OVERHANG_TILES.has(tile)) continue;
         } else {
           // Apply biome palette override for structure tiles only
           let tileColor = TILE_COLORS[tile] || '#000';
@@ -485,6 +618,11 @@ export class Renderer {
           } else if (STRUCTURE_FLOOR_TILES.has(tile) && _hasAdjacentWall(world, col, row)) {
             tileColor = _palette.floor;
           }
+          // Player-house paint overrides — floor tiles first, then walls.
+          const floorTintU = world.floorTints?.get(`${col},${row}`);
+          if (floorTintU) tileColor = floorTintU;
+          const wallTintU = world.wallTints?.get(`${col},${row}`);
+          if (wallTintU) tileColor = wallTintU;
           ctx.fillStyle = tileColor;
           ctx.fillRect(px, py, TILE_SIZE, TILE_SIZE);
         }
@@ -1551,6 +1689,299 @@ export class Renderer {
       return;
     }
 
+    // ── Framed painting (wall-mounted) ─────────────────────
+    //
+    // Wall-mounted props like MEAT_HOOK / HEARTH use a direct case here (not
+    // the FURN_SET sprite dispatch below) so the wall face renders underneath
+    // via propGroundMap and the prop draws on top without being obscured.
+
+    if (tile === TILES.FURN_PAINTING) {
+      // Sits on the wall face (y = 10..28) so it hangs at the same height
+      // as other wall-mounts like the meat hooks.
+      // Ornate gilt frame
+      ctx.fillStyle = '#2a1808'; ctx.fillRect(px + 4,  py + 10, 24, 18);  // frame outer
+      ctx.fillStyle = '#c8a227'; ctx.fillRect(px + 5,  py + 11, 22, 16);  // gold inlay
+      ctx.fillStyle = '#8a6018'; ctx.fillRect(px + 6,  py + 12, 20, 14);  // inner shadow
+      // Canvas — stylised landscape
+      ctx.fillStyle = '#79bce8'; ctx.fillRect(px + 7,  py + 13, 18, 7);   // sky
+      ctx.fillStyle = '#f4cf3f'; ctx.fillRect(px + 20, py + 15, 3, 3);    // sun
+      ctx.fillStyle = '#4a7a2a'; ctx.fillRect(px + 7,  py + 19, 18, 3);   // hill band
+      ctx.fillStyle = '#6a8a3a'; ctx.fillRect(px + 8,  py + 18, 3, 2);    // far hill L
+      ctx.fillRect(px + 14, py + 18, 4, 2);                               // far hill R
+      ctx.fillStyle = '#2a4a18'; ctx.fillRect(px + 7,  py + 22, 18, 3);   // ground
+      // Frame highlight + small plaque
+      ctx.fillStyle = '#e4c84a'; ctx.fillRect(px + 5,  py + 11, 22, 1);   // top highlight
+      ctx.fillStyle = '#c8a227'; ctx.fillRect(px + 13, py + 26, 6, 1);    // plaque
+      // Hanging wire (small peak above frame)
+      ctx.fillStyle = '#2a1808'; ctx.fillRect(px + 15, py + 9, 2, 1);
+      return;
+    }
+
+    // ── Mounted fish plaque (wall-mount) ───────────────────
+    if (tile === TILES.FURN_FISH_MOUNT) {
+      // Sits on the wall face (y = 10..28), aligned with other wall-mounts.
+      // Wooden plaque backdrop
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 3,  py + 10, 26, 18);
+      ctx.fillStyle = '#6a4018'; ctx.fillRect(px + 4,  py + 11, 24, 16);
+      ctx.fillStyle = '#8a5820'; ctx.fillRect(px + 4,  py + 11, 24, 1);    // top highlight
+      ctx.fillStyle = '#2a1604'; ctx.fillRect(px + 4,  py + 26, 24, 1);    // bottom shadow
+      // Gold inset rim around the full inner display area
+      ctx.fillStyle = '#c8a227';
+      ctx.fillRect(px + 6,  py + 12, 20, 1);
+      ctx.fillRect(px + 6,  py + 25, 20, 1);
+      ctx.fillRect(px + 6,  py + 12, 1, 14);
+      ctx.fillRect(px + 25, py + 12, 1, 14);
+
+      const fm = world?.displayContent?.get(`${c},${r}`);
+      if (fm?.content) {
+        // Draw the actual fish inventory icon, centred in the plaque's
+        // inner display area. Weight / rarity are shown via the hover
+        // tooltip so the icon can use the full space.
+        const fishDef = this._itemById?.get(fm.content.itemId);
+        if (fishDef?.draw) {
+          const ICON = 14;
+          const iconX = px + 16 - ICON / 2;           // centred horizontally
+          const iconY = py + 12 + (13 - ICON) / 2;    // centred in y=12..25
+          fishDef.draw(ctx, iconX, iconY, ICON);
+        }
+      } else {
+        // Empty: faint "?" cue centred in the display area
+        ctx.fillStyle = '#8a6018';
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('?', px + 16, py + 19);
+        ctx.textBaseline = 'alphabetic';
+      }
+      return;
+    }
+
+    // ── Trophy plaque (wall-mount, engraved text) ───────────
+    if (tile === TILES.FURN_TROPHY_PLAQUE) {
+      // Sits on the wall face (y = 10..28), aligned with other wall-mounts.
+      ctx.fillStyle = '#2a1604'; ctx.fillRect(px + 3,  py + 10, 26, 18);
+      ctx.fillStyle = '#5a3010'; ctx.fillRect(px + 4,  py + 11, 24, 16);
+      ctx.fillStyle = '#7a4820'; ctx.fillRect(px + 4,  py + 11, 24, 1);    // highlight
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 4,  py + 26, 24, 1);
+      // Inner gold trim
+      ctx.fillStyle = '#c8a227';
+      ctx.fillRect(px + 6,  py + 13, 20, 1);
+      ctx.fillRect(px + 6,  py + 25, 20, 1);
+      ctx.fillRect(px + 6,  py + 13, 1, 13);
+      ctx.fillRect(px + 25, py + 13, 1, 13);
+      // Text engraving
+      const tp = world?.displayContent?.get(`${c},${r}`);
+      const label = (tp?.content?.text || '').slice(0, 10) || '— — —';
+      ctx.fillStyle = tp?.content?.text ? '#f0d090' : '#6a5030';
+      ctx.font = 'bold 7px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(label, px + 16, py + 19);
+      ctx.fillText(tp?.content?.text ? '★' : ' ', px + 16, py + 24);
+      return;
+    }
+
+    // ── WEAPON_RACK — wall-mounted rack with 3 weapons (wall face y=10..28) ──
+    if (tile === TILES.WEAPON_RACK) {
+      const rail    = '#7a4a1e', railHi = '#9a6028', railSh = '#4a2c12';
+      const cap     = '#9a7040', bracket = '#3a2a14';
+      const hilt    = '#5a3a1e', guard = '#806040', pommel = '#c8a030';
+      const blade   = '#b8b8cc', bladeHi = '#d0d0e0', bladeShd = '#7a7a8a';
+      const axeH    = '#8a8890', axeHi = '#a8a8b0', axeShd = '#5a5a6a';
+      const haftDk  = '#3a2008';
+
+      // Drop shadow below the rack
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(px + 4, py + 27, 24, 1);
+
+      // Wooden mounting rail across the middle of the wall face
+      ctx.fillStyle = rail;    ctx.fillRect(px + 1, py + 15, 30, 5);
+      ctx.fillStyle = railHi;  ctx.fillRect(px + 2, py + 15, 28, 1);
+      ctx.fillStyle = railHi;  ctx.fillRect(px + 2, py + 16, 28, 1);
+      ctx.fillStyle = railSh;  ctx.fillRect(px + 2, py + 19, 28, 1);
+      // Rail end caps (iron brackets into the wall)
+      ctx.fillStyle = cap;     ctx.fillRect(px + 0, py + 14, 3, 7);
+      ctx.fillRect(px + 29, py + 14, 3, 7);
+      ctx.fillStyle = bracket; ctx.fillRect(px + 0, py + 19, 3, 2);
+      ctx.fillRect(px + 29, py + 19, 3, 2);
+
+      // ── SWORD (left) — hilt above rail, blade hanging below ──
+      // Pommel + grip above rail
+      ctx.fillStyle = pommel; ctx.fillRect(px + 5, py + 10, 3, 2);
+      ctx.fillStyle = hilt;   ctx.fillRect(px + 5, py + 12, 3, 3);
+      // Guard sitting across rail
+      ctx.fillStyle = guard;  ctx.fillRect(px + 3, py + 14, 7, 2);
+      ctx.fillStyle = '#a07848'; ctx.fillRect(px + 3, py + 14, 7, 1);
+      // Blade hanging down
+      ctx.fillStyle = blade;  ctx.fillRect(px + 5, py + 20, 3, 8);
+      ctx.fillStyle = bladeHi;ctx.fillRect(px + 5, py + 20, 1, 7);
+      ctx.fillStyle = bladeShd; ctx.fillRect(px + 7, py + 20, 1, 8);
+      ctx.fillStyle = blade;  ctx.fillRect(px + 6, py + 27, 1, 1);   // sword point
+
+      // ── AXE (centre) — head above rail, haft hanging below ──
+      // Haft poking up above rail
+      ctx.fillStyle = haftDk; ctx.fillRect(px + 15, py + 11, 2, 4);
+      // Axe head — wide blade above the rail
+      ctx.fillStyle = axeH;   ctx.fillRect(px + 13, py + 10, 8, 5);
+      ctx.fillStyle = axeHi;  ctx.fillRect(px + 13, py + 10, 8, 2);
+      ctx.fillStyle = axeShd; ctx.fillRect(px + 13, py + 14, 8, 1);
+      // Axe edge tip
+      ctx.fillStyle = axeHi;  ctx.fillRect(px + 12, py + 11, 1, 3);
+      ctx.fillStyle = axeHi;  ctx.fillRect(px + 21, py + 11, 1, 3);
+      // Haft hanging below rail
+      ctx.fillStyle = haftDk; ctx.fillRect(px + 15, py + 20, 2, 7);
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(px + 15, py + 20, 1, 7);
+
+      // ── SPEAR (right) — tip above rail, haft hanging below ──
+      // Spear tip (triangular)
+      ctx.fillStyle = blade;  ctx.fillRect(px + 24, py + 10, 3, 5);
+      ctx.fillStyle = bladeHi;ctx.fillRect(px + 24, py + 10, 1, 5);
+      ctx.fillStyle = bladeShd; ctx.fillRect(px + 26, py + 10, 1, 5);
+      // Spear socket
+      ctx.fillStyle = '#6a6a6a'; ctx.fillRect(px + 24, py + 13, 3, 1);
+      // Haft hanging below rail
+      ctx.fillStyle = haftDk; ctx.fillRect(px + 25, py + 20, 2, 7);
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(px + 25, py + 20, 1, 7);
+
+      // Subtle shadow along the rail's bottom where weapons touch
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(px + 3, py + 20, 7, 1);
+      ctx.fillRect(px + 13, py + 20, 9, 1);
+      ctx.fillRect(px + 23, py + 20, 6, 1);
+      return;
+    }
+
+    // ── Weapon display case — glass-fronted cabinet (modest overhang) ──
+    if (tile === TILES.FURN_WEAPON_CASE) {
+      const wood   = '#5a3418', woodDk = '#3a1f08', woodLt = '#7a4820';
+      const gold   = '#c8a227', goldLt = '#f1cc40', goldDk = '#8a6818';
+      const velvet = '#6a0810';
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(px + 4, py + 30, 24, 2);
+
+      // ── Crown pediment (top of sprite, y = -14..-8) ────────
+      ctx.fillStyle = gold;    ctx.fillRect(px + 2,  py - 14, 28, 2);
+      ctx.fillStyle = goldLt;  ctx.fillRect(px + 2,  py - 14, 28, 1);
+      ctx.fillStyle = goldDk;  ctx.fillRect(px + 2,  py - 12, 28, 1);
+      ctx.fillStyle = wood;    ctx.fillRect(px + 3,  py - 11, 26, 3);
+      ctx.fillStyle = woodLt;  ctx.fillRect(px + 3,  py - 11, 26, 1);
+      // Central crest
+      ctx.fillStyle = gold;    ctx.fillRect(px + 14, py - 17, 4, 3);
+      ctx.fillStyle = goldLt;  ctx.fillRect(px + 14, py - 17, 3, 1);
+
+      // ── Cabinet body (single tall pane, y = -8..+28) ──────
+      ctx.fillStyle = woodDk;  ctx.fillRect(px + 2,  py - 8, 28, 36);
+      ctx.fillStyle = wood;    ctx.fillRect(px + 3,  py - 7, 26, 34);
+      ctx.fillStyle = gold;    ctx.fillRect(px + 3,  py - 8, 26, 1);
+      ctx.fillStyle = goldDk;  ctx.fillRect(px + 3,  py + 27, 26, 1);
+
+      // ── Single glass pane from top to bottom (no mid divider) ──
+      ctx.fillStyle = 'rgba(200,230,255,0.22)';
+      ctx.fillRect(px + 5,  py - 5, 22, 29);
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      ctx.fillRect(px + 5,  py - 5, 22, 1);
+      ctx.fillRect(px + 5,  py - 5, 1, 29);
+      // Velvet backdrop behind weapon (full height)
+      ctx.fillStyle = velvet;  ctx.fillRect(px + 6,  py - 4, 20, 27);
+
+      // Assigned weapon sprite — centred in the unobstructed pane
+      const wc = world?.displayContent?.get(`${c},${r}`);
+      if (wc?.content?.itemId && this._itemById?.has(wc.content.itemId)) {
+        // Draw weapon centred vertically across the full glass pane
+        this._itemById.get(wc.content.itemId).draw(ctx, px + 4, py - 2, 24);
+      } else {
+        // Empty: faint sword silhouette + "?" hint
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.fillRect(px + 15, py - 2, 2, 20);
+        ctx.fillRect(px + 13, py + 14, 6, 1);
+        ctx.fillStyle = gold;
+        ctx.font = 'bold 12px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', px + 16, py + 10);
+        ctx.textAlign = 'left';
+      }
+
+      // Small brass door latch at bottom
+      ctx.fillStyle = gold;    ctx.fillRect(px + 14, py + 25, 4, 2);
+      ctx.fillStyle = goldDk;  ctx.fillRect(px + 15, py + 26, 2, 1);
+      // Feet
+      ctx.fillStyle = woodDk;
+      ctx.fillRect(px + 3, py + 28, 3, 3);
+      ctx.fillRect(px + 26, py + 28, 3, 3);
+      return;
+    }
+
+    // ── Relic shelf (floor, displays one item) ───────────────
+    if (tile === TILES.FURN_RELIC_SHELF) {
+      // Bracket (wall-attached look)
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 4,  py + 10, 24, 14);
+      ctx.fillStyle = '#6a4018'; ctx.fillRect(px + 5,  py + 11, 22, 12);
+      ctx.fillStyle = '#8a5820'; ctx.fillRect(px + 5,  py + 11, 22, 1); // top sheen
+      // Shelf surface
+      ctx.fillStyle = '#5a3010'; ctx.fillRect(px + 3,  py + 9, 26, 3);
+      ctx.fillStyle = '#7a4818'; ctx.fillRect(px + 3,  py + 9, 26, 1);
+      // Item on shelf
+      const rs = world?.displayContent?.get(`${c},${r}`);
+      if (rs?.content?.itemId && this._itemById?.has(rs.content.itemId)) {
+        this._itemById.get(rs.content.itemId).draw(ctx, px + 10, py - 4, 14);
+        // Soft light glow on the shelf around the item
+        ctx.fillStyle = 'rgba(255,220,140,0.20)';
+        ctx.fillRect(px + 6, py + 9, 20, 2);
+      } else {
+        // Empty: dashed question marker
+        ctx.fillStyle = '#c8a227';
+        ctx.font = 'bold 9px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', px + 16, py + 5);
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.fillRect(px + 13, py + 7, 6, 1);
+      }
+      // Brackets / supports on either side
+      ctx.fillStyle = '#3a2008';
+      ctx.fillRect(px + 5,  py + 23, 2, 5);
+      ctx.fillRect(px + 25, py + 23, 2, 5);
+      return;
+    }
+
+    // ── Achievements book (floor, on pedestal) ───────────────
+    if (tile === TILES.FURN_ACHIEVEMENTS_BOOK) {
+      // Pedestal
+      ctx.fillStyle = '#2a1404'; ctx.fillRect(px + 6,  py + 19, 20, 12);
+      ctx.fillStyle = '#5a3010'; ctx.fillRect(px + 7,  py + 20, 18, 10);
+      ctx.fillStyle = '#7a4820'; ctx.fillRect(px + 7,  py + 20, 18, 1);  // top sheen
+      ctx.fillStyle = '#1a0804'; ctx.fillRect(px + 7,  py + 29, 18, 1);  // shadow
+      // Pedestal feet
+      ctx.fillStyle = '#2a1404';
+      ctx.fillRect(px + 5,  py + 30, 4, 1);
+      ctx.fillRect(px + 23, py + 30, 4, 1);
+      // Top plinth
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 4,  py + 16, 24, 4);
+      ctx.fillStyle = '#6a4018'; ctx.fillRect(px + 5,  py + 17, 22, 2);
+      // Book — open, tilted toward viewer
+      // Left page
+      ctx.fillStyle = '#f0e8d0'; ctx.fillRect(px + 6,  py + 10, 10, 8);
+      // Right page
+      ctx.fillRect(px + 16, py + 10, 10, 8);
+      // Page lines
+      ctx.fillStyle = 'rgba(80,60,20,0.45)';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillRect(px + 7,  py + 12 + i * 2, 8, 1);
+        ctx.fillRect(px + 17, py + 12 + i * 2, 8, 1);
+      }
+      // Spine
+      ctx.fillStyle = '#6a0810'; ctx.fillRect(px + 15, py + 9,  2, 10);
+      // Gilded glow on top of book
+      ctx.fillStyle = 'rgba(255,220,140,0.28)';
+      ctx.fillRect(px + 6, py + 9, 20, 1);
+      // Small star to indicate interactivity
+      ctx.fillStyle = '#f1c40f';
+      ctx.fillRect(px + 15, py + 6, 2, 2);
+      ctx.fillRect(px + 14, py + 7, 4, 1);
+      ctx.fillRect(px + 15, py + 7, 2, 1);
+      return;
+    }
+
     // ── Butcher's chopping block ──────────────────────────
 
     if (tile === TILES.BUTCHER_BLOCK) {
@@ -1876,39 +2307,75 @@ export class Renderer {
     // ── Armor stand (chainmail mannequin) ─────────────────
 
     if (tile === TILES.ARMOR_STAND) {
-      // Wooden T-stand base
-      ctx.fillStyle = '#4a2c10'; ctx.fillRect(px + 10, py + 26, 12, 5); // base board
-      ctx.fillStyle = '#5e3a18'; ctx.fillRect(px + 11, py + 27, 10,  2); // board highlight
-      ctx.fillStyle = '#6a3e1a'; ctx.fillRect(px + 15, py + 15,  2, 12); // pole
-      // Shoulder crossbar
-      ctx.fillStyle = '#7a5020'; ctx.fillRect(px + 8,  py + 14, 16,  3);
-      ctx.fillStyle = '#9a6a2a'; ctx.fillRect(px + 9,  py + 15, 14,  1); // bar highlight
+      // Blank wooden mannequin shaped like a player. Helmet / chestplate /
+      // leggings assigned via displayContent are drawn with the same
+      // functions used to render them on the player, so the pieces line up.
+      // Sprite spans y = py - 32 .. py + 32 (64 px tall).
+      //
+      // "Virtual player" anchor: the armour-piece draw functions expect a
+      // player origin (cx, cy) where the body occupies cx..cx+24, cy..cy+32.
+      // We anchor the mannequin head roughly one tile above the base tile
+      // so the whole figure sits neatly atop the plinth.
+      const pcx = px + 4;     // body horizontal origin
+      const pcy = py - 16;    // body vertical origin (head at pcy+1)
+      const wDk = '#3a1e08', wMd = '#5a3018', wLt = '#7a4820', wDkr = '#2a1608';
 
-      // Chainmail torso
-      ctx.fillStyle = '#585666'; ctx.fillRect(px + 10, py + 17, 12,  9);
-      // Chain link texture
-      ctx.fillStyle = '#6c6a7a';
-      ctx.fillRect(px + 11, py + 18, 2, 1); ctx.fillRect(px + 14, py + 18, 2, 1); ctx.fillRect(px + 17, py + 18, 2, 1);
-      ctx.fillRect(px + 12, py + 20, 2, 1); ctx.fillRect(px + 15, py + 20, 2, 1);
-      ctx.fillRect(px + 11, py + 22, 2, 1); ctx.fillRect(px + 14, py + 22, 2, 1); ctx.fillRect(px + 17, py + 22, 2, 1);
-      ctx.fillRect(px + 12, py + 24, 2, 1); ctx.fillRect(px + 15, py + 24, 2, 1);
+      // Drop shadow under the plinth
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(px + 6, py + 30, 20, 2);
 
-      // Steel pauldrons (shoulder plates)
-      ctx.fillStyle = '#8898a8';
-      ctx.fillRect(px + 5,  py + 12, 9, 6);  // left
-      ctx.fillRect(px + 18, py + 12, 9, 6);  // right
-      ctx.fillStyle = '#aab8c8'; // shine
-      ctx.fillRect(px + 6,  py + 13, 7, 2);
-      ctx.fillRect(px + 19, py + 13, 7, 2);
-      ctx.fillStyle = '#606878'; // lower shadow edge
-      ctx.fillRect(px + 5,  py + 17, 9, 1);
-      ctx.fillRect(px + 18, py + 17, 9, 1);
+      // ── Wooden plinth (wider, two-tier) ─────────────
+      ctx.fillStyle = wDkr; ctx.fillRect(px + 5,  py + 18, 22, 13);
+      ctx.fillStyle = wDk;  ctx.fillRect(px + 5,  py + 18, 22, 2);   // top edge
+      ctx.fillStyle = wMd;  ctx.fillRect(px + 6,  py + 19, 20, 1);   // highlight
+      ctx.fillStyle = wDk;  ctx.fillRect(px + 6,  py + 20, 20, 10);  // side face
+      ctx.fillStyle = wMd;  ctx.fillRect(px + 7,  py + 21, 18, 8);   // face centre
+      ctx.fillStyle = wLt;  ctx.fillRect(px + 7,  py + 21, 18, 1);   // sheen
+      ctx.fillStyle = wDkr; ctx.fillRect(px + 6,  py + 29, 20, 1);   // shadow
+      ctx.fillStyle = wDk;  ctx.fillRect(px + 5,  py + 30, 22, 1);
 
-      // Helmet
-      ctx.fillStyle = '#7888a0'; ctx.fillRect(px + 12, py + 4,  8, 8);  // dome
-      ctx.fillStyle = '#9ab0c0'; ctx.fillRect(px + 13, py + 5,  6, 3);  // dome shine
-      ctx.fillStyle = '#606878'; ctx.fillRect(px + 11, py + 11, 10, 2); // visor brim
-      ctx.fillStyle = '#282430'; ctx.fillRect(px + 13, py + 9,   6, 3); // visor slot
+      // ── Wooden head orb (gets covered by helmet when equipped) ─
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 5,  pcy + 1, 14, 12);
+      ctx.fillStyle = wLt;  ctx.fillRect(pcx + 6,  pcy + 1, 12, 2);   // top sheen
+      ctx.fillStyle = wDkr; ctx.fillRect(pcx + 5,  pcy + 11, 14, 2);  // chin shadow
+      // Subtle face groove (suggests sculpted eyes) — hidden once helmet covers
+      ctx.fillStyle = wDkr; ctx.fillRect(pcx + 8, pcy + 5, 2, 1); ctx.fillRect(pcx + 14, pcy + 5, 2, 1);
+
+      // ── Neck peg ─────────────────────────────
+      ctx.fillStyle = wDk;  ctx.fillRect(pcx + 10, pcy + 13, 4, 2);
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 10, pcy + 13, 4, 1);
+
+      // ── Torso form (covered by chestplate) ────────────
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 5,  pcy + 13, 14, 9);
+      ctx.fillStyle = wLt;  ctx.fillRect(pcx + 5,  pcy + 13, 14, 1);
+      ctx.fillStyle = wDkr; ctx.fillRect(pcx + 5,  pcy + 21, 14, 1);
+      ctx.fillStyle = wLt;  ctx.fillRect(pcx + 5,  pcy + 13, 1, 9);   // left edge
+      ctx.fillStyle = wDk;  ctx.fillRect(pcx + 18, pcy + 13, 1, 9);
+      // Center "button" line (mannequin seam)
+      ctx.fillStyle = wDk;  ctx.fillRect(pcx + 11, pcy + 14, 2, 7);
+
+      // ── Shoulders (small stubs flanking torso) ─────────
+      ctx.fillStyle = wDk;  ctx.fillRect(pcx + 3,  pcy + 13, 3, 5);
+      ctx.fillStyle = wDk;  ctx.fillRect(pcx + 18, pcy + 13, 3, 5);
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 3,  pcy + 13, 3, 1);
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 18, pcy + 13, 3, 1);
+
+      // ── Legs (covered by leggings) ────────────────
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 5,  pcy + 22, 5, 10);
+      ctx.fillStyle = wMd;  ctx.fillRect(pcx + 14, pcy + 22, 5, 10);
+      ctx.fillStyle = wLt;  ctx.fillRect(pcx + 5,  pcy + 22, 5, 1);
+      ctx.fillStyle = wLt;  ctx.fillRect(pcx + 14, pcy + 22, 5, 1);
+      ctx.fillStyle = wDkr; ctx.fillRect(pcx + 5,  pcy + 31, 5, 1);
+      ctx.fillStyle = wDkr; ctx.fillRect(pcx + 14, pcy + 31, 5, 1);
+
+      // ── Assigned armour pieces (same functions the player uses) ──
+      const ac = world?.displayContent?.get(`${c},${r}`)?.content;
+      if (ac) {
+        // Legs first (so chestplate/helmet overlap naturally), bob = 0, legSpread = 0
+        if (ac.leggings)   drawLeggings  (ctx, pcx, pcy, 1, ac.leggings,   0, 0);
+        if (ac.chestplate) drawChestplate(ctx, pcx, pcy, 1, ac.chestplate, 0, 0);
+        if (ac.helmet)     drawHelmet    (ctx, pcx, pcy, 1, ac.helmet,     0, 0); // 0 = DIR_DOWN (front-facing)
+      }
       return;
     }
 
@@ -3669,34 +4136,680 @@ export class Renderer {
       return;
     }
 
+    // ── GARDEN BOULDER ─────────────────────────────────────────────────
+    if (tile === TILES.FURN_GARDEN_ROCK) {
+      const s1 = (c * 7  + r * 13) % 17;
+      const s2 = (c * 11 + r * 7)  % 19;
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.25)';
+      ctx.fillRect(px + 6, py + 25, 20, 3);
+      // Main boulder body
+      ctx.fillStyle = '#5a5a5a';
+      ctx.fillRect(px + 5,  py + 11, 22, 15);
+      ctx.fillRect(px + 7,  py + 9,  18, 2);
+      ctx.fillRect(px + 9,  py + 7,  14, 2);
+      // Top lit face
+      ctx.fillStyle = '#8a8a8a';
+      ctx.fillRect(px + 7,  py + 9,  18, 3);
+      ctx.fillRect(px + 9,  py + 7,  14, 2);
+      ctx.fillRect(px + 5,  py + 11, 4,  4);   // left cheek sheen
+      // Mid-tone speckles (moss / weathering)
+      ctx.fillStyle = '#6a6a6a';
+      ctx.fillRect(px + 10 + (s1 % 8),  py + 13 + (s2 % 4), 3, 2);
+      ctx.fillRect(px + 15 + (s2 % 6),  py + 18 + (s1 % 3), 4, 2);
+      // Dark undercut
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(px + 5,  py + 23, 22, 2);
+      ctx.fillRect(px + 7,  py + 24, 18, 2);
+      // Moss patches on top
+      ctx.fillStyle = '#4a7a28';
+      ctx.fillRect(px + 12, py + 9, 3, 1);
+      ctx.fillRect(px + 20, py + 11, 3, 1);
+      ctx.fillStyle = '#6a9a38';
+      ctx.fillRect(px + 13, py + 9, 1, 1);
+      return;
+    }
+
+    // ── POND WATER (animated) ──────────────────────────────────────────
+    if (tile === TILES.FURN_POND_WATER) {
+      // Look up neighbour pond tiles so adjacent placements merge into a
+      // seamless body of water instead of tiling visibly.
+      const _isPond = (dc, dr) =>
+        world && world.getTile(c + dc, r + dr) === TILES.FURN_POND_WATER;
+      const pN = _isPond(0, -1), pS = _isPond(0, 1);
+      const pE = _isPond(1, 0),  pW = _isPond(-1, 0);
+
+      // Base water fill
+      ctx.fillStyle = '#2d68a0';
+      ctx.fillRect(px, py, 32, 32);
+      // Slight depth gradient (darker near bottom)
+      ctx.fillStyle = '#265a90';
+      ctx.fillRect(px, py + 22, 32, 10);
+
+      // Stony rim around exposed edges (where there's no neighbour pond)
+      ctx.fillStyle = '#5a5a5a';
+      if (!pN) ctx.fillRect(px,      py,      32, 3);
+      if (!pS) ctx.fillRect(px,      py + 29, 32, 3);
+      if (!pW) ctx.fillRect(px,      py,      3,  32);
+      if (!pE) ctx.fillRect(px + 29, py,      3,  32);
+      // Rim highlight / shadow
+      ctx.fillStyle = '#8a8a8a';
+      if (!pN) ctx.fillRect(px + 1,  py + 1,  30, 1);
+      if (!pW) ctx.fillRect(px + 1,  py + 1,  1,  30);
+      ctx.fillStyle = '#3a3a3a';
+      if (!pS) ctx.fillRect(px,      py + 31, 32, 1);
+      if (!pE) ctx.fillRect(px + 31, py,      1,  32);
+
+      // Animated ripples — sine-phased per-tile so they shimmer
+      const t = this.time;
+      const phase = (c + r) * 0.7;
+      const rip1 = 0.5 + 0.5 * Math.sin(t * 2 + phase);
+      const rip2 = 0.5 + 0.5 * Math.sin(t * 2.7 + phase + 1.3);
+      ctx.fillStyle = `rgba(150,200,240,${0.15 + 0.15 * rip1})`;
+      ctx.fillRect(px + 6,  py + 10, 12, 1);
+      ctx.fillRect(px + 16, py + 18, 10, 1);
+      ctx.fillStyle = `rgba(200,230,255,${0.10 + 0.12 * rip2})`;
+      ctx.fillRect(px + 10, py + 14, 8,  1);
+      ctx.fillRect(px + 4,  py + 22, 6,  1);
+      // Lily pad (visible on some tiles via seed)
+      const s1 = (c * 13 + r * 11) % 23;
+      if (s1 === 0 || s1 === 7) {
+        ctx.fillStyle = '#2e5a22';
+        ctx.fillRect(px + 12, py + 12, 6, 4);
+        ctx.fillStyle = '#4a8a3a';
+        ctx.fillRect(px + 13, py + 12, 4, 1);
+        ctx.fillStyle = '#e0e0e0';
+        ctx.fillRect(px + 14, py + 13, 2, 2);  // lily flower
+      }
+      return;
+    }
+
+    // ── TRAIL: DIRT (packed earth path) ────────────────────────────────
+    if (tile === TILES.FURN_TRAIL_DIRT) {
+      const s1 = (c * 7  + r * 13) % 17;
+      const s2 = (c * 11 + r * 7)  % 19;
+      const s3 = (c * 13 + r * 11) % 23;
+      // Base
+      ctx.fillStyle = '#8b7355';
+      ctx.fillRect(px, py, 32, 32);
+      // Lighter sandy streaks
+      ctx.fillStyle = '#a08668';
+      ctx.fillRect(px + 2 + (s1 % 8), py + 4 + (s2 % 4), 16, 2);
+      ctx.fillRect(px + 6 + (s2 % 6), py + 18 + (s1 % 4), 20, 2);
+      // Darker tread marks
+      ctx.fillStyle = '#6a5840';
+      ctx.fillRect(px + 4 + (s3 % 6), py + 10, 3, 1);
+      ctx.fillRect(px + 14 + (s1 % 8), py + 24, 4, 1);
+      // Specks of pebble
+      ctx.fillStyle = '#5a4a38';
+      ctx.fillRect(px + 8  + (s2 % 14), py + 8  + (s1 % 8), 1, 1);
+      ctx.fillRect(px + 20 + (s3 % 8),  py + 14 + (s2 % 10), 1, 1);
+      ctx.fillRect(px + 5  + (s1 % 18), py + 26 + (s3 % 4),  1, 1);
+      return;
+    }
+
+    // ── TRAIL: STONE COBBLE ────────────────────────────────────────────
+    if (tile === TILES.FURN_TRAIL_STONE) {
+      const s1 = (c * 7  + r * 13) % 17;
+      const s2 = (c * 11 + r * 7)  % 19;
+      // Dark grout base
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(px, py, 32, 32);
+      // Irregular cobbles — 4 per tile in a rough 2x2 grid with jitter
+      const stones = [
+        [ 1 + (s1 % 3),  1 + (s2 % 2),  14 + (s1 % 3), 14 ],
+        [17 + (s2 % 2),  1 + (s1 % 3),  14,            14 + (s2 % 3) ],
+        [ 1 + (s2 % 3), 17 + (s1 % 3),  14 + (s2 % 3), 14 ],
+        [17 + (s1 % 2), 17 + (s2 % 2),  14,            14 + (s1 % 3) ],
+      ];
+      for (const [sx, sy, sw, sh] of stones) {
+        ctx.fillStyle = '#7a7a7a';
+        ctx.fillRect(px + sx, py + sy, sw, sh);
+        ctx.fillStyle = '#8a8a8a';                    // top sheen
+        ctx.fillRect(px + sx, py + sy, sw, 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';     // highlight
+        ctx.fillRect(px + sx + 1, py + sy + 1, 3, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.25)';           // inner shadow bottom
+        ctx.fillRect(px + sx, py + sy + sh - 1, sw, 1);
+      }
+      return;
+    }
+
+    // ── TRAIL: GRAVEL ──────────────────────────────────────────────────
+    if (tile === TILES.FURN_TRAIL_GRAVEL) {
+      const s1 = (c * 7  + r * 13) % 17;
+      const s2 = (c * 11 + r * 7)  % 19;
+      const s3 = (c * 13 + r * 11) % 23;
+      // Base
+      ctx.fillStyle = '#908880';
+      ctx.fillRect(px, py, 32, 32);
+      // Lighter specks (sandy flecks)
+      ctx.fillStyle = '#b0a898';
+      for (let i = 0; i < 14; i++) {
+        const x = (s1 + i * 7)  % 32;
+        const y = (s2 + i * 11) % 32;
+        ctx.fillRect(px + x, py + y, 2, 2);
+      }
+      // Darker pebbles
+      ctx.fillStyle = '#605850';
+      for (let i = 0; i < 10; i++) {
+        const x = (s3 + i * 13) % 32;
+        const y = (s1 + i * 5)  % 32;
+        ctx.fillRect(px + x, py + y, 2, 2);
+      }
+      // Tiny highlights on some pebbles
+      ctx.fillStyle = 'rgba(255,255,255,0.15)';
+      for (let i = 0; i < 6; i++) {
+        const x = (s2 + i * 9)  % 32;
+        const y = (s3 + i * 17) % 32;
+        ctx.fillRect(px + x, py + y, 1, 1);
+      }
+      return;
+    }
+
+    // ── TRAIL: FLAGSTONE ───────────────────────────────────────────────
+    if (tile === TILES.FURN_TRAIL_FLAGSTONE) {
+      // Base grout (dark)
+      ctx.fillStyle = '#4a4238';
+      ctx.fillRect(px, py, 32, 32);
+      // Two large interlocking slabs per tile
+      ctx.fillStyle = '#8a8070';
+      ctx.fillRect(px + 1,  py + 1,  18, 14);
+      ctx.fillRect(px + 20, py + 1,  11, 18);
+      ctx.fillRect(px + 1,  py + 16, 11, 15);
+      ctx.fillRect(px + 13, py + 20, 18, 11);
+      // Top sheen on each slab
+      ctx.fillStyle = '#9a9080';
+      ctx.fillRect(px + 1,  py + 1,  18, 2);
+      ctx.fillRect(px + 20, py + 1,  11, 2);
+      ctx.fillRect(px + 1,  py + 16, 11, 2);
+      ctx.fillRect(px + 13, py + 20, 18, 2);
+      // Bottom shadow line
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(px + 1,  py + 14, 18, 1);
+      ctx.fillRect(px + 20, py + 18, 11, 1);
+      ctx.fillRect(px + 1,  py + 30, 11, 1);
+      ctx.fillRect(px + 13, py + 30, 18, 1);
+      // Subtle stone grain — one per slab
+      ctx.fillStyle = 'rgba(90,70,50,0.22)';
+      ctx.fillRect(px + 4,  py + 7,  10, 1);
+      ctx.fillRect(px + 22, py + 8,  6,  1);
+      ctx.fillRect(px + 4,  py + 23, 6,  1);
+      ctx.fillRect(px + 18, py + 25, 10, 1);
+      return;
+    }
+
+    // ── FISH TANK (animated) ───────────────────────────────────────────
+    if (tile === TILES.FURN_FISH_TANK) {
+      // Wooden stand
+      ctx.fillStyle = '#3a1f08'; ctx.fillRect(px + 2,  py + 26, 28, 5);
+      ctx.fillStyle = '#5a3418'; ctx.fillRect(px + 3,  py + 27, 26, 2);
+      ctx.fillStyle = '#2a1404'; ctx.fillRect(px + 2,  py + 30, 28, 1);
+      // Glass frame
+      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(px + 3,  py + 3,  26, 24);
+      // Water
+      ctx.fillStyle = '#2a6090'; ctx.fillRect(px + 4,  py + 4,  24, 22);
+      ctx.fillStyle = '#356fa8'; ctx.fillRect(px + 4,  py + 4,  24, 12);
+      // Water surface highlight
+      ctx.fillStyle = 'rgba(180,220,255,0.35)'; ctx.fillRect(px + 4, py + 4,  24, 2);
+      // Sand floor with pebbles
+      ctx.fillStyle = '#a89868'; ctx.fillRect(px + 4,  py + 22, 24, 4);
+      ctx.fillStyle = '#8a7848'; ctx.fillRect(px + 4,  py + 25, 24, 1);
+      ctx.fillStyle = '#606060';
+      ctx.fillRect(px + 8,  py + 23, 2, 2); ctx.fillRect(px + 16, py + 24, 2, 1);
+      ctx.fillRect(px + 22, py + 23, 3, 2);
+      // Seaweed swaying with time
+      const swA = Math.sin(this.time * 1.6) * 1;
+      const swB = Math.sin(this.time * 2.1 + 1) * 1;
+      ctx.fillStyle = '#2e7a32';
+      ctx.fillRect(px + 7 + swA, py + 16, 1, 7);
+      ctx.fillRect(px + 8 + swA, py + 14, 1, 9);
+      ctx.fillRect(px + 23 + swB, py + 18, 1, 5);
+      ctx.fillRect(px + 24 + swB, py + 15, 1, 8);
+      // Two fish swimming, one orange one blue, bobbing in opposite phase
+      const fxA = Math.floor(((this.time * 6) % 20) - 10);     // -10..+10
+      const fxB = Math.floor(((this.time * 5 + 2) % 20) - 10);
+      const fyA = Math.round(Math.sin(this.time * 3) * 1);
+      const fyB = Math.round(Math.sin(this.time * 2.4 + 2) * 1);
+      // Fish A — orange, moving east
+      const axA = px + 16 + fxA, ayA = py + 10 + fyA;
+      ctx.fillStyle = '#e27a20';
+      ctx.fillRect(axA - 3, ayA, 5, 3);
+      ctx.fillRect(axA - 4, ayA, 1, 1);    // tail fork upper
+      ctx.fillRect(axA - 4, ayA + 2, 1, 1);// tail fork lower
+      ctx.fillStyle = '#f0a040'; ctx.fillRect(axA - 2, ayA, 3, 1);
+      ctx.fillStyle = '#1a0804'; ctx.fillRect(axA + 1, ayA, 1, 1); // eye
+      // Fish B — blue, moving west
+      const axB = px + 16 + fxB, ayB = py + 17 + fyB;
+      ctx.fillStyle = '#3a7ac4';
+      ctx.fillRect(axB, ayB, 5, 3);
+      ctx.fillRect(axB + 5, ayB, 1, 1);
+      ctx.fillRect(axB + 5, ayB + 2, 1, 1);
+      ctx.fillStyle = '#6aa0e0'; ctx.fillRect(axB + 1, ayB, 3, 1);
+      ctx.fillStyle = '#1a0804'; ctx.fillRect(axB, ayB, 1, 1);
+      // Bubbles drifting up
+      const bTime = this.time * 1.5;
+      for (let i = 0; i < 3; i++) {
+        const by = py + 25 - ((bTime * 10 + i * 7) % 20);
+        const bx = px + 10 + i * 6;
+        ctx.fillStyle = 'rgba(230,240,255,0.5)';
+        ctx.fillRect(bx, by, 1, 1);
+      }
+      // Glass frame top (solid black ring on top)
+      ctx.fillStyle = '#1a1a1a'; ctx.fillRect(px + 3, py + 3, 26, 1);
+      ctx.fillStyle = '#1a1a1a'; ctx.fillRect(px + 3, py + 3, 1, 23);
+      ctx.fillStyle = '#1a1a1a'; ctx.fillRect(px + 28, py + 3, 1, 23);
+      ctx.fillStyle = '#3a3a3a'; ctx.fillRect(px + 4, py + 4, 1, 1); // corner sheen
+      return;
+    }
+
+    // ── ALCHEMY TABLE ──────────────────────────────────────────────────
+    if (tile === TILES.FURN_ALCHEMY_TABLE) {
+      // Wooden bench
+      ctx.fillStyle = '#2a1408'; ctx.fillRect(px + 2,  py + 16, 28, 14);
+      ctx.fillStyle = '#5a3418'; ctx.fillRect(px + 3,  py + 17, 26, 11);
+      ctx.fillStyle = '#7a4820'; ctx.fillRect(px + 3,  py + 17, 26, 1);
+      ctx.fillStyle = '#2a1408'; ctx.fillRect(px + 3,  py + 28, 26, 1);
+      // Legs
+      ctx.fillStyle = '#2a1408'; ctx.fillRect(px + 3, py + 26, 3, 5);
+      ctx.fillRect(px + 26, py + 26, 3, 5);
+      // Mortar and pestle (left)
+      ctx.fillStyle = '#6a6a6a'; ctx.fillRect(px + 4,  py + 12, 7, 5);
+      ctx.fillStyle = '#8a8a8a'; ctx.fillRect(px + 5,  py + 12, 5, 2);
+      ctx.fillStyle = '#4a4a4a'; ctx.fillRect(px + 5,  py + 15, 5, 1);
+      ctx.fillStyle = '#8a6818'; ctx.fillRect(px + 7,  py + 8,  2, 5);  // pestle
+      // Bubbling alembic (centre) — flame animated
+      ctx.fillStyle = '#8a8a9a'; ctx.fillRect(px + 13, py + 10, 7, 7);  // base sphere
+      ctx.fillStyle = '#aaaabc'; ctx.fillRect(px + 14, py + 10, 5, 2);
+      ctx.fillStyle = '#5a8a38'; ctx.fillRect(px + 15, py + 12, 3, 3);  // green potion
+      ctx.fillStyle = '#8acc48'; ctx.fillRect(px + 15, py + 12, 1, 1);
+      ctx.fillStyle = '#8a8a9a'; ctx.fillRect(px + 15, py + 6,  3, 4);  // neck
+      ctx.fillStyle = '#aaaabc'; ctx.fillRect(px + 16, py + 6,  1, 4);
+      // Bubbles from potion top
+      const bubT = this.time * 2;
+      for (let i = 0; i < 3; i++) {
+        const by = py + 12 - ((bubT * 3 + i * 4) % 8);
+        ctx.fillStyle = 'rgba(140,220,120,0.6)';
+        ctx.fillRect(px + 15 + (i % 2), by, 1, 1);
+      }
+      // Flame under alembic (flicker)
+      const fl = Math.sin(this.time * 10) * 0.5 + 0.5;
+      ctx.fillStyle = '#e06020'; ctx.fillRect(px + 14, py + 17, 5, 2);
+      ctx.fillStyle = '#f8c040'; ctx.fillRect(px + 15, py + 17, 3, 1 + Math.round(fl));
+      // Bottles on the right
+      ctx.fillStyle = '#8a1818'; ctx.fillRect(px + 22, py + 11, 3, 6);  // red bottle
+      ctx.fillStyle = '#c02020'; ctx.fillRect(px + 23, py + 12, 1, 4);
+      ctx.fillStyle = '#6a6a6a'; ctx.fillRect(px + 22, py + 10, 3, 1);  // cork
+      ctx.fillStyle = '#2a4898'; ctx.fillRect(px + 26, py + 13, 3, 4);  // blue bottle
+      ctx.fillStyle = '#4a78c8'; ctx.fillRect(px + 27, py + 14, 1, 2);
+      ctx.fillStyle = '#6a6a6a'; ctx.fillRect(px + 26, py + 12, 3, 1);
+      return;
+    }
+
+    // ── ARCHERY TARGET ─────────────────────────────────────────────────
+    if (tile === TILES.FURN_ARCHERY_TARGET) {
+      // Wooden tripod stand (lower)
+      ctx.fillStyle = '#3a2008';
+      ctx.fillRect(px + 8,  py + 22, 3, 9);
+      ctx.fillRect(px + 21, py + 22, 3, 9);
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(px + 6, py + 30, 20, 1);
+      // Target body — concentric rings centred at (px+16, py+14)
+      const cx = px + 16, cy = py + 14;
+      // Outermost straw ring
+      ctx.fillStyle = '#d8c890';
+      ctx.fillRect(cx - 10, cy - 8, 20, 16);
+      ctx.fillRect(cx - 12, cy - 6, 24, 12);
+      ctx.fillRect(cx - 11, cy - 7, 22, 14);
+      // Straw texture — little flecks
+      ctx.fillStyle = '#b8a868';
+      ctx.fillRect(cx - 9, cy - 5, 1, 2);
+      ctx.fillRect(cx + 6, cy + 2, 1, 2);
+      ctx.fillRect(cx - 4, cy + 4, 1, 1);
+      // Blue ring
+      ctx.fillStyle = '#2a6a9a';
+      ctx.fillRect(cx - 8, cy - 6, 16, 12);
+      ctx.fillRect(cx - 9, cy - 5, 18, 10);
+      // Red ring
+      ctx.fillStyle = '#b8301c';
+      ctx.fillRect(cx - 6, cy - 4, 12, 8);
+      ctx.fillRect(cx - 7, cy - 3, 14, 6);
+      // Yellow centre
+      ctx.fillStyle = '#e8c030';
+      ctx.fillRect(cx - 4, cy - 2, 8, 4);
+      ctx.fillRect(cx - 5, cy - 1, 10, 2);
+      // Bullseye
+      ctx.fillStyle = '#8a3010';
+      ctx.fillRect(cx - 1, cy - 1, 2, 2);
+      // Arrow stuck in target (red fletching)
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(cx + 2, cy - 6, 1, 8);  // shaft
+      ctx.fillStyle = '#6a4018'; ctx.fillRect(cx + 2, cy - 6, 1, 1);  // arrowhead
+      ctx.fillStyle = '#c02020'; ctx.fillRect(cx + 3, cy - 6, 2, 2);  // fletching
+      ctx.fillStyle = '#e04040'; ctx.fillRect(cx + 3, cy - 6, 1, 1);
+      return;
+    }
+
+    // ── WINE CASK ──────────────────────────────────────────────────────
+    if (tile === TILES.FURN_WINE_CASK) {
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.28)';
+      ctx.fillRect(px + 6, py + 30, 20, 1);
+      // Cask body (barrel on its side)
+      ctx.fillStyle = '#3a1808'; ctx.fillRect(px + 4,  py + 10, 24, 20);
+      ctx.fillStyle = '#6a3818'; ctx.fillRect(px + 5,  py + 11, 22, 18);
+      ctx.fillStyle = '#8a5028'; ctx.fillRect(px + 5,  py + 12, 22, 2);   // top stave sheen
+      ctx.fillStyle = '#4a2008'; ctx.fillRect(px + 5,  py + 27, 22, 1);   // bottom shadow
+      // Vertical stave seams
+      ctx.fillStyle = '#4a2008';
+      ctx.fillRect(px + 10, py + 11, 1, 18);
+      ctx.fillRect(px + 15, py + 11, 1, 18);
+      ctx.fillRect(px + 21, py + 11, 1, 18);
+      // Iron hoops
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(px + 4, py + 13, 24, 2);
+      ctx.fillRect(px + 4, py + 25, 24, 2);
+      ctx.fillStyle = '#6a6a6a';
+      ctx.fillRect(px + 4, py + 13, 24, 1);
+      ctx.fillRect(px + 4, py + 25, 24, 1);
+      // Brass tap
+      ctx.fillStyle = '#c8a227'; ctx.fillRect(px + 14, py + 20, 4, 3);
+      ctx.fillStyle = '#f1cc40'; ctx.fillRect(px + 14, py + 20, 4, 1);
+      ctx.fillStyle = '#8a6018'; ctx.fillRect(px + 15, py + 23, 2, 2);
+      // Wine puddle drip
+      ctx.fillStyle = '#6a1a1a'; ctx.fillRect(px + 15, py + 27, 2, 1);
+      ctx.fillStyle = '#8a2020'; ctx.fillRect(px + 14, py + 28, 4, 1);
+      // Wood-cap end (left) — shows end-grain
+      ctx.fillStyle = '#5a2808'; ctx.fillRect(px + 4, py + 10, 2, 20);
+      ctx.fillStyle = '#8a5028'; ctx.fillRect(px + 4, py + 10, 1, 20);
+      return;
+    }
+
+    // ── LOOM ───────────────────────────────────────────────────────────
+    if (tile === TILES.FURN_LOOM) {
+      // Wooden frame posts
+      ctx.fillStyle = '#3a2008';
+      ctx.fillRect(px + 4,  py + 4,  4, 26);
+      ctx.fillRect(px + 24, py + 4,  4, 26);
+      ctx.fillStyle = '#5a3418';
+      ctx.fillRect(px + 5,  py + 4,  2, 26);
+      ctx.fillRect(px + 25, py + 4,  2, 26);
+      // Top crossbar
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 4, py + 4, 24, 4);
+      ctx.fillStyle = '#5a3418'; ctx.fillRect(px + 4, py + 4, 24, 2);
+      // Bottom beam
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(px + 4, py + 26, 24, 4);
+      ctx.fillStyle = '#5a3418'; ctx.fillRect(px + 4, py + 26, 24, 2);
+      // Warp threads (vertical)
+      ctx.fillStyle = '#e8dcb0';
+      for (let i = 0; i < 8; i++) {
+        ctx.fillRect(px + 9 + i * 2, py + 8, 1, 18);
+      }
+      // Weft rows (horizontal) — partial weave at bottom
+      ctx.fillStyle = '#b8a070';
+      ctx.fillRect(px + 9,  py + 22, 15, 1);
+      ctx.fillRect(px + 9,  py + 24, 15, 1);
+      ctx.fillStyle = '#8a7848';
+      ctx.fillRect(px + 9,  py + 23, 15, 1);
+      ctx.fillRect(px + 9,  py + 25, 15, 1);
+      // Shuttle mid-row
+      ctx.fillStyle = '#8a4820'; ctx.fillRect(px + 14, py + 15, 6, 2);
+      ctx.fillStyle = '#a06030'; ctx.fillRect(px + 14, py + 15, 6, 1);
+      ctx.fillStyle = '#4a2008'; ctx.fillRect(px + 15, py + 16, 4, 1);
+      // Thread spool near corner
+      ctx.fillStyle = '#c8a030'; ctx.fillRect(px + 6, py + 10, 3, 3);
+      ctx.fillStyle = '#e8c040'; ctx.fillRect(px + 6, py + 10, 3, 1);
+      return;
+    }
+
+    // ── TABLE — neighbour-aware 3/4-angle connected table ───────────────────
+    // Tables placed adjacent to each other merge into a single larger table.
+    // Rendered in the game's slight-south 3/4 perspective: back legs peek
+    // above the top surface, south apron shows the front face's thickness,
+    // and front legs hang below the apron. Both back and front legs share
+    // the same X columns so the legs visually line up vertically.
+    //
+    // Legs only draw at OUTER corners of the connected group; the wooden
+    // top extends seamlessly across connected edges.
+    if (tile === TILES.FURN_TABLE) {
+      const _isTable = (dc, dr) => world && world.getTile(c + dc, r + dr) === TILES.FURN_TABLE;
+      const rN = _isTable(0, -1), rS = _isTable(0, 1);
+      const rE = _isTable(1, 0),  rW = _isTable(-1, 0);
+
+      // Variant-aware palette: falls back to the original oak look if the
+      // placed table hasn't been tinted.
+      const tint = world?.furnVariants?.get(`${c},${r}`);
+      const wp = tint ? Renderer.woodPalette(tint) : null;
+      const topWood  = wp ? wp.hi   : '#a67844';
+      const apronC   = wp ? wp.mid  : '#6a3818';
+      const legBack  = wp ? wp.shdw : '#2e1008';
+      const legFront = wp ? wp.dk   : '#4a2010';
+      const legHi    = wp ? wp.mid  : '#6a3818';
+      // Leg X columns — same for back & front so left legs align at x=4 and
+      // right legs align at x=24. 4 px wide each.
+      const LX_LEFT  = 4;
+      const LX_RIGHT = 24;
+
+      // ── 1. Back legs (drawn FIRST so the top will cover most of them,
+      //       leaving only a 2-px peek above the top). ──────────────────
+      if (!rN && !rW) {
+        ctx.fillStyle = legBack;
+        ctx.fillRect(px + LX_LEFT, py + 4, 4, 4);
+      }
+      if (!rN && !rE) {
+        ctx.fillStyle = legBack;
+        ctx.fillRect(px + LX_RIGHT, py + 4, 4, 4);
+      }
+
+      // ── 2. Top surface — main wood colour, spans to connected edges. ─
+      const tL = rW ? 0 : 2, tR = rE ? 32 : 30;
+      const tT = rN ? 0 : 6, tB = rS ? 32 : 22;
+      ctx.fillStyle = topWood;                          // wood
+      ctx.fillRect(px + tL, py + tT, tR - tL, tB - tT);
+      // Top-edge highlight only on the northernmost row of the group.
+      if (!rN) {
+        ctx.fillStyle = 'rgba(255,255,255,0.16)';
+        ctx.fillRect(px + tL, py + tT, tR - tL, 1);
+      }
+      // Horizontal wood grain — continuous east-west across connected tiles.
+      ctx.fillStyle = 'rgba(0,0,0,0.10)';
+      ctx.fillRect(px + tL, py + 11, tR - tL, 1);
+      ctx.fillRect(px + tL, py + 17, tR - tL, 1);
+      // Soft shadow along the underside of the top (only where the south
+      // edge is actually exposed, marking where the top meets the apron).
+      if (!rS) {
+        ctx.fillStyle = 'rgba(0,0,0,0.28)';
+        ctx.fillRect(px + tL, py + 21, tR - tL, 1);
+      }
+
+      // ── 3. South apron (front face showing the 3/4 thickness). Only on
+      //       the southernmost row of the group. ──────────────────────
+      if (!rS) {
+        const aL = rW ? 0 : 3, aR = rE ? 32 : 29;
+        ctx.fillStyle = apronC;
+        ctx.fillRect(px + aL, py + 22, aR - aL, 3);
+        ctx.fillStyle = 'rgba(255,180,120,0.10)';       // lit top of apron
+        ctx.fillRect(px + aL, py + 22, aR - aL, 1);
+        ctx.fillStyle = 'rgba(0,0,0,0.18)';             // dark bottom edge
+        ctx.fillRect(px + aL, py + 24, aR - aL, 1);
+      }
+
+      // ── 4. Front legs — drawn on outer south corners only. Same X
+      //       columns as back legs so the legs line up vertically. ──────
+      if (!rS && !rW) {
+        ctx.fillStyle = legFront;
+        ctx.fillRect(px + LX_LEFT, py + 25, 4, 5);
+        ctx.fillStyle = legHi;
+        ctx.fillRect(px + LX_LEFT, py + 25, 4, 1);    // top-edge sheen
+      }
+      if (!rS && !rE) {
+        ctx.fillStyle = legFront;
+        ctx.fillRect(px + LX_RIGHT, py + 25, 4, 5);
+        ctx.fillStyle = legHi;
+        ctx.fillRect(px + LX_RIGHT, py + 25, 4, 1);
+      }
+
+      // ── 5. Cast shadow under the front edge of the group. ─────────────
+      if (!rS) {
+        ctx.fillStyle = 'rgba(0,0,0,0.20)';
+        const sL = rW ? 0 : 3, sR = rE ? 32 : 29;
+        ctx.fillRect(px + sL, py + 30, sR - sL, 1);
+      }
+      return;
+    }
+
+    // ── BED — 1×2 neighbour-aware (head half + foot half) ────────────────
+    if (tile === TILES.FURN_BED) {
+      const _isBed = (dc, dr) => world && world.getTile(c + dc, r + dr) === TILES.FURN_BED;
+      const rot = world?.getRotation ? world.getRotation(c, r) : 0;
+
+      // Direction from head tile toward foot tile, indexed by rotation.
+      // rot 0 head=N foot=S, rot 1 head=E foot=W, rot 2 head=S foot=N, rot 3 head=W foot=E.
+      const dirTowardFoot = [[0,1],[-1,0],[0,-1],[1,0]];
+      const [dfx, dfy] = dirTowardFoot[rot & 3];
+      const isHead = _isBed(dfx, dfy);
+      const isFoot = _isBed(-dfx, -dfy);
+      // If neither neighbor matches (build-mode preview or orphaned save),
+      // default to drawing the head half.
+      const drawHead = isHead || (!isHead && !isFoot);
+
+      // Draw sprite oriented as if this were rot=0 (head at north), then
+      // apply rotation. Coords below are "local" — (0..32, 0..32).
+      ctx.save();
+      ctx.translate(px + 16, py + 16);
+      ctx.rotate((rot & 3) * Math.PI / 2);
+      ctx.translate(-16, -16);
+
+      // Variant-aware wood palette for the frame; sheets/pillow/blanket
+      // stay fixed (blanket colour already has strong identity).
+      const tint = world?.furnVariants?.get(`${c},${r}`);
+      const wp   = tint ? Renderer.woodPalette(tint) : null;
+      const wDk  = wp ? wp.shdw : '#2e1608';
+      const wMd  = wp ? wp.mid  : '#5a3418';
+      const wLt  = wp ? wp.lt   : '#7a5028';
+      const wHi  = wp ? wp.hi   : '#9a6838';
+      const rail = wp ? wp.dk   : '#4a2a10';
+      const railHi = wp ? wp.lt : '#6a4020';
+      const railShd = wp ? wp.shdw : '#2a1404';
+      const sheetDk = '#b8b090', sheetMd = '#d4cca8', sheetLt = '#e8e0c0';
+      const pillowDk = '#c8bea0', pillowMd = '#f0e8d0', pillowLt = '#fff8e0';
+      const bl1 = '#7a1a1a', bl2 = '#a02828', bl3 = '#c84040', blStitch = '#e0b040';
+
+      // Side frame rails (always visible on both halves)
+      ctx.fillStyle = rail;    ctx.fillRect(0,  0, 3, 32);
+      ctx.fillRect(29, 0, 3, 32);
+      ctx.fillStyle = railHi;  ctx.fillRect(0, 0, 1, 32);
+      ctx.fillStyle = railShd; ctx.fillRect(2, 0, 1, 32);
+      ctx.fillStyle = railHi;  ctx.fillRect(29, 0, 1, 32);
+      ctx.fillStyle = railShd; ctx.fillRect(31, 0, 1, 32);
+
+      if (drawHead) {
+        // ── HEAD HALF (contains headboard + pillow + upper blanket) ──
+        // Headboard (tall, arched)
+        ctx.fillStyle = wDk; ctx.fillRect(0,  0, 32, 11);
+        ctx.fillStyle = wMd; ctx.fillRect(1,  1, 30, 10);
+        ctx.fillStyle = wLt; ctx.fillRect(2,  1, 28, 2);   // top sheen
+        ctx.fillStyle = wDk; ctx.fillRect(2, 10, 28, 1);   // bottom shadow
+        // Arched decorative panel
+        ctx.fillStyle = wDk; ctx.fillRect(8, 2, 16, 7);
+        ctx.fillStyle = wHi; ctx.fillRect(9, 3, 14, 5);
+        ctx.fillStyle = wLt; ctx.fillRect(10, 3, 12, 2);
+        ctx.fillStyle = '#c8a030'; ctx.fillRect(15, 4, 2, 4); // brass medallion
+        // Headboard posts (outer flanking)
+        ctx.fillStyle = wDk; ctx.fillRect(0, 0, 5, 12);
+        ctx.fillStyle = wMd; ctx.fillRect(1, 1, 3, 10);
+        ctx.fillStyle = wDk; ctx.fillRect(27, 0, 5, 12);
+        ctx.fillStyle = wMd; ctx.fillRect(28, 1, 3, 10);
+        // Post finials (small caps)
+        ctx.fillStyle = wLt; ctx.fillRect(1, 0, 3, 1); ctx.fillRect(28, 0, 3, 1);
+
+        // Mattress base
+        ctx.fillStyle = sheetDk; ctx.fillRect(3, 11, 26, 21);
+        ctx.fillStyle = sheetMd; ctx.fillRect(3, 11, 26, 2);   // sheet top edge
+        ctx.fillStyle = sheetLt; ctx.fillRect(3, 11, 26, 1);
+
+        // Pillow (stacked shadow + body + highlight)
+        ctx.fillStyle = pillowDk; ctx.fillRect(6, 14, 20, 10);
+        ctx.fillStyle = pillowMd; ctx.fillRect(7, 14, 18, 8);
+        ctx.fillStyle = pillowLt; ctx.fillRect(8, 15, 10, 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.10)'; ctx.fillRect(7, 22, 18, 1);
+
+        // Upper blanket (starts at y ≈ 25)
+        ctx.fillStyle = bl1; ctx.fillRect(3, 25, 26, 2);   // blanket fold shadow
+        ctx.fillStyle = bl2; ctx.fillRect(3, 26, 26, 6);
+        ctx.fillStyle = bl3; ctx.fillRect(3, 26, 26, 1);   // top sheen
+        // Gold stitching line
+        ctx.fillStyle = blStitch; ctx.fillRect(3, 25, 26, 1);
+      } else {
+        // ── FOOT HALF (continues blanket + footboard) ──
+        // Blanket body
+        ctx.fillStyle = bl2; ctx.fillRect(3, 0, 26, 24);
+        ctx.fillStyle = bl3; ctx.fillRect(3, 0, 26, 1);   // top sheen
+        // Weave pattern — diagonal stripes
+        ctx.fillStyle = 'rgba(0,0,0,0.14)';
+        for (let i = 0; i < 4; i++) ctx.fillRect(4 + i * 6, 3, 2, 18);
+        ctx.fillStyle = 'rgba(255,255,255,0.07)';
+        for (let i = 0; i < 4; i++) ctx.fillRect(6 + i * 6, 3, 1, 18);
+        // Blanket edge shadow where it drapes over footboard
+        ctx.fillStyle = bl1; ctx.fillRect(3, 22, 26, 2);
+
+        // Footboard (low wooden panel)
+        ctx.fillStyle = wDk; ctx.fillRect(0, 24, 32, 6);
+        ctx.fillStyle = wMd; ctx.fillRect(1, 25, 30, 4);
+        ctx.fillStyle = wLt; ctx.fillRect(2, 25, 28, 1);   // top highlight
+        ctx.fillStyle = wDk; ctx.fillRect(2, 28, 28, 1);   // shadow line
+        // Footboard decorative panel
+        ctx.fillStyle = wHi; ctx.fillRect(10, 26, 12, 2);
+        // Corner posts
+        ctx.fillStyle = wDk; ctx.fillRect(0, 24, 5, 8);
+        ctx.fillStyle = wMd; ctx.fillRect(1, 25, 3, 6);
+        ctx.fillStyle = wDk; ctx.fillRect(27, 24, 5, 8);
+        ctx.fillStyle = wMd; ctx.fillRect(28, 25, 3, 6);
+
+        // Drop shadow under footboard
+        ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(3, 30, 26, 2);
+      }
+      ctx.restore();
+      return;
+    }
+
     // ── RUG — neighbour-aware connected rug ──────────────────────────────────
     if (tile === TILES.FURN_RUG) {
       const _isRug = (dc, dr) => world && world.getTile(c + dc, r + dr) === TILES.FURN_RUG;
       const rN = _isRug(0, -1), rS = _isRug(0, 1);
       const rE = _isRug(1, 0),  rW = _isRug(-1, 0);
 
+      // Variant-aware fabric palette — falls back to the original red weave.
+      const tint = world?.furnVariants?.get(`${c},${r}`);
+      const fp = tint ? Renderer.fabricPalette(tint) : null;
+      const borderDk = fp ? Renderer.shadeHex(fp.dk, -0.30) : '#8b1010';
+      const borderMd = fp ? fp.dk   : '#a02018';
+      const fieldC   = fp ? fp.mid  : '#c0392b';
+      const fieldHi  = fp ? fp.lt   : '#d04030';
+      const fringeC  = fp ? Renderer.shadeHex(fp.dk, -0.40) : '#6a0808';
+
       // Edge insets: 0 on connected edges (seamless), 2 on exposed edges (border)
       const eL = rW ? 0 : 2, eR = rE ? 0 : 2;
       const eT = rN ? 0 : 2, eB = rS ? 0 : 2;
 
       // Outer border layer (dark red)
-      ctx.fillStyle = '#8b1010';
+      ctx.fillStyle = borderDk;
       ctx.fillRect(px + eL, py + eT, 32 - eL - eR, 32 - eT - eB);
 
       // Inner border layer
       const iL = rW ? 0 : 4, iR = rE ? 0 : 4;
       const iT = rN ? 0 : 4, iB = rS ? 0 : 4;
-      ctx.fillStyle = '#a02018';
+      ctx.fillStyle = borderMd;
       ctx.fillRect(px + iL, py + iT, 32 - iL - iR, 32 - iT - iB);
 
       // Main field (crimson)
       const fL = rW ? 0 : 6, fR = rE ? 0 : 6;
       const fT = rN ? 0 : 6, fB = rS ? 0 : 6;
-      ctx.fillStyle = '#c0392b';
+      ctx.fillStyle = fieldC;
       ctx.fillRect(px + fL, py + fT, 32 - fL - fR, 32 - fT - fB);
 
       // Subtle inner highlight
-      ctx.fillStyle = '#d04030';
+      ctx.fillStyle = fieldHi;
       const hL = rW ? 0 : 8, hR = rE ? 0 : 8;
       const hT = rN ? 0 : 8, hB = rS ? 0 : 8;
       ctx.fillRect(px + hL, py + hT, 32 - hL - hR, 32 - hT - hB);
@@ -3720,7 +4833,7 @@ export class Renderer {
       ctx.fillRect(px + 15, py + 18, 2, 2);
 
       // Fringe tassels on exposed edges only
-      ctx.fillStyle = '#6a0808';
+      ctx.fillStyle = fringeC;
       if (!rN) for (let i = 0; i < 7; i++) ctx.fillRect(px + 3 + i * 4, py,      2, 2);
       if (!rS) for (let i = 0; i < 7; i++) ctx.fillRect(px + 3 + i * 4, py + 30, 2, 2);
       if (!rW) for (let i = 0; i < 7; i++) ctx.fillRect(px,      py + 3 + i * 4, 2, 2);
@@ -3730,17 +4843,36 @@ export class Renderer {
 
     // ── Furniture tiles (floor drawn by PROP_TILES path; just draw the sprite) ─
     const FURN_SET = new Set([
-      TILES.FURN_CHAIR, TILES.FURN_TABLE,
-      TILES.FURN_CHEST, TILES.FURN_BOOKSHELF, TILES.FURN_PLANT,
-      TILES.FURN_BED, TILES.FURN_BENCH,
-      TILES.FURN_WARDROBE, TILES.FURN_TAPESTRY,
-      TILES.WEAPON_RACK, TILES.DISPLAY_SHELF,
+      TILES.FURN_CHAIR,
+      TILES.FURN_CHEST, TILES.FURN_PLANT,
+      TILES.FURN_BENCH,
+      TILES.FURN_TAPESTRY,
+      TILES.DISPLAY_SHELF,
+      TILES.FURN_STOOL,
+      TILES.FURN_NIGHTSTAND, TILES.FURN_FLOWER_PATCH,
+      // FURN_TABLE is neighbour-aware (like FURN_RUG) — handled as a direct
+      // case in _drawTileDetail so adjacent tables merge seamlessly.
+      // FURN_PAINTING is a wall-mount — handled as a direct case in
+      // _drawTileDetail (next to MEAT_HOOK / HEARTH) so the wall draws beneath it.
+      // FURN_BED is a 1×2 neighbour-aware direct case so each tile draws
+      // only its half (headboard vs footboard) instead of duplicating.
+      // OVERHANG tiles (clock, wardrobe, bookshelf, throne, vase, lantern,
+      // weapon_case, armor_stand) keep their FURN_SET or direct dispatch but
+      // are NOT baked into the chunk cache — they render via depth-sorted
+      // sortables so entities get proper front/back occlusion.
+      TILES.FURN_WARDROBE,
+      TILES.FURN_BOOKSHELF,
+      TILES.FURN_THRONE,
+      TILES.FURN_VASE,
+      TILES.FURN_CLOCK,
+      TILES.FURN_LANTERN,
     ]);
     if (FURN_SET.has(tile)) {
       const rot = world.getRotation ? world.getRotation(c, r) : 0;
+      const tint = world?.furnVariants?.get(`${c},${r}`) || null;
       ctx.save();
       ctx.translate(px, py);
-      this._drawFurnitureSprite(ctx, tile, rot);
+      this._drawFurnitureSprite(ctx, tile, rot, tint);
       ctx.restore();
       return;
     }
@@ -4227,7 +5359,7 @@ export class Renderer {
    *   South = bottom       = close to viewer
    *   Top faces: lightest   South faces: medium   East/West: slightly dark
    */
-  _drawFurnitureSprite(ctx, tile, rot) {
+  _drawFurnitureSprite(ctx, tile, rot, tint = null) {
     const T = TILES;
 
     // (RUG is rendered via neighbour-aware code in _drawTileDetail, not here)
@@ -4235,14 +5367,17 @@ export class Renderer {
     // ── CHAIR ───────────────────────────────────────────────
     if (tile === T.FURN_CHAIR) {
       const shadow = () => { ctx.fillStyle='rgba(0,0,0,0.2)'; };
-      const legDk  = '#2e1008';
-      const legMd  = '#4a2808';
-      const topFace  = '#c8844a';  // seat / backrest top (lightest)
-      const sthFace  = '#7a4a20';  // south-facing vertical face
-      const bkFace   = '#5a3010';  // backrest south face (medium)
+      // When the player chose a wood variant, derive the chair's palette
+      // from the tint so every shade stays harmonised.
+      const wp     = tint ? Renderer.woodPalette(tint) : null;
+      const legDk  = wp ? wp.shdw : '#2e1008';
+      const legMd  = wp ? wp.dk   : '#4a2808';
+      const topFace  = wp ? wp.hi  : '#c8844a';  // seat / backrest top (lightest)
+      const sthFace  = wp ? wp.mid : '#7a4a20';  // south-facing vertical face
+      const bkFace   = wp ? wp.dk  : '#5a3010';  // backrest south face (medium)
       const cush     = '#c0392b';
       const cushDk   = '#8b1a14';
-      const bkTop    = '#9a6a3a';  // backrest top face
+      const bkTop    = wp ? wp.lt : '#9a6a3a';  // backrest top face
 
       if (rot === 0) {
         // Backrest = north (top). Standard view.
@@ -4344,35 +5479,9 @@ export class Renderer {
       return;
     }
 
-    // ── TABLE ───────────────────────────────────────────────
-    // 4-legged table — symmetric, but apron face shifts with rotation
-    if (tile === T.FURN_TABLE) {
-      // Common elements for all rotations
-      ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(4,25,24,5); // shadow
-      // Back legs (always at top/north = far, darker)
-      ctx.fillStyle='#3a1808';
-      ctx.fillRect(4,8,4,16); ctx.fillRect(24,8,4,16);
-      // Front legs (bottom/south = near, lighter)
-      ctx.fillStyle='#5a3010';
-      ctx.fillRect(4,17,4,10); ctx.fillRect(24,17,4,10);
-      // Table top surface (always visible)
-      ctx.fillStyle='#d09050'; ctx.fillRect(2,6,28,12);
-      ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fillRect(2,6,28,1);
-      // Wood grain
-      ctx.fillStyle='rgba(0,0,0,0.08)';
-      for (let gx=8; gx<28; gx+=8) ctx.fillRect(gx,7,1,10);
-      // South-facing apron (always at bottom of top surface, faces viewer)
-      ctx.fillStyle='#7a4820'; ctx.fillRect(4,18,24,4);
-      // Side aprons (east/west faces — slightly darker)
-      if (rot === 0 || rot === 2) {
-        ctx.fillStyle='#6a3a18'; ctx.fillRect(2,10,4,8); ctx.fillRect(26,10,4,8);
-      } else {
-        // rot=1/3: show north/south aprons more — same look, just different emphasis
-        ctx.fillStyle='#6a3a18'; ctx.fillRect(2,10,4,8); ctx.fillRect(26,10,4,8);
-        ctx.fillStyle='#553010'; ctx.fillRect(4,6,24,3); // top apron strip (north face, barely visible)
-      }
-      return;
-    }
+    // FURN_TABLE is rendered as a neighbour-aware direct case in
+    // _drawTileDetail (alongside FURN_RUG) so adjacent tables merge
+    // seamlessly into a larger table. It is NOT in FURN_SET.
 
     // ── CHEST ───────────────────────────────────────────────
     if (tile === T.FURN_CHEST) {
@@ -4475,64 +5584,171 @@ export class Renderer {
       return;
     }
 
-    // ── BOOKSHELF ────────────────────────────────────────────
+    // ── BOOKSHELF — tall library shelf (overhangs into tile above) ──
     if (tile === T.FURN_BOOKSHELF) {
-      const topC = ['#e74c3c','#3498db','#27ae60','#f39c12'];
-      const midC = ['#8e44ad','#e67e22','#c0392b','#1a8a6a'];
+      // Muted, library-appropriate book palette (leather-bound tones)
+      const books = [
+        ['#6a2418', '#8a3820'],  // burgundy
+        ['#2a4868', '#3a6088'],  // navy
+        ['#3a5828', '#4a7038'],  // forest
+        ['#7a5018', '#a07028'],  // tan
+        ['#4a2a48', '#6a3a68'],  // plum
+        ['#2a2a2a', '#484848'],  // charcoal
+      ];
+      const wp = tint ? Renderer.woodPalette(tint) : null;
+      const wDk     = wp ? wp.shdw : '#2a1808';
+      const wMd     = wp ? wp.mid  : '#4a2e14';
+      const wLt     = wp ? wp.lt   : '#6a4020';
+      const shelf   = wp ? wp.dk   : '#3a2010';
+      const shelfLt = wp ? wp.mid  : '#5a3818';
+      const crown   = wp ? wp.mid  : '#5a3818';
+      const crownLt = wp ? wp.lt   : '#7a5028';
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.28)'; ctx.fillRect(2, 29, 28, 2);
+
+      // Helper: draw a row of book spines. `count` books, slight height variation.
+      const drawBookRow = (y, h, rowSeed) => {
+        // Books vary in width (3-4 px) so the row looks natural
+        let bx = 4;
+        let i = 0;
+        while (bx < 28) {
+          const w = 3 + ((rowSeed + i) % 2);  // 3 or 4
+          if (bx + w > 28) break;
+          const [base, hi] = books[(rowSeed + i * 3) % books.length];
+          // Random book height: some books shorter, some full
+          const bh = h - ((rowSeed + i * 7) % 3);    // 0..2 px shorter
+          const by = y + (h - bh);
+          // Spine
+          ctx.fillStyle = base; ctx.fillRect(bx, by, w, bh);
+          ctx.fillStyle = hi;   ctx.fillRect(bx, by, 1, bh);
+          ctx.fillStyle = 'rgba(255,255,255,0.12)'; ctx.fillRect(bx + 1, by, 1, bh);
+          ctx.fillStyle = 'rgba(0,0,0,0.22)';       ctx.fillRect(bx + w - 1, by, 1, bh);
+          // Top cap (dark) — suggests the book's page edge
+          ctx.fillStyle = 'rgba(0,0,0,0.30)';       ctx.fillRect(bx, by, w, 1);
+          // Occasional gold title band
+          if ((rowSeed + i) % 3 === 0 && bh >= 7) {
+            ctx.fillStyle = '#c8a030'; ctx.fillRect(bx + 1, by + Math.floor(bh / 2), w - 2, 1);
+          }
+          bx += w;
+          i++;
+        }
+      };
+
+      // Helper: draw a book with its pages facing out (end-on view on side face)
+      const drawBookEndOn = (x, y, w, h, seed) => {
+        ctx.fillStyle = '#d4c8a0'; ctx.fillRect(x, y, w, h);       // paper edge
+        ctx.fillStyle = '#b8ac88'; ctx.fillRect(x, y + h - 1, w, 1);
+        // Spine peek (colored)
+        const [base] = books[seed % books.length];
+        ctx.fillStyle = base; ctx.fillRect(x, y, 1, h);
+        ctx.fillRect(x + w - 1, y, 1, h);
+      };
 
       if (rot === 0) {
-        // Books face south — standard library shelf view
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(2,28,28,3);
-        ctx.fillStyle='#2e1a08'; ctx.fillRect(0,4,4,26); ctx.fillRect(28,4,4,26); // side faces
-        ctx.fillStyle='#3a2010'; ctx.fillRect(4,4,24,26);                          // body
-        ctx.fillStyle='#7a5030'; ctx.fillRect(0,2,32,4);                           // top face
-        ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(0,2,32,1);
-        ctx.fillStyle='#5a3818'; ctx.fillRect(4,14,24,3); ctx.fillRect(4,24,24,3); // shelves
-        for (let i=0;i<4;i++) { ctx.fillStyle=topC[i]; ctx.fillRect(5+i*6,6,4,8); ctx.fillStyle='rgba(255,255,255,0.2)'; ctx.fillRect(5+i*6,6,1,8); }
-        for (let i=0;i<4;i++) { ctx.fillStyle=midC[i]; ctx.fillRect(5+i*6,17,4,7); ctx.fillStyle='rgba(255,255,255,0.15)'; ctx.fillRect(5+i*6,17,1,7); }
+        // ── Front view: book spines face south ──
+        // Carcass (upper + lower as one continuous cabinet)
+        ctx.fillStyle = wDk;    ctx.fillRect(0, -30, 4, 60); ctx.fillRect(28, -30, 4, 60);
+        ctx.fillStyle = wMd;    ctx.fillRect(4, -30, 24, 60);
+        // Side-panel wood grain highlight
+        ctx.fillStyle = wLt;    ctx.fillRect(0, -30, 1, 60); ctx.fillRect(28, -30, 1, 60);
+        // Crown moulding (top cap)
+        ctx.fillStyle = crown;  ctx.fillRect(0, -32, 32, 3);
+        ctx.fillStyle = crownLt;ctx.fillRect(0, -32, 32, 1);
+        ctx.fillStyle = wDk;    ctx.fillRect(0, -29, 32, 1);
+        // Base plinth
+        ctx.fillStyle = crown;  ctx.fillRect(0, 28, 32, 2);
+        ctx.fillStyle = wDk;    ctx.fillRect(0, 30, 32, 2);
+        // Feet
+        ctx.fillStyle = wDk;    ctx.fillRect(0, 30, 4, 2); ctx.fillRect(28, 30, 4, 2);
 
-      } else if (rot === 1) {
-        // Right side of shelf faces viewer. Books visible on the right edge (side-on).
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(4,28,26,3);
-        ctx.fillStyle='#3a2010'; ctx.fillRect(2,4,22,26);                           // left face / body (back)
-        ctx.fillStyle='#2e1a08'; ctx.fillRect(24,4,6,26);                           // right (east) face — visible
-        ctx.fillStyle='#7a5030'; ctx.fillRect(2,2,28,4);                            // top face
-        ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(2,2,28,1);
-        ctx.fillStyle='#5a3818'; ctx.fillRect(2,14,22,3); ctx.fillRect(2,24,22,3);
-        // Books visible through the south face (left portion)
-        for (let i=0;i<4;i++) { ctx.fillStyle=topC[i]; ctx.fillRect(3+i*5,6,3,8); ctx.fillStyle='rgba(255,255,255,0.18)'; ctx.fillRect(3+i*5,6,1,8); }
-        for (let i=0;i<4;i++) { ctx.fillStyle=midC[i]; ctx.fillRect(3+i*5,17,3,7); }
-        // Right face — book spines visible end-on (thin coloured lines)
-        ctx.fillStyle='#2e1a08'; ctx.fillRect(24,4,6,26);
-        for (let i=0;i<4;i++) { ctx.fillStyle=topC[i]; ctx.fillRect(25,6+i*2,4,1); }
-        for (let i=0;i<4;i++) { ctx.fillStyle=midC[i]; ctx.fillRect(25,17+i*2,4,1); }
+        // 4 shelves with a book row on each. Shelf board, then books resting on it.
+        // Shelf Y positions (board tops) and book row heights:
+        //   shelf 1 board y=-26 (top row of books y=-25..-17, h=8)
+        //   shelf 2 board y=-14 (books y=-13..-5, h=8)
+        //   shelf 3 board y=-2  (books y=-1..+10, h=11)  ← bigger row to feel grounded
+        //   shelf 4 board y=+14 (books y=+15..+26, h=11)
+        const rows = [
+          { boardY: -26, bookY: -25, bookH: 8,  seed: 1 },
+          { boardY: -14, bookY: -13, bookH: 8,  seed: 5 },
+          { boardY:  -2, bookY:  -1, bookH: 11, seed: 2 },
+          { boardY:  14, bookY:  15, bookH: 11, seed: 7 },
+        ];
+        for (const { boardY, bookY, bookH, seed } of rows) {
+          // Shelf board
+          ctx.fillStyle = shelf;   ctx.fillRect(3, boardY, 26, 2);
+          ctx.fillStyle = shelfLt; ctx.fillRect(3, boardY, 26, 1);
+          // Books on this shelf
+          drawBookRow(bookY, bookH, seed);
+        }
+      } else if (rot === 1 || rot === 3) {
+        // ── Side view: one flat side of the shelf faces the viewer ──
+        const sideSign = rot === 1 ? +1 : -1;
+        // Side panel (the one facing viewer) — solid dark wood slab
+        const sideX  = rot === 1 ? 24 : 2;
+        const sideW  = 6;
+        const backX  = rot === 1 ? 2 : 8;
+        const backW  = 22;
+        // Back body
+        ctx.fillStyle = wMd; ctx.fillRect(backX, -30, backW, 60);
+        ctx.fillStyle = wLt; ctx.fillRect(backX, -30, 1, 60);
+        // Visible side slab (darker)
+        ctx.fillStyle = wDk; ctx.fillRect(sideX, -30, sideW, 60);
+        ctx.fillStyle = wMd; ctx.fillRect(sideX, -30, sideW, 1);
+        ctx.fillStyle = wLt; ctx.fillRect(sideX, -30, 1, 60);
+        // Crown + base
+        ctx.fillStyle = crown;   ctx.fillRect(0, -32, 32, 3);
+        ctx.fillStyle = crownLt; ctx.fillRect(0, -32, 32, 1);
+        ctx.fillStyle = wDk;     ctx.fillRect(0, -29, 32, 1);
+        ctx.fillStyle = crown;   ctx.fillRect(0, 28, 32, 2);
+        ctx.fillStyle = wDk;     ctx.fillRect(0, 30, 32, 2);
 
-      } else if (rot === 2) {
-        // Back of shelf faces viewer — plain wood back, no books visible
-        ctx.fillStyle='rgba(0,0,0,0.18)'; ctx.fillRect(2,28,28,3);
-        ctx.fillStyle='#2e1a08'; ctx.fillRect(0,4,4,26); ctx.fillRect(28,4,4,26);
-        ctx.fillStyle='#4a2e14'; ctx.fillRect(4,4,24,26);                           // back panel (lighter plank back)
-        ctx.fillStyle='#7a5030'; ctx.fillRect(0,2,32,4);
-        ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(0,2,32,1);
-        // Shelf edges visible
-        ctx.fillStyle='#3a2010'; ctx.fillRect(4,14,24,3); ctx.fillRect(4,24,24,3);
-        // Nail marks on back
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(8,7,2,2); ctx.fillRect(22,7,2,2);
-        ctx.fillRect(8,17,2,2); ctx.fillRect(22,17,2,2);
-
-      } else { // rot=3 — left side faces viewer
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(2,28,26,3);
-        ctx.fillStyle='#2e1a08'; ctx.fillRect(2,4,6,26);                            // west (left) face — visible
-        ctx.fillStyle='#3a2010'; ctx.fillRect(8,4,22,26);                           // body
-        ctx.fillStyle='#7a5030'; ctx.fillRect(2,2,28,4);
-        ctx.fillStyle='rgba(255,255,255,0.12)'; ctx.fillRect(2,2,28,1);
-        ctx.fillStyle='#5a3818'; ctx.fillRect(8,14,22,3); ctx.fillRect(8,24,22,3);
-        // Books (right portion, angled view)
-        for (let i=0;i<4;i++) { ctx.fillStyle=topC[i]; ctx.fillRect(9+i*5,6,3,8); ctx.fillStyle='rgba(255,255,255,0.18)'; ctx.fillRect(9+i*5,6,1,8); }
-        for (let i=0;i<4;i++) { ctx.fillStyle=midC[i]; ctx.fillRect(9+i*5,17,3,7); }
-        // Left face end-on book spines
-        for (let i=0;i<4;i++) { ctx.fillStyle=topC[i]; ctx.fillRect(3,6+i*2,4,1); }
-        for (let i=0;i<4;i++) { ctx.fillStyle=midC[i]; ctx.fillRect(3,17+i*2,4,1); }
+        // 4 shelves on the back-face body with end-on book pages visible
+        const shelfYs = [-24, -12, 0, 16];
+        for (const sy of shelfYs) {
+          ctx.fillStyle = shelf;   ctx.fillRect(backX, sy, backW, 2);
+          ctx.fillStyle = shelfLt; ctx.fillRect(backX, sy, backW, 1);
+          // Pages visible end-on across the back face
+          const rowY = sy + 2;
+          const rowH = sy === 0 || sy === 16 ? 11 : 8;
+          let bx = backX + 1;
+          let i = 0;
+          while (bx < backX + backW - 2) {
+            const w = 3 + ((sy * sideSign + i) % 2);
+            if (bx + w > backX + backW - 1) break;
+            drawBookEndOn(bx, rowY + (rowH - 8), w, 8, i + Math.abs(sy));
+            bx += w + 1;
+            i++;
+          }
+        }
+        // Hint of spines peek through on the far shelf edge
+        ctx.fillStyle = books[0][0];
+        for (let sy of shelfYs) {
+          const peekX = rot === 1 ? backX + 1 : backX + backW - 2;
+          ctx.fillRect(peekX, sy + 3, 1, 6);
+        }
+      } else {
+        // ── rot=2: back of shelf faces viewer ──
+        ctx.fillStyle = wDk; ctx.fillRect(0, -30, 4, 60); ctx.fillRect(28, -30, 4, 60);
+        ctx.fillStyle = wMd; ctx.fillRect(4, -30, 24, 60);
+        ctx.fillStyle = wLt; ctx.fillRect(0, -30, 1, 60); ctx.fillRect(28, -30, 1, 60);
+        // Crown + base
+        ctx.fillStyle = crown;   ctx.fillRect(0, -32, 32, 3);
+        ctx.fillStyle = crownLt; ctx.fillRect(0, -32, 32, 1);
+        ctx.fillStyle = wDk;     ctx.fillRect(0, -29, 32, 1);
+        ctx.fillStyle = crown;   ctx.fillRect(0, 28, 32, 2);
+        ctx.fillStyle = wDk;     ctx.fillRect(0, 30, 32, 2);
+        // Plank seams on back
+        ctx.fillStyle = wDk;
+        ctx.fillRect(12, -30, 1, 60); ctx.fillRect(20, -30, 1, 60);
+        ctx.fillStyle = wLt;
+        ctx.fillRect(13, -30, 1, 60); ctx.fillRect(21, -30, 1, 60);
+        // Nail marks at each shelf
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        for (const sy of [-24, -12, 0, 16]) {
+          ctx.fillRect(8,  sy, 2, 2);
+          ctx.fillRect(22, sy, 2, 2);
+        }
       }
       return;
     }
@@ -4565,70 +5781,8 @@ export class Renderer {
     }
 
     // ── BED ─────────────────────────────────────────────────
-    if (tile === T.FURN_BED) {
-      if (rot === 0) {
-        // Headboard north, pillow at top
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,28,26,4);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,4,28,27);
-        ctx.fillStyle='#6b3a18'; ctx.fillRect(3,5,26,25);
-        ctx.fillStyle='#e8dcc8'; ctx.fillRect(4,7,24,20);
-        ctx.fillStyle='#d4c8b0'; ctx.fillRect(5,8,22,18);
-        ctx.fillStyle='#f0eae0'; ctx.fillRect(7,8,18,7);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillRect(8,9,8,3);
-        ctx.fillStyle='#9b3a3a'; ctx.fillRect(4,19,24,8);
-        ctx.fillStyle='#b04444'; ctx.fillRect(5,20,22,6);
-        ctx.fillStyle='#7a2828'; ctx.fillRect(4,19,24,2);
-        ctx.fillStyle='#3a1a08'; ctx.fillRect(2,4,28,4);
-        ctx.fillStyle='#5a2a10'; ctx.fillRect(3,5,26,2);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,29,28,3);
-      } else if (rot === 1) {
-        // Headboard east, pillow at right
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,28,26,4);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,2,28,28);
-        ctx.fillStyle='#6b3a18'; ctx.fillRect(3,3,26,26);
-        ctx.fillStyle='#e8dcc8'; ctx.fillRect(4,4,24,24);
-        ctx.fillStyle='#d4c8b0'; ctx.fillRect(5,5,22,22);
-        ctx.fillStyle='#f0eae0'; ctx.fillRect(20,5,7,18);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillRect(21,6,3,8);
-        ctx.fillStyle='#9b3a3a'; ctx.fillRect(4,4,14,24);
-        ctx.fillStyle='#b04444'; ctx.fillRect(5,5,12,22);
-        ctx.fillStyle='#7a2828'; ctx.fillRect(16,4,2,24);
-        ctx.fillStyle='#3a1a08'; ctx.fillRect(26,2,4,28);
-        ctx.fillStyle='#5a2a10'; ctx.fillRect(27,3,2,26);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(0,2,3,28);
-      } else if (rot === 2) {
-        // Headboard south, pillow at bottom
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,28,26,4);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,2,28,27);
-        ctx.fillStyle='#6b3a18'; ctx.fillRect(3,3,26,25);
-        ctx.fillStyle='#e8dcc8'; ctx.fillRect(4,5,24,20);
-        ctx.fillStyle='#d4c8b0'; ctx.fillRect(5,6,22,18);
-        ctx.fillStyle='#f0eae0'; ctx.fillRect(7,18,18,7);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillRect(8,19,8,3);
-        ctx.fillStyle='#9b3a3a'; ctx.fillRect(4,5,24,8);
-        ctx.fillStyle='#b04444'; ctx.fillRect(5,6,22,6);
-        ctx.fillStyle='#7a2828'; ctx.fillRect(4,12,24,2);
-        ctx.fillStyle='#3a1a08'; ctx.fillRect(2,25,28,4);
-        ctx.fillStyle='#5a2a10'; ctx.fillRect(3,26,26,2);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,0,28,3);
-      } else {
-        // Headboard west, pillow at left
-        ctx.fillStyle='rgba(0,0,0,0.2)'; ctx.fillRect(3,28,26,4);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(2,2,28,28);
-        ctx.fillStyle='#6b3a18'; ctx.fillRect(3,3,26,26);
-        ctx.fillStyle='#e8dcc8'; ctx.fillRect(4,4,24,24);
-        ctx.fillStyle='#d4c8b0'; ctx.fillRect(5,5,22,22);
-        ctx.fillStyle='#f0eae0'; ctx.fillRect(5,5,7,18);
-        ctx.fillStyle='rgba(255,255,255,0.5)'; ctx.fillRect(6,6,3,8);
-        ctx.fillStyle='#9b3a3a'; ctx.fillRect(14,4,14,24);
-        ctx.fillStyle='#b04444'; ctx.fillRect(15,5,12,22);
-        ctx.fillStyle='#7a2828'; ctx.fillRect(14,4,2,24);
-        ctx.fillStyle='#3a1a08'; ctx.fillRect(2,2,4,28);
-        ctx.fillStyle='#5a2a10'; ctx.fillRect(3,3,2,26);
-        ctx.fillStyle='#4a2808'; ctx.fillRect(29,2,3,28);
-      }
-      return;
-    }
+    // FURN_BED is rendered as a neighbour-aware direct case in _drawTileDetail
+    // so the 1×2 footprint splits into a head half and a foot half.
 
     // ── BENCH ────────────────────────────────────────────────
     if (tile === T.FURN_BENCH) {
@@ -4666,62 +5820,117 @@ export class Renderer {
       return;
     }
 
-    // ── WARDROBE ──────────────────────────────────────────────
+    // ── WARDROBE — tall cabinet (overhangs into tile above) ─────
     if (tile === T.FURN_WARDROBE) {
-      // Tall cabinet — doors face the rotation direction
-      const frame = '#4a2a10', body = '#5a3a18', panel = '#6a4a28';
-      const crown = '#6a4a28', handle = '#8a8a8a', split = '#3a2008';
+      const wp = tint ? Renderer.woodPalette(tint) : null;
+      const frame    = wp ? wp.dk   : '#4a2a10';
+      const body     = wp ? wp.mid  : '#5a3a18';
+      const panel    = wp ? wp.lt   : '#6a4a28';
+      const crown    = wp ? wp.lt   : '#7a5228';
+      const crownLt  = wp ? wp.hi   : '#9a6a38';
+      const crownShd = wp ? wp.dk   : '#4a2e14';
+      const split    = wp ? wp.shdw : '#3a2008';
+      const handle = '#d8cc88', handleShd = '#8a7a40';
+      const shadow = 'rgba(0,0,0,0.35)';
+
+      // Drop shadow at the base
+      ctx.fillStyle = shadow; ctx.fillRect(3, 30, 26, 2);
 
       if (rot === 0) {
-        // Doors face south (standard front view)
-        ctx.fillStyle=crown; ctx.fillRect(2,1,28,2);
-        ctx.fillStyle=body; ctx.fillRect(3,2,26,28);
-        ctx.fillStyle=frame;
-        ctx.fillRect(3,2,26,2); ctx.fillRect(3,28,26,2);
-        ctx.fillRect(3,2,2,28); ctx.fillRect(27,2,2,28);
-        ctx.fillStyle=split; ctx.fillRect(15,4,2,24);
+        // Doors face south — tall body from y=-22 to y=30, stepped crown on top
+        // Pediment crown
+        ctx.fillStyle=crown;    ctx.fillRect(0, -22, 32, 2);
+        ctx.fillStyle=crownLt;  ctx.fillRect(1, -22, 30, 1);
+        ctx.fillStyle=crownShd; ctx.fillRect(0, -20, 32, 1);
+        // Cornice step
+        ctx.fillStyle=crown;    ctx.fillRect(2, -19, 28, 3);
+        ctx.fillStyle=crownShd; ctx.fillRect(2, -16, 28, 1);
+        // Upper body (into tile above)
+        ctx.fillStyle=body;     ctx.fillRect(3, -15, 26, 15);
+        ctx.fillStyle=frame;    ctx.fillRect(3, -15,  2, 15);
+        ctx.fillStyle=frame;    ctx.fillRect(27,-15,  2, 15);
+        ctx.fillStyle=split;    ctx.fillRect(15,-15,  2, 15);
         ctx.fillStyle=panel;
-        ctx.fillRect(6,5,8,10); ctx.fillRect(6,17,8,10);
-        ctx.fillRect(18,5,8,10); ctx.fillRect(18,17,8,10);
-        ctx.fillStyle=handle;
-        ctx.fillRect(13,15,2,2); ctx.fillRect(17,15,2,2);
-      } else if (rot === 1) {
-        // Doors face east
-        ctx.fillStyle=crown; ctx.fillRect(1,2,2,28);
-        ctx.fillStyle=body; ctx.fillRect(2,3,28,26);
+        ctx.fillRect(6, -13, 8, 10);  ctx.fillRect(18, -13, 8, 10);
+        // Main body in base tile
+        ctx.fillStyle=body;     ctx.fillRect(3, 0, 26, 30);
         ctx.fillStyle=frame;
-        ctx.fillRect(2,3,2,26); ctx.fillRect(28,3,2,26);
-        ctx.fillRect(2,3,28,2); ctx.fillRect(2,27,28,2);
-        ctx.fillStyle=split; ctx.fillRect(4,15,24,2);
+        ctx.fillRect(3, 0, 26, 2); ctx.fillRect(3, 28, 26, 2);
+        ctx.fillRect(3, 0, 2, 30); ctx.fillRect(27, 0, 2, 30);
+        ctx.fillStyle=split;    ctx.fillRect(15, 2, 2, 26);
         ctx.fillStyle=panel;
-        ctx.fillRect(5,6,10,8); ctx.fillRect(17,6,10,8);
-        ctx.fillRect(5,18,10,8); ctx.fillRect(17,18,10,8);
-        ctx.fillStyle=handle;
-        ctx.fillRect(15,13,2,2); ctx.fillRect(15,17,2,2);
-      } else if (rot === 2) {
-        // Doors face north (back panel faces viewer)
-        ctx.fillStyle=crown; ctx.fillRect(2,29,28,2);
-        ctx.fillStyle='#4a2e14'; ctx.fillRect(3,2,26,28);
-        ctx.fillStyle=frame;
-        ctx.fillRect(3,2,26,2); ctx.fillRect(3,28,26,2);
-        ctx.fillRect(3,2,2,28); ctx.fillRect(27,2,2,28);
-        // Nail marks on back
+        ctx.fillRect(6, 2, 8, 12);   ctx.fillRect(18, 2, 8, 12);
+        ctx.fillRect(6, 16, 8, 10);  ctx.fillRect(18, 16, 8, 10);
+        // Panel inner shadows
         ctx.fillStyle='rgba(0,0,0,0.2)';
-        ctx.fillRect(8,7,2,2); ctx.fillRect(22,7,2,2);
-        ctx.fillRect(8,22,2,2); ctx.fillRect(22,22,2,2);
-      } else {
-        // Doors face west
-        ctx.fillStyle=crown; ctx.fillRect(29,2,2,28);
-        ctx.fillStyle=body; ctx.fillRect(2,3,28,26);
-        ctx.fillStyle=frame;
-        ctx.fillRect(2,3,2,26); ctx.fillRect(28,3,2,26);
-        ctx.fillRect(2,3,28,2); ctx.fillRect(2,27,28,2);
-        ctx.fillStyle=split; ctx.fillRect(4,15,24,2);
+        ctx.fillRect(6, 13, 8, 1); ctx.fillRect(18, 13, 8, 1);
+        // Brass knob handles
+        ctx.fillStyle=handle;    ctx.fillRect(13, 14, 2, 3); ctx.fillRect(17, 14, 2, 3);
+        ctx.fillStyle=handleShd; ctx.fillRect(13, 16, 2, 1); ctx.fillRect(17, 16, 2, 1);
+        // Feet
+        ctx.fillStyle=crownShd;  ctx.fillRect(3, 28, 4, 2); ctx.fillRect(25, 28, 4, 2);
+      } else if (rot === 1) {
+        // Doors face east — side view, tall body
+        ctx.fillStyle=crown;    ctx.fillRect(0, -22, 32, 2);
+        ctx.fillStyle=crownLt;  ctx.fillRect(1, -22, 30, 1);
+        ctx.fillStyle=crown;    ctx.fillRect(2, -19, 28, 3);
+        ctx.fillStyle=crownShd; ctx.fillRect(2, -16, 28, 1);
+        ctx.fillStyle=body;     ctx.fillRect(2, -15, 28, 15);
+        ctx.fillStyle=frame;    ctx.fillRect(2, -15, 2, 15); ctx.fillRect(28,-15, 2, 15);
+        ctx.fillStyle=split;    ctx.fillRect(4, -8, 24, 2);
         ctx.fillStyle=panel;
-        ctx.fillRect(5,6,10,8); ctx.fillRect(17,6,10,8);
-        ctx.fillRect(5,18,10,8); ctx.fillRect(17,18,10,8);
-        ctx.fillStyle=handle;
-        ctx.fillRect(15,13,2,2); ctx.fillRect(15,17,2,2);
+        ctx.fillRect(5, -13, 10, 4); ctx.fillRect(17, -13, 10, 4);
+        ctx.fillRect(5, -5, 10, 5);  ctx.fillRect(17, -5, 10, 5);
+        ctx.fillStyle=body;     ctx.fillRect(2, 0, 28, 30);
+        ctx.fillStyle=frame;
+        ctx.fillRect(2, 0, 2, 30); ctx.fillRect(28, 0, 2, 30);
+        ctx.fillRect(2, 0, 28, 2); ctx.fillRect(2, 28, 28, 2);
+        ctx.fillStyle=split;    ctx.fillRect(4, 15, 24, 2);
+        ctx.fillStyle=panel;
+        ctx.fillRect(5, 4, 10, 9); ctx.fillRect(17, 4, 10, 9);
+        ctx.fillRect(5, 18, 10, 9); ctx.fillRect(17, 18, 10, 9);
+        ctx.fillStyle=handle;    ctx.fillRect(15, 12, 2, 3); ctx.fillRect(15, 17, 2, 3);
+        ctx.fillStyle=crownShd;  ctx.fillRect(2, 28, 4, 2); ctx.fillRect(26, 28, 4, 2);
+      } else if (rot === 2) {
+        // Back panel — plain paneled back, still tall
+        ctx.fillStyle=crown;    ctx.fillRect(0, -22, 32, 2);
+        ctx.fillStyle=crownLt;  ctx.fillRect(1, -22, 30, 1);
+        ctx.fillStyle=crown;    ctx.fillRect(2, -19, 28, 3);
+        ctx.fillStyle=crownShd; ctx.fillRect(2, -16, 28, 1);
+        ctx.fillStyle=crownShd; ctx.fillRect(3, -15, 26, 15);
+        ctx.fillStyle=frame;    ctx.fillRect(3, -15, 2, 15); ctx.fillRect(27,-15, 2, 15);
+        // Nail marks upper
+        ctx.fillStyle='rgba(0,0,0,0.2)';
+        ctx.fillRect(8, -10, 2, 2); ctx.fillRect(22, -10, 2, 2);
+        ctx.fillStyle=crownShd; ctx.fillRect(3, 0, 26, 30);
+        ctx.fillStyle=frame;
+        ctx.fillRect(3, 0, 26, 2); ctx.fillRect(3, 28, 26, 2);
+        ctx.fillRect(3, 0, 2, 30); ctx.fillRect(27, 0, 2, 30);
+        ctx.fillStyle='rgba(0,0,0,0.2)';
+        ctx.fillRect(8, 7, 2, 2);  ctx.fillRect(22, 7, 2, 2);
+        ctx.fillRect(8, 22, 2, 2); ctx.fillRect(22, 22, 2, 2);
+      } else {
+        // Doors face west — mirror of rot=1
+        ctx.fillStyle=crown;    ctx.fillRect(0, -22, 32, 2);
+        ctx.fillStyle=crownLt;  ctx.fillRect(1, -22, 30, 1);
+        ctx.fillStyle=crown;    ctx.fillRect(2, -19, 28, 3);
+        ctx.fillStyle=crownShd; ctx.fillRect(2, -16, 28, 1);
+        ctx.fillStyle=body;     ctx.fillRect(2, -15, 28, 15);
+        ctx.fillStyle=frame;    ctx.fillRect(2, -15, 2, 15); ctx.fillRect(28,-15, 2, 15);
+        ctx.fillStyle=split;    ctx.fillRect(4, -8, 24, 2);
+        ctx.fillStyle=panel;
+        ctx.fillRect(5, -13, 10, 4); ctx.fillRect(17, -13, 10, 4);
+        ctx.fillRect(5, -5, 10, 5);  ctx.fillRect(17, -5, 10, 5);
+        ctx.fillStyle=body;     ctx.fillRect(2, 0, 28, 30);
+        ctx.fillStyle=frame;
+        ctx.fillRect(2, 0, 2, 30); ctx.fillRect(28, 0, 2, 30);
+        ctx.fillRect(2, 0, 28, 2); ctx.fillRect(2, 28, 28, 2);
+        ctx.fillStyle=split;    ctx.fillRect(4, 15, 24, 2);
+        ctx.fillStyle=panel;
+        ctx.fillRect(5, 4, 10, 9); ctx.fillRect(17, 4, 10, 9);
+        ctx.fillRect(5, 18, 10, 9); ctx.fillRect(17, 18, 10, 9);
+        ctx.fillStyle=handle;    ctx.fillRect(15, 12, 2, 3); ctx.fillRect(15, 17, 2, 3);
+        ctx.fillStyle=crownShd;  ctx.fillRect(2, 28, 4, 2); ctx.fillRect(26, 28, 4, 2);
       }
       return;
     }
@@ -4779,72 +5988,9 @@ export class Renderer {
       return;
     }
 
-    // ── WEAPON_RACK ──────────────────────────────────────────
-    if (tile === T.WEAPON_RACK) {
-      // Wall display with rack rail and 3 weapons — rotated to face different walls
-      const wall='#1c1820', wallLt='#252030', wallDk='#20202e';
-      const mortar='#121018', rail='#7a4a1e', railHi='#9a6028';
-      const railSh='#4a2c12', cap='#9a7040';
-      const hilt='#5a3a1e', guard='#806040', blade='#b8b8cc';
-      const bladeHi='#d0d0e0', axeH='#8a8890', axeHi='#a8a8b0';
-
-      if (rot === 0 || rot === 2) {
-        // Weapons face south/north — standard horizontal layout
-        ctx.fillStyle=wall; ctx.fillRect(0,0,32,32);
-        ctx.fillStyle=wallLt; ctx.fillRect(1,1,13,14);
-        ctx.fillStyle='#22203a'; ctx.fillRect(16,1,15,14);
-        ctx.fillStyle=wallDk; ctx.fillRect(1,17,30,14);
-        ctx.fillStyle=mortar;
-        ctx.fillRect(0,15,32,2); ctx.fillRect(15,0,2,15); ctx.fillRect(15,17,2,15);
-        ctx.fillStyle=rail; ctx.fillRect(2,7,28,5);
-        ctx.fillStyle=railHi; ctx.fillRect(3,8,26,2);
-        ctx.fillStyle=railSh; ctx.fillRect(3,11,26,1);
-        ctx.fillStyle=cap; ctx.fillRect(0,7,3,5); ctx.fillRect(29,7,3,5);
-        // Sword
-        ctx.fillStyle=hilt; ctx.fillRect(4,3,3,5);
-        ctx.fillStyle=guard; ctx.fillRect(3,7,5,2);
-        ctx.fillStyle=blade; ctx.fillRect(5,12,2,17);
-        ctx.fillStyle=bladeHi; ctx.fillRect(5,12,1,8);
-        // Axe
-        ctx.fillStyle=hilt; ctx.fillRect(15,3,2,5);
-        ctx.fillStyle=axeH; ctx.fillRect(12,7,8,8);
-        ctx.fillStyle=axeHi; ctx.fillRect(13,8,3,3);
-        ctx.fillStyle=hilt; ctx.fillRect(15,15,2,14);
-        // Spear
-        ctx.fillStyle=blade; ctx.fillRect(24,2,4,7);
-        ctx.fillStyle=bladeHi; ctx.fillRect(25,3,2,3);
-        ctx.fillStyle=hilt; ctx.fillRect(25,9,2,20);
-        ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fillRect(2,11,28,4);
-      } else {
-        // Weapons face east/west — vertical layout
-        ctx.fillStyle=wall; ctx.fillRect(0,0,32,32);
-        ctx.fillStyle=wallLt; ctx.fillRect(1,1,14,13);
-        ctx.fillStyle='#22203a'; ctx.fillRect(1,16,14,15);
-        ctx.fillStyle=wallDk; ctx.fillRect(17,1,14,30);
-        ctx.fillStyle=mortar;
-        ctx.fillRect(15,0,2,32); ctx.fillRect(0,15,15,2); ctx.fillRect(17,15,15,2);
-        ctx.fillStyle=rail; ctx.fillRect(7,2,5,28);
-        ctx.fillStyle=railHi; ctx.fillRect(8,3,2,26);
-        ctx.fillStyle=railSh; ctx.fillRect(11,3,1,26);
-        ctx.fillStyle=cap; ctx.fillRect(7,0,5,3); ctx.fillRect(7,29,5,3);
-        // Sword
-        ctx.fillStyle=hilt; ctx.fillRect(3,4,5,3);
-        ctx.fillStyle=guard; ctx.fillRect(7,3,2,5);
-        ctx.fillStyle=blade; ctx.fillRect(12,5,17,2);
-        ctx.fillStyle=bladeHi; ctx.fillRect(12,5,8,1);
-        // Axe
-        ctx.fillStyle=hilt; ctx.fillRect(3,15,5,2);
-        ctx.fillStyle=axeH; ctx.fillRect(7,12,8,8);
-        ctx.fillStyle=axeHi; ctx.fillRect(8,13,3,3);
-        ctx.fillStyle=hilt; ctx.fillRect(15,15,14,2);
-        // Spear
-        ctx.fillStyle=blade; ctx.fillRect(2,24,7,4);
-        ctx.fillStyle=bladeHi; ctx.fillRect(3,25,3,2);
-        ctx.fillStyle=hilt; ctx.fillRect(9,25,20,2);
-        ctx.fillStyle='rgba(0,0,0,0.22)'; ctx.fillRect(11,2,4,28);
-      }
-      return;
-    }
+    // WEAPON_RACK is rendered as a wall-mount direct case in _drawTileDetail
+    // (next to MEAT_HOOK / FURN_PAINTING) so the wall face renders underneath
+    // and the rack's weapons sit in the y = 10..28 wall-face zone.
 
     // ── DISPLAY_SHELF ────────────────────────────────────────
     if (tile === T.DISPLAY_SHELF) {
@@ -4943,6 +6089,367 @@ export class Renderer {
       }
       return;
     }
+
+    // ── STOOL ───────────────────────────────────────────────
+    if (tile === T.FURN_STOOL) {
+      const wp = tint ? Renderer.woodPalette(tint) : null;
+      const legC   = wp ? wp.shdw : '#2e1008';
+      const seatC  = wp ? wp.mid  : '#8b5e3c';
+      const seatHi = wp ? wp.hi   : '#a67844';
+      const shadC  = wp ? wp.dk   : '#5a3010';
+      ctx.fillStyle = legC;   ctx.fillRect(4, 24, 3, 6);  // left leg
+      ctx.fillRect(14, 24, 3, 8);                         // mid leg (front)
+      ctx.fillRect(25, 24, 3, 6);                         // right leg
+      ctx.fillStyle = seatC;  ctx.fillRect(3, 19, 26, 6); // seat
+      ctx.fillStyle = seatHi; ctx.fillRect(4, 20, 24, 2); // seat top highlight
+      ctx.fillStyle = shadC;  ctx.fillRect(3, 24, 26, 1); // seat underside shadow
+      return;
+    }
+
+    // ── THRONE — ornate high-backed chair ───────────────────
+    if (tile === T.FURN_THRONE) {
+      // Gilded throne with a tall crowned backrest — extends into tile above.
+      const goldDk = '#8a6818', gold = '#c8a227', goldLt = '#f1cc40';
+      const wood   = '#6a4410', woodShd = '#3a1808';
+      const cushDk = '#8a2222', cushMd = '#b83030', cushLt = '#e05050';
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(4, 30, 24, 2);
+
+      // ── Crown pinnacles (top of sprite) ────────────
+      // Central peak (tallest)
+      ctx.fillStyle = gold;   ctx.fillRect(15, -28, 2, 6);
+      ctx.fillStyle = goldLt; ctx.fillRect(15, -28, 1, 4);
+      ctx.fillStyle = goldDk; ctx.fillRect(14, -24, 4, 2);
+      // Side spikes
+      ctx.fillStyle = gold;   ctx.fillRect(9, -24, 2, 5); ctx.fillRect(21, -24, 2, 5);
+      ctx.fillStyle = goldDk; ctx.fillRect(8, -20, 4, 2); ctx.fillRect(20, -20, 4, 2);
+      // Small outer spikes
+      ctx.fillStyle = gold;   ctx.fillRect(5, -20, 2, 3); ctx.fillRect(25, -20, 2, 3);
+
+      // ── Tall backrest frame (from y=-18 to y=20) ────
+      ctx.fillStyle = wood;    ctx.fillRect(5, -18, 22, 38);
+      ctx.fillStyle = gold;    ctx.fillRect(5, -18, 22, 4);    // gold crown band
+      ctx.fillStyle = goldLt;  ctx.fillRect(6, -17, 20, 1);    // band highlight
+      ctx.fillStyle = goldDk;  ctx.fillRect(5, -14, 22, 1);    // band shadow
+      // Gold pilasters running down the sides
+      ctx.fillStyle = gold;    ctx.fillRect(5, -14, 3, 34); ctx.fillRect(24, -14, 3, 34);
+      ctx.fillStyle = goldLt;  ctx.fillRect(5, -14, 1, 34); ctx.fillRect(24, -14, 1, 34);
+      ctx.fillStyle = goldDk;  ctx.fillRect(7, -14, 1, 34); ctx.fillRect(26, -14, 1, 34);
+
+      // Velvet backrest cushion
+      ctx.fillStyle = cushDk;  ctx.fillRect(8, -12, 16, 28);
+      ctx.fillStyle = cushMd;  ctx.fillRect(9, -11, 14, 26);
+      ctx.fillStyle = cushLt;  ctx.fillRect(10, -10, 12, 3);   // top sheen
+      ctx.fillStyle = cushLt;  ctx.fillRect(10, -5, 4, 12);    // left sheen stripe
+      // Gold buttons on cushion
+      ctx.fillStyle = gold;
+      ctx.fillRect(12, -6, 2, 2); ctx.fillRect(18, -6, 2, 2);
+      ctx.fillRect(12, 2, 2, 2);  ctx.fillRect(18, 2, 2, 2);
+      ctx.fillRect(15, -2, 2, 2);                               // center button
+
+      // ── Seat (base tile) ───────────────────────────
+      ctx.fillStyle = wood;    ctx.fillRect(3, 20, 26, 8);
+      ctx.fillStyle = gold;    ctx.fillRect(3, 20, 26, 2);      // gold trim
+      ctx.fillStyle = goldLt;  ctx.fillRect(3, 20, 26, 1);
+      ctx.fillStyle = cushMd;  ctx.fillRect(5, 22, 22, 5);      // seat cushion
+      ctx.fillStyle = cushLt;  ctx.fillRect(6, 22, 20, 1);      // sheen
+      ctx.fillStyle = cushDk;  ctx.fillRect(5, 26, 22, 1);      // cushion shadow edge
+
+      // Gilded lion-paw legs
+      ctx.fillStyle = woodShd; ctx.fillRect(3, 28, 5, 4); ctx.fillRect(24, 28, 5, 4);
+      ctx.fillStyle = gold;    ctx.fillRect(3, 28, 5, 1); ctx.fillRect(24, 28, 5, 1);
+      // Claw detail
+      ctx.fillStyle = goldDk;
+      ctx.fillRect(3, 30, 2, 1); ctx.fillRect(6, 30, 2, 1);
+      ctx.fillRect(24, 30, 2, 1); ctx.fillRect(27, 30, 2, 1);
+      return;
+    }
+
+    // FURN_PAINTING is rendered as a direct case in _drawTileDetail so the
+    // wall face draws beneath it via the PROP_TILES pipeline. It is NOT in
+    // FURN_SET and NOT handled here.
+
+    // ── VASE — floor vase with a tall flower bouquet (overhangs up) ──
+    if (tile === T.FURN_VASE) {
+      const vaseDk  = '#2a2032', vaseMd = '#3a2d44', vaseLt = '#4a3854';
+      const vaseShd = '#18121f';
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.30)';
+      ctx.fillRect(10, 30, 12, 2);
+
+      // ── Ceramic vase (occupies y = 5..31) ──────────────────
+      ctx.fillStyle = vaseDk;
+      ctx.fillRect(11, 28, 10, 3);   // foot base
+      ctx.fillRect(13, 24, 6, 4);    // stem
+      ctx.fillRect(9, 14, 14, 11);   // belly
+      ctx.fillRect(10, 11, 12, 4);   // shoulder
+      ctx.fillRect(12, 7, 8, 5);     // neck
+      ctx.fillRect(11, 5, 10, 3);    // lip
+      // Left highlight stripe
+      ctx.fillStyle = vaseLt; ctx.fillRect(11, 11, 2, 14);
+      ctx.fillStyle = vaseMd; ctx.fillRect(10, 7, 1, 18);
+      // Right shadow
+      ctx.fillStyle = vaseShd; ctx.fillRect(22, 11, 1, 14);
+      // Floral band — blue ring
+      ctx.fillStyle = '#3a6aa8'; ctx.fillRect(10, 18, 12, 3);
+      ctx.fillStyle = '#5a8ac8'; ctx.fillRect(11, 19, 10, 1);
+      // Lip highlight
+      ctx.fillStyle = vaseLt; ctx.fillRect(12, 5, 8, 1);
+      // Broad sheen
+      ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fillRect(11, 8, 2, 14);
+
+      // ── Tall bouquet rising into tile above ───────────────
+      // Stems
+      ctx.fillStyle = '#1e5a20';
+      ctx.fillRect(13, 2, 1, 4);  ctx.fillRect(16, 0, 1, 6);
+      ctx.fillRect(19, 1, 1, 5);
+      ctx.fillStyle = '#27ae60';
+      ctx.fillRect(12, -4, 1, 8); ctx.fillRect(17, -8, 1, 14);
+      ctx.fillRect(20, -2, 1, 8);
+      // Leaves on stems
+      ctx.fillStyle = '#2e7a32';
+      ctx.fillRect(11, -2, 3, 1); ctx.fillRect(12, -5, 2, 1);
+      ctx.fillRect(18, -4, 3, 1); ctx.fillRect(18, -10, 2, 1);
+      ctx.fillRect(21, 0, 2, 1);
+      // Small filler greenery
+      ctx.fillStyle = '#4a9040';
+      ctx.fillRect(14, -3, 1, 1); ctx.fillRect(19, -6, 1, 1);
+      // Flower heads — a bigger bouquet reaching up into the tile above
+      // Red rose (left-front)
+      ctx.fillStyle = '#8a1a10'; ctx.fillRect(11, -8, 4, 4);
+      ctx.fillStyle = '#d02828'; ctx.fillRect(12, -8, 3, 3);
+      ctx.fillStyle = '#f05050'; ctx.fillRect(12, -7, 1, 1);
+      // Yellow (tallest, centre)
+      ctx.fillStyle = '#a07400'; ctx.fillRect(15, -18, 5, 5);
+      ctx.fillStyle = '#e8c030'; ctx.fillRect(16, -17, 3, 3);
+      ctx.fillStyle = '#f8e060'; ctx.fillRect(16, -17, 1, 1);
+      // Pink daisy (right)
+      ctx.fillStyle = '#a04070'; ctx.fillRect(19, -12, 4, 4);
+      ctx.fillStyle = '#e070a0'; ctx.fillRect(20, -12, 3, 3);
+      ctx.fillStyle = '#ffcce0'; ctx.fillRect(20, -11, 1, 1);
+      // White blossom (top-left)
+      ctx.fillStyle = '#c8c8c8'; ctx.fillRect(9,  -14, 3, 3);
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(10, -14, 2, 2);
+      ctx.fillStyle = '#d0a020'; ctx.fillRect(10, -13, 1, 1);  // centre
+      // Small red bud (top-right)
+      ctx.fillStyle = '#8a1a10'; ctx.fillRect(22, -18, 2, 2);
+      ctx.fillStyle = '#e04040'; ctx.fillRect(22, -18, 1, 1);
+      return;
+    }
+
+    // ── NIGHTSTAND — small bedside table with drawer ────────
+    if (tile === T.FURN_NIGHTSTAND) {
+      ctx.fillStyle = '#5a3a18'; ctx.fillRect(3, 10, 26, 18);  // body
+      ctx.fillStyle = '#7a4a22'; ctx.fillRect(3, 10, 26, 3);   // top face
+      ctx.fillStyle = '#8a5a28'; ctx.fillRect(4, 10, 24, 1);   // top highlight
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(3, 28, 26, 2);   // bottom shadow
+      // Drawer outline
+      ctx.fillStyle = '#3a2008'; ctx.fillRect(5, 15, 22, 1);
+      ctx.fillRect(5, 22, 22, 1);
+      // Drawer handle
+      ctx.fillStyle = '#c8a227'; ctx.fillRect(15, 18, 2, 2);
+      ctx.fillStyle = '#e0b840'; ctx.fillRect(15, 18, 1, 1);
+      // Legs
+      ctx.fillStyle = '#2e1008'; ctx.fillRect(3, 28, 3, 3);
+      ctx.fillRect(26, 28, 3, 3);
+      // Small lamp on top — warm glow
+      ctx.fillStyle = '#2a2a2a'; ctx.fillRect(14, 7, 4, 3);    // lamp base
+      ctx.fillStyle = '#e8c874'; ctx.fillRect(13, 3, 6, 5);    // shade
+      ctx.fillStyle = 'rgba(255,220,100,0.35)';
+      ctx.fillRect(11, 4, 10, 6);                              // soft light
+      return;
+    }
+
+    // ── FLOWER PATCH — garden cluster ───────────────────────
+    if (tile === T.FURN_FLOWER_PATCH) {
+      // Soil mound
+      ctx.fillStyle = '#3a2410'; ctx.fillRect(4, 22, 24, 7);
+      ctx.fillStyle = '#5a3818'; ctx.fillRect(5, 23, 22, 2);
+      // Leaves
+      ctx.fillStyle = '#2e5a22'; ctx.fillRect(6, 14, 4, 9);
+      ctx.fillRect(13, 12, 4, 11);
+      ctx.fillRect(22, 14, 4, 9);
+      ctx.fillStyle = '#4a8a3a'; ctx.fillRect(7, 15, 2, 7);
+      ctx.fillRect(14, 13, 2, 9);
+      ctx.fillRect(23, 15, 2, 7);
+      // Flowers — red / yellow / pink
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(6, 10, 4, 4);
+      ctx.fillStyle = '#e05050'; ctx.fillRect(7, 11, 2, 2);
+      ctx.fillStyle = '#f1c40f'; ctx.fillRect(13, 8, 4, 4);
+      ctx.fillStyle = '#fce070'; ctx.fillRect(14, 9, 2, 2);
+      ctx.fillStyle = '#e83b9b'; ctx.fillRect(22, 10, 4, 4);
+      ctx.fillStyle = '#f070c0'; ctx.fillRect(23, 11, 2, 2);
+      // Little buds
+      ctx.fillStyle = '#c0392b'; ctx.fillRect(4, 17, 2, 2);
+      ctx.fillStyle = '#f1c40f'; ctx.fillRect(26, 17, 2, 2);
+      return;
+    }
+
+    // ── CLOCK — tall grandfather clock (64 px, overhangs into tile above) ──
+    if (tile === T.FURN_CLOCK) {
+      // Sprite spans y = -32 .. 32 in tile-local coords; OVERHANG_TILES
+      // ensures the post-pass paints it on top of the already-rendered scene.
+      // Color palette
+      const woodDk  = '#2a1008';
+      const woodMd  = '#4a2010';
+      const woodLt  = '#6a3018';
+      const woodShd = '#1a0804';
+      const gold    = '#c8a227';
+      const goldLt  = '#e0b840';
+      const goldShd = '#8a6818';
+      const faceBg  = '#e8dcb0';
+      const faceShd = '#b8ac88';
+
+      // Drop shadow pooled at the base
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(7, 30, 18, 2);
+
+      // ── Pediment / crown cornice (top of sprite) ──────────
+      // Decorative arched bonnet
+      ctx.fillStyle = gold;    ctx.fillRect(10, -30, 12, 2);   // top finial cap
+      ctx.fillStyle = goldLt;  ctx.fillRect(11, -30, 10, 1);
+      ctx.fillStyle = goldShd; ctx.fillRect(10, -29, 12, 1);
+      // Tapered crown
+      ctx.fillStyle = woodDk; ctx.fillRect(9,  -28, 14, 2);
+      ctx.fillStyle = woodMd; ctx.fillRect(10, -28, 12, 1);
+      ctx.fillStyle = gold;   ctx.fillRect(8,  -26, 16, 2);    // cornice gold band
+      ctx.fillStyle = goldLt; ctx.fillRect(8,  -26, 16, 1);
+      ctx.fillStyle = goldShd;ctx.fillRect(8,  -25, 16, 1);
+
+      // ── Bonnet / hood (holds the clock face) ───────────────
+      ctx.fillStyle = woodDk; ctx.fillRect(9,  -24, 14, 16);
+      ctx.fillStyle = woodMd; ctx.fillRect(10, -24, 12, 14);
+      ctx.fillStyle = woodLt; ctx.fillRect(10, -24, 1,  14);   // left highlight
+      ctx.fillStyle = woodShd;ctx.fillRect(21, -24, 1,  14);   // right shadow
+
+      // Gold-trimmed round clock face (recessed panel)
+      ctx.fillStyle = gold;   ctx.fillRect(10, -22, 12, 1);    // face rim top
+      ctx.fillRect(10, -10, 12, 1);                            // face rim bottom
+      ctx.fillRect(10, -22, 1, 13);                            // rim left
+      ctx.fillRect(21, -22, 1, 13);                            // rim right
+      ctx.fillStyle = faceBg; ctx.fillRect(11, -21, 10, 10);
+      // Inner face shading (subtle rounded look via corner chamfers)
+      ctx.fillStyle = faceShd;
+      ctx.fillRect(11, -21, 10, 1);                            // face shadow top
+      ctx.fillRect(11, -12, 10, 1);                            // face shadow bot
+      ctx.fillRect(11, -21, 1,  10);
+      ctx.fillRect(20, -21, 1,  10);
+      // Hour markers — 12/3/6/9
+      ctx.fillStyle = '#1a0804';
+      ctx.fillRect(15, -20, 2, 1);   // 12
+      ctx.fillRect(19, -16, 1, 2);   // 3
+      ctx.fillRect(15, -13, 2, 1);   // 6
+      ctx.fillRect(12, -16, 1, 2);   // 9
+      // Clock hands — point to roughly 10:10 (classic watch pose)
+      ctx.fillStyle = woodDk;
+      ctx.fillRect(15, -19, 1, 4);                             // minute hand (up-ish)
+      ctx.fillRect(12, -16, 4, 1);                             // hour hand (left)
+      ctx.fillStyle = gold;  ctx.fillRect(15, -16, 1, 1);       // centre pin
+
+      // ── Neck / moulding between bonnet and waist ──────────
+      ctx.fillStyle = woodDk; ctx.fillRect(9,  -8, 14, 2);
+      ctx.fillStyle = gold;   ctx.fillRect(8,  -7, 16, 1);
+      ctx.fillStyle = goldShd;ctx.fillRect(8,  -6, 16, 1);
+      ctx.fillStyle = woodDk; ctx.fillRect(10, -5, 12, 2);
+
+      // ── Waist cabinet (pendulum window lives here) ─────────
+      ctx.fillStyle = woodDk; ctx.fillRect(10, -3, 12, 25);
+      ctx.fillStyle = woodMd; ctx.fillRect(11, -3, 10, 25);
+      ctx.fillStyle = woodLt; ctx.fillRect(11, -3, 1,  25);    // left highlight
+      ctx.fillStyle = woodShd;ctx.fillRect(20, -3, 1,  25);    // right shadow
+
+      // Pendulum window — glass pane with gold surround
+      ctx.fillStyle = gold;   ctx.fillRect(12, 0, 8, 1);        // window top
+      ctx.fillRect(12, 19, 8, 1);                              // window bottom
+      ctx.fillRect(12, 0, 1, 20);                              // left
+      ctx.fillRect(19, 0, 1, 20);                              // right
+      ctx.fillStyle = '#120604';                               // deep interior
+      ctx.fillRect(13, 1, 6, 18);
+      // Subtle glass highlight
+      ctx.fillStyle = 'rgba(240,220,140,0.10)';
+      ctx.fillRect(13, 1, 2, 18);
+
+      // Animated pendulum — swings on a short arc
+      const swing = Math.sin(this.time * 2.2);                 // ~2.2 rad/s
+      const pendX = 16 + Math.round(swing * 2);                // -2..+2 px
+      ctx.fillStyle = gold;   ctx.fillRect(pendX, 2, 1, 13);    // rod
+      ctx.fillStyle = goldLt; ctx.fillRect(pendX - 2, 14, 5, 3);// bob
+      ctx.fillStyle = gold;   ctx.fillRect(pendX - 2, 16, 5, 1);
+      ctx.fillStyle = goldShd;ctx.fillRect(pendX - 2, 17, 5, 1);
+
+      // ── Base plinth ───────────────────────────────────────
+      ctx.fillStyle = woodDk; ctx.fillRect(8,  22, 16, 8);
+      ctx.fillStyle = woodMd; ctx.fillRect(9,  22, 14, 7);
+      ctx.fillStyle = gold;   ctx.fillRect(8,  23, 16, 1);     // moulding highlight
+      ctx.fillStyle = goldShd;ctx.fillRect(8,  24, 16, 1);
+      // Carved bottom moulding
+      ctx.fillStyle = woodDk; ctx.fillRect(8,  28, 16, 1);
+      ctx.fillStyle = woodShd;ctx.fillRect(8,  29, 16, 1);
+      // Feet
+      ctx.fillStyle = woodDk; ctx.fillRect(8,  30, 3,  1);
+      ctx.fillRect(21, 30, 3, 1);
+      return;
+    }
+
+    // ── LANTERN — tall iron floor lantern (overhangs upward) ────
+    if (tile === T.FURN_LANTERN) {
+      const iron = '#2a2a2a', ironLt = '#4a4a4a', ironDk = '#121212';
+      // Flicker the flame slightly
+      const flick = Math.sin(this.time * 9) * 0.5 + 0.5;  // 0..1
+
+      // Drop shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fillRect(11, 30, 10, 2);
+
+      // Broad iron plinth base (3 tiers)
+      ctx.fillStyle = iron;   ctx.fillRect(10, 28, 12, 3);
+      ctx.fillStyle = ironDk; ctx.fillRect(10, 30, 12, 1);
+      ctx.fillStyle = iron;   ctx.fillRect(11, 26, 10, 2);
+      ctx.fillStyle = ironLt; ctx.fillRect(11, 26, 10, 1);
+      ctx.fillStyle = iron;   ctx.fillRect(12, 24, 8, 2);
+
+      // Tall stem reaching upward
+      ctx.fillStyle = iron;   ctx.fillRect(15, -8, 2, 32);
+      ctx.fillStyle = ironLt; ctx.fillRect(15, -8, 1, 32);
+      // Decorative finial ring at mid-stem
+      ctx.fillStyle = iron;   ctx.fillRect(14, 10, 4, 2);
+      ctx.fillStyle = ironLt; ctx.fillRect(14, 10, 4, 1);
+
+      // Bracket arm + mounting
+      ctx.fillStyle = iron;   ctx.fillRect(13, -10, 6, 2);
+
+      // Lantern head — now sits up in the tile above (y = -24..-10)
+      ctx.fillStyle = iron;   ctx.fillRect(9, -24, 14, 14);     // head body
+      ctx.fillRect(10, -26, 12, 2);                             // cap brim
+      ctx.fillRect(11, -28, 10, 2);                             // cap top
+      ctx.fillStyle = ironLt; ctx.fillRect(10, -26, 12, 1);
+      ctx.fillStyle = ironDk; ctx.fillRect(9, -12, 14, 1);
+      // Spire finial on cap
+      ctx.fillStyle = iron;   ctx.fillRect(15, -31, 2, 3);
+      ctx.fillStyle = ironLt; ctx.fillRect(15, -31, 1, 3);
+
+      // Glass panels (inside head)
+      ctx.fillStyle = '#f8e090'; ctx.fillRect(11, -22, 10, 10);
+      ctx.fillStyle = 'rgba(255,200,80,0.55)';
+      ctx.fillRect(10, -23, 12, 12);
+      // Window crossbars
+      ctx.fillStyle = ironDk; ctx.fillRect(9, -18, 14, 1); ctx.fillRect(15, -22, 2, 10);
+
+      // Flame — animated
+      const fh = 3 + Math.round(flick);            // 3..4 px tall
+      ctx.fillStyle = '#e06020'; ctx.fillRect(15, -18, 2, fh);
+      ctx.fillStyle = '#f8c040'; ctx.fillRect(15, -17, 2, 1);
+      ctx.fillStyle = '#ffe070'; ctx.fillRect(15, -16, 1, 1);
+
+      // Soft glow halo around the head (additive-feeling)
+      ctx.fillStyle = 'rgba(255,200,80,0.14)';
+      ctx.fillRect(2, -28, 28, 22);
+      ctx.fillStyle = 'rgba(255,220,120,0.10)';
+      ctx.fillRect(5, -24, 22, 16);
+      return;
+    }
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -4983,6 +6490,52 @@ export class Renderer {
     ctx.beginPath();
     ctx.arc(cx, cy, pulse, 0, Math.PI * 2);
     ctx.stroke();
+  }
+
+  /* ═══════════════════════════════════════════════════════
+     OVERHANG TILE SORTABLES  (tall furniture drawn with the entity layer
+     so depth-sort produces correct front/back occlusion — e.g. a player
+     standing north of a grandfather clock appears behind its crown.)
+     Pushes one sortable per visible OVERHANG tile into `outArr`.
+     Each sortable has { y, h, draw(ctx) } — sort key is y + h.
+     ═══════════════════════════════════════════════════════ */
+  collectOverhangSortables(world, startCol, startRow, endCol, endRow, outArr) {
+    if (!this._overhangPool) this._overhangPool = [];
+    const self = this;
+    // Iterate one row past the bottom so a tall sprite just below the
+    // viewport still contributes its crown into view.
+    let idx = 0;
+    for (let r = startRow; r <= endRow + 1; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const tile = world.getTile(c, r);
+        if (!OVERHANG_TILES.has(tile)) continue;
+        let s = this._overhangPool[idx];
+        if (!s) {
+          // Route through _drawTileDetail so both FURN_SET dispatch (e.g.
+          // clock, wardrobe) and direct cases (e.g. weapon_case using
+          // world.displayContent) render the same way.
+          s = { y:0, h:0, tpx:0, tpy:0, c:0, r:0, tile:0, world:null,
+                draw(ctx) {
+                  self._drawTileDetail(ctx, this.tile, this.tpx, this.tpy, this.c, this.r, this.world);
+                } };
+          this._overhangPool[idx] = s;
+        }
+        const px = c * TILE_SIZE, py = r * TILE_SIZE;
+        // Sprite top reaches up one tile; height spans 2 tiles; sort key
+        // (y + h) equals the base tile's bottom edge, so entities south of
+        // the base tile draw over it and entities north draw behind it.
+        s.tile  = tile;
+        s.c     = c;
+        s.r     = r;
+        s.world = world;
+        s.tpx   = px;
+        s.tpy   = py;
+        s.y     = py - TILE_SIZE;
+        s.h     = TILE_SIZE * 2;
+        outArr.push(s);
+        idx++;
+      }
+    }
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -5525,23 +7078,17 @@ export class Renderer {
     const px = 10;
     const py = this.canvas.height / 2 - panelH / 2;
 
-    // Background
-    ctx.fillStyle = 'rgba(20,15,10,0.88)';
-    this._roundRect(ctx, px, py, panelW, panelH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#8b6914';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, panelW, panelH, 8);
-    ctx.stroke();
+    // Background — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, panelW, panelH);
 
     // Title
-    ctx.fillStyle = '#f1c40f';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Skills', px + panelW / 2, py + 22);
 
     // Total level
-    ctx.fillStyle = '#aaa';
+    ctx.fillStyle = '#a08848';
     ctx.font = '10px monospace';
     ctx.fillText(`Total Level: ${skills.totalLevel}`, px + panelW / 2, py + 36);
 
@@ -5618,18 +7165,11 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, W, H);
 
-    // ── Panel background ─────────────────────────────────
-    ctx.fillStyle = '#100c06';
-    this._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, PW, PH, 8);
-    ctx.stroke();
-    ctx.strokeStyle = '#2a1a08';
-    ctx.lineWidth = 1;
-    this._roundRect(ctx, px + 3, py + 3, PW - 6, PH - 6, 6);
-    ctx.stroke();
+    // ── Panel background — shared bronze frame with a rarity accent line ──
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    ctx.fillStyle = color;
+    ctx.fillRect(px + 4, py + 3, PW - 8, 1);
+    this.drawCloseButton(ctx, px, py, PW);
 
     // ── Header ───────────────────────────────────────────
     const HICON = 42;
@@ -5793,8 +7333,9 @@ export class Renderer {
     const TILE_PX = 3;
     const mapAvailable = !!world;  // minimap + map button only render when a world is provided
 
-    // Outer integrated HUD panel — holds the minimap, map button, and HP bar.
-    const PANEL_W = 246, PANEL_H = 262;
+    // Outer integrated HUD panel — holds the minimap, map button, HP bar,
+    // and (when inside the player house) the BUILD button in a new row below.
+    const PANEL_W = 246, PANEL_H = this.getMinimapPanelHeight(world);
     const panelX = this.canvas.width - PANEL_W - 4;
     const panelY = 10;
     const cx = panelX + Math.floor(PANEL_W / 2);  // minimap centered in panel
@@ -5989,6 +7530,52 @@ export class Renderer {
     ctx.textBaseline = 'middle';
     ctx.fillText('MAP', ix + iw + 6, mb.y + mb.h / 2);
     ctx.textBaseline = 'alphabetic';
+
+    // ── Build-mode button (only when in the player house) ───
+    if (world?.id === 'player_house') {
+      const bb = this.getBuildButtonRect();
+      const hoverBuild = mouseX >= bb.x && mouseX <= bb.x + bb.w &&
+                         mouseY >= bb.y && mouseY <= bb.y + bb.h;
+      // Button body (same bronze bevel)
+      ctx.fillStyle = hoverBuild ? '#4a3414' : '#2a1c08';
+      ctx.fillRect(bb.x, bb.y, bb.w, bb.h);
+      ctx.fillStyle = hoverBuild ? '#c89040' : '#8a5c20';
+      ctx.fillRect(bb.x, bb.y, bb.w, 1);
+      ctx.fillRect(bb.x, bb.y, 1, bb.h);
+      ctx.fillStyle = '#1a0e04';
+      ctx.fillRect(bb.x, bb.y + bb.h - 1, bb.w, 1);
+      ctx.fillRect(bb.x + bb.w - 1, bb.y, 1, bb.h);
+
+      // Center the icon+label group inside the wider button.
+      //   Icon occupies ~20 px wide, gap 6, label "BUILD" ~40 px → group ~66 px
+      const GROUP_W = 66;
+      const groupX  = bb.x + Math.floor((bb.w - GROUP_W) / 2);
+      const hx = groupX, hy = bb.y + 6, hh = bb.h - 12;
+
+      // Hammer icon (wood handle + grey head)
+      ctx.fillStyle = '#8a5a28';
+      for (let i = 0; i < 10; i++) ctx.fillRect(hx + 3 + i, hy + hh - 2 - i, 2, 2);
+      ctx.fillStyle = '#6a4018';
+      for (let i = 0; i < 10; i++) ctx.fillRect(hx + 3 + i, hy + hh - 1 - i, 1, 1);
+      // Hammer head (steel block at upper-right end of handle)
+      ctx.fillStyle = '#6a7080';
+      ctx.fillRect(hx + 11, hy + 1, 9, 7);
+      ctx.fillStyle = '#9aa0b0';
+      ctx.fillRect(hx + 11, hy + 1, 9, 2);   // top shine
+      ctx.fillStyle = '#3a4050';
+      ctx.fillRect(hx + 11, hy + 7, 9, 1);   // bottom shadow
+      // Claw tips on left side of head
+      ctx.fillStyle = '#4a5260';
+      ctx.fillRect(hx + 10, hy + 2, 1, 2); ctx.fillRect(hx + 10, hy + 5, 1, 2);
+
+      // "BUILD" label — right of icon, same baseline
+      ctx.fillStyle = hoverBuild ? '#fff1c0' : '#f0d090';
+      ctx.font = 'bold 12px monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('BUILD', hx + 24, bb.y + bb.h / 2 + 1);
+      ctx.textBaseline = 'alphabetic';
+    }
   }
 
   /** Shared rect for the world-map button (used by renderer + hit-test).
@@ -6005,6 +7592,24 @@ export class Renderer {
       w: MB_W,
       h: MB_H,
     };
+  }
+
+  /** Shared rect for the Build-mode button — a full-width bar in its own row
+   *  directly below the HP bar inside the minimap HUD panel. Only drawn when
+   *  the player is inside their house (see drawCircleMinimap). */
+  getBuildButtonRect() {
+    const mb = this.getMapButtonRect();
+    const PANEL_W = 246;
+    const panelX = this.canvas.width - PANEL_W - 4;
+    const BB_H = 28;
+    // Sits below the MAP/HP row with a 6px gap.
+    return { x: panelX + 8, y: mb.y + mb.h + 6, w: PANEL_W - 16, h: BB_H };
+  }
+
+  /** Total pixel height of the minimap HUD panel. Grows by one button row
+   *  when the player is inside their house so the BUILD button fits. */
+  getMinimapPanelHeight(world) {
+    return world?.id === 'player_house' ? 300 : 262;
   }
 
   /* ═══════════════════════════════════════════════════════
@@ -6811,17 +8416,12 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel background
-    ctx.fillStyle = 'rgba(15,12,8,0.97)';
-    this._roundRect(ctx, px, py, SHOP_PW, SHOP_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#8b6914';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, SHOP_PW, SHOP_PH, 8);
-    ctx.stroke();
+    // Panel background — shared bronze frame matching the HUD theme
+    this.drawBronzeFrame(ctx, px, py, SHOP_PW, SHOP_PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, SHOP_PW);
 
     // Header — title
-    ctx.fillStyle = '#f1c40f';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(title, px + 12, py + 24);
@@ -7049,29 +8649,24 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel bg
-    ctx.fillStyle = 'rgba(12,8,4,0.97)';
-    this._roundRect(ctx, px, py, FORGE_PW, SMELT_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#b7410e';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, FORGE_PW, SMELT_PH, 8);
-    ctx.stroke();
+    // Panel bg — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, FORGE_PW, SMELT_PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, FORGE_PW);
 
-    // Flame accent strip along top
+    // Flame accent strip along top (inside the frame)
     const grad = ctx.createLinearGradient(px, py, px + FORGE_PW, py);
     grad.addColorStop(0, 'rgba(183,65,14,0)');
     grad.addColorStop(0.5, 'rgba(255,140,66,0.25)');
     grad.addColorStop(1, 'rgba(183,65,14,0)');
     ctx.fillStyle = grad;
-    ctx.fillRect(px, py, FORGE_PW, FORGE_HEADER_H);
+    ctx.fillRect(px + 3, py + 3, FORGE_PW - 6, FORGE_HEADER_H - 3);
 
     // Header
     ctx.fillStyle = '#ff8c42';
     ctx.font = 'bold 15px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('🔥 Furnace — Smelting', px + 12, py + 26);
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = '#a08848';
     ctx.font = '10px monospace';
     ctx.fillText('Smelt ores into bars  •  Click outside to close', px + 12, py + 42);
 
@@ -7111,29 +8706,24 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.5)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel bg
-    ctx.fillStyle = 'rgba(8,10,14,0.97)';
-    this._roundRect(ctx, px, py, FORGE_PW, SMITH_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#4a7ab7';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, FORGE_PW, SMITH_PH, 8);
-    ctx.stroke();
+    // Panel bg — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, FORGE_PW, SMITH_PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, FORGE_PW);
 
-    // Steel accent strip
+    // Steel accent strip (inside the frame)
     const grad2 = ctx.createLinearGradient(px, py, px + FORGE_PW, py);
     grad2.addColorStop(0, 'rgba(74,122,183,0)');
     grad2.addColorStop(0.5, 'rgba(120,180,255,0.18)');
     grad2.addColorStop(1, 'rgba(74,122,183,0)');
     ctx.fillStyle = grad2;
-    ctx.fillRect(px, py, FORGE_PW, FORGE_HEADER_H);
+    ctx.fillRect(px + 3, py + 3, FORGE_PW - 6, FORGE_HEADER_H - 3);
 
     // Header
     ctx.fillStyle = '#78b4ff';
     ctx.font = 'bold 15px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('⚒ Anvil — Smithing', px + 12, py + 26);
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = '#a08848';
     ctx.font = '10px monospace';
     ctx.fillText('Smith bars into equipment  •  Click outside to close', px + 12, py + 42);
 
@@ -7244,14 +8834,9 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel background
-    ctx.fillStyle = 'rgba(14,10,4,0.97)';
-    this._roundRect(ctx, px, py, CHEST_PW, CHEST_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#a07828';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, CHEST_PW, CHEST_PH, 8);
-    ctx.stroke();
+    // Panel background — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, CHEST_PW, CHEST_PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, CHEST_PW);
 
     // Amber gradient accent along top
     const grad = ctx.createLinearGradient(px, py, px + CHEST_PW, py);
@@ -7367,32 +8952,25 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.65)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel bg
-    ctx.fillStyle = 'rgba(6,8,14,0.98)';
-    this._roundRect(ctx, px, py, PW, PH, 10);
-    ctx.fill();
-    // Animated border glow
-    const glow = 0.6 + 0.3 * Math.sin(elapsed * 2);
-    ctx.strokeStyle = `rgba(74,144,208,${glow})`;
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, PW, PH, 10);
-    ctx.stroke();
+    // Panel bg — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, PW);
+    void elapsed; // no longer used for animated border
 
     // Header
-    ctx.fillStyle = '#78b4ff';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 15px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('Character', px + 14, py + 28);
-    ctx.fillStyle = '#555';
+    ctx.fillStyle = '#8a7050';
     ctx.font = '10px monospace';
-    ctx.fillText('Click outside to close', px + 14, py + 44);
+    ctx.fillText('Click outside or the ✕ to close', px + 14, py + 44);
 
-    // Header divider
-    ctx.strokeStyle = 'rgba(74,144,208,0.35)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px + 8, py + 52); ctx.lineTo(px + PW - 8, py + 52);
-    ctx.stroke();
+    // Header divider — gold over dark double rule
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 8, py + 51, PW - 16, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(px + 8, py + 52, PW - 16, 1);
 
     // ── Left: character preview ──
     const charW = 200;
@@ -7400,31 +8978,30 @@ export class Renderer {
     const charX = px + 8;
     const charY = py + 56;
 
-    ctx.fillStyle = 'rgba(0,0,0,0.5)';
-    this._roundRect(ctx, charX, charY, charW, charH, 6);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(40,80,140,0.6)';
-    ctx.lineWidth = 1;
-    this._roundRect(ctx, charX, charY, charW, charH, 6);
-    ctx.stroke();
+    // Inset bronze-framed portrait box to match the rest of the HUD.
+    this.drawBronzeFrame(ctx, charX, charY, charW, charH);
 
-    // Grid lines in background
-    ctx.strokeStyle = 'rgba(40,80,140,0.15)';
-    ctx.lineWidth = 1;
-    for (let gx = charX + 20; gx < charX + charW; gx += 20) {
-      ctx.beginPath(); ctx.moveTo(gx, charY + 1); ctx.lineTo(gx, charY + charH - 1); ctx.stroke();
-    }
-    for (let gy = charY + 20; gy < charY + charH; gy += 20) {
-      ctx.beginPath(); ctx.moveTo(charX + 1, gy); ctx.lineTo(charX + charW - 1, gy); ctx.stroke();
-    }
-
-    // Draw player character (scaled up, clipped)
+    // Draw player character (scaled up, clipped). Force front-facing pose
+    // and suppress the name tag + any action animation so the preview is
+    // a clean portrait regardless of the live player state.
     const SCALE = 3.5;
     const charCX = charX + charW / 2;
     const charCY = charY + charH * 0.44;
+
+    const prevDir          = player.dir;
+    const prevAction       = player.currentAction;
+    const prevLocked       = player.actionLocked;
+    const prevHideName     = player.hideNameTag;
+    const prevHideShadow   = player.hideShadow;
+    player.dir             = 0; // DIR.DOWN — face forward
+    player.currentAction   = 'idle';
+    player.actionLocked    = false;
+    player.hideNameTag     = true;
+    player.hideShadow      = true;
+
     ctx.save();
     ctx.beginPath();
-    this._roundRect(ctx, charX + 1, charY + 1, charW - 2, charH - 2, 5);
+    ctx.rect(charX + 2, charY + 2, charW - 4, charH - 4);
     ctx.clip();
     ctx.translate(charCX - (player.x + player.w / 2) * SCALE,
                   charCY - (player.y + player.h / 2) * SCALE);
@@ -7432,17 +9009,17 @@ export class Renderer {
     player.draw(ctx);
     ctx.restore();
 
-    // Pedestal
-    ctx.fillStyle = 'rgba(40,80,140,0.3)';
+    player.dir           = prevDir;
+    player.currentAction = prevAction;
+    player.actionLocked  = prevLocked;
+    player.hideNameTag   = prevHideName;
+    player.hideShadow    = prevHideShadow;
+
+    // Pedestal — bronze-toned ellipse under the feet
+    ctx.fillStyle = 'rgba(140,96,48,0.35)';
     ctx.beginPath();
     ctx.ellipse(charX + charW / 2, charCY + player.h * SCALE * 0.56, 36, 8, 0, 0, Math.PI * 2);
     ctx.fill();
-
-    // "Player" label
-    ctx.fillStyle = '#f1c40f';
-    ctx.font = 'bold 11px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('Player', charX + charW / 2, charY + charH - 10);
 
     // ── Accumulate all five gear stats from gear registry ──
     let offAtk = 0, offStr = 0, defTotal = 0, totalCrit = 0, weaponSpeed = 1.0;
@@ -7474,7 +9051,7 @@ export class Renderer {
     const totalsColW = 100;
 
     // Equipment slots section header
-    ctx.fillStyle = '#4a90d0';
+    ctx.fillStyle = '#e8b858';
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('EQUIPMENT', rightX, py + 66);
@@ -7532,17 +9109,11 @@ export class Renderer {
     const totalsY = slotsStartY;
     const totalsH = numSlots * slotRowH - 4;
 
-    // Column background
-    ctx.fillStyle = 'rgba(8,10,16,0.92)';
-    this._roundRect(ctx, totalsX, totalsY, totalsColW, totalsH, 5);
-    ctx.fill();
-    ctx.strokeStyle = `rgba(74,144,208,${0.4 + 0.15 * Math.sin(elapsed * 1.8)})`;
-    ctx.lineWidth = 1;
-    this._roundRect(ctx, totalsX, totalsY, totalsColW, totalsH, 5);
-    ctx.stroke();
+    // Shared bronze-framed column
+    this.drawBronzeFrame(ctx, totalsX, totalsY, totalsColW, totalsH);
 
     // Column header
-    ctx.fillStyle = '#78b4ff';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 8px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('GEAR STATS', totalsX + totalsColW / 2, totalsY + 11);
@@ -7563,8 +9134,8 @@ export class Renderer {
       const sr  = statRows[ri];
       const ry  = totalsY + 14 + ri * rowSlotH;
 
-      // Divider
-      ctx.strokeStyle = 'rgba(74,144,208,0.18)';
+      // Divider — subtle bronze hairline
+      ctx.strokeStyle = 'rgba(200,144,48,0.22)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(totalsX + 4, ry); ctx.lineTo(totalsX + totalsColW - 4, ry);
@@ -7576,8 +9147,8 @@ export class Renderer {
       ctx.textAlign = 'left';
       ctx.fillText(sr.label, totalsX + 5, ry + 11);
 
-      // Value — green if non-zero, grey if zero/default
-      ctx.fillStyle = sr.nonZero ? '#8bc34a' : '#484848';
+      // Value — cream if non-zero, muted bronze if zero/default
+      ctx.fillStyle = sr.nonZero ? '#f0d090' : '#6a5030';
       ctx.font = `bold ${sr.nonZero ? 12 : 10}px monospace`;
       ctx.textAlign = 'right';
       ctx.fillText(sr.dispVal, totalsX + totalsColW - 4, ry + rowSlotH - 5);
@@ -7586,13 +9157,13 @@ export class Renderer {
     // ── Combat stats section ──
     const statsY = slotsStartY + numSlots * slotRowH + 14;
 
-    ctx.strokeStyle = 'rgba(74,144,208,0.4)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(rightX, statsY); ctx.lineTo(rightX + rightW, statsY);
-    ctx.stroke();
+    // Gold/dark double rule separator (matches the tab bar divider).
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(rightX, statsY,     rightW, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(rightX, statsY + 1, rightW, 1);
 
-    ctx.fillStyle = '#4a90d0';
+    ctx.fillStyle = '#e8b858';
     ctx.font = 'bold 10px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('COMBAT STATS', rightX, statsY + 14);
@@ -7610,32 +9181,30 @@ export class Renderer {
       const sc = statCols[i];
       const bx = rightX + i * colW;
       const by = statsY + 20;
+      const bw = colW - 4, bh = 68;
 
-      ctx.fillStyle = 'rgba(10,8,4,0.9)';
-      this._roundRect(ctx, bx, by, colW - 4, 68, 4);
-      ctx.fill();
-      ctx.strokeStyle = sc.color;
-      ctx.lineWidth = 1;
-      this._roundRect(ctx, bx, by, colW - 4, 68, 4);
-      ctx.stroke();
+      // Shared bronze-framed stat box + skill-color accent line at the top.
+      this.drawBronzeFrame(ctx, bx, by, bw, bh);
+      ctx.fillStyle = sc.color;
+      ctx.fillRect(bx + 3, by + 3, bw - 6, 1);
 
       ctx.fillStyle = sc.color;
       ctx.font = 'bold 9px monospace';
       ctx.textAlign = 'center';
-      ctx.fillText(sc.label, bx + (colW - 4) / 2, by + 13);
+      ctx.fillText(sc.label, bx + bw / 2, by + 13);
 
-      ctx.fillStyle = '#fff';
+      ctx.fillStyle = '#f0d090';
       ctx.font = 'bold 22px monospace';
-      ctx.fillText(`${sc.level}`, bx + (colW - 4) / 2, by + 40);
+      ctx.fillText(`${sc.level}`, bx + bw / 2, by + 40);
 
       if (sc.bonus > 0) {
         ctx.fillStyle = '#8bc34a';
         ctx.font = 'bold 10px monospace';
-        ctx.fillText(`+${sc.bonus}${sc.bonusLabel ? ' ' + sc.bonusLabel : ''}`, bx + (colW - 4) / 2, by + 58);
+        ctx.fillText(`+${sc.bonus}${sc.bonusLabel ? ' ' + sc.bonusLabel : ''}`, bx + bw / 2, by + 58);
       } else {
-        ctx.fillStyle = '#444';
+        ctx.fillStyle = '#6a5030';
         ctx.font = '9px monospace';
-        ctx.fillText(sc.bonusLabel ? 'no ' + sc.bonusLabel : '—', bx + (colW - 4) / 2, by + 58);
+        ctx.fillText(sc.bonusLabel ? 'no ' + sc.bonusLabel : '—', bx + bw / 2, by + 58);
       }
     }
 
@@ -7669,24 +9238,15 @@ export class Renderer {
     const px = Math.floor((W - PW) / 2);
     const py = Math.floor((H - PH) / 2);
 
-    ctx.fillStyle = 'rgba(6,2,0,0.97)';
-    this._roundRect(ctx, px, py, PW, PH, 12);
-    ctx.fill();
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
 
-    // Animated orange border
-    const borderGlow = 0.55 + 0.35 * Math.sin(elapsed * 5);
-    ctx.strokeStyle = `rgba(255,100,0,${borderGlow})`;
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, PW, PH, 12);
-    ctx.stroke();
-
-    // Inner top accent glow
+    // Inner top accent glow — warm ember sweep across the top of the frame
     const topGrad = ctx.createLinearGradient(px, py, px + PW, py);
     topGrad.addColorStop(0, 'rgba(255,60,0,0)');
     topGrad.addColorStop(0.5, `rgba(255,120,0,${0.2 + flicker})`);
     topGrad.addColorStop(1, 'rgba(255,60,0,0)');
     ctx.fillStyle = topGrad;
-    ctx.fillRect(px, py, PW, 3);
+    ctx.fillRect(px + 3, py + 3, PW - 6, 3);
 
     // Title
     ctx.fillStyle = '#ff8c42';
@@ -7864,24 +9424,16 @@ export class Renderer {
     const px = Math.floor((W - PW) / 2);
     const py = Math.floor((H - PH) / 2);
 
-    ctx.fillStyle = 'rgba(4,8,16,0.97)';
-    this._roundRect(ctx, px, py, PW, PH, 12);
-    ctx.fill();
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
 
-    // Animated steel-blue border
-    const borderGlow = 0.55 + 0.35 * Math.sin(elapsed * 5);
-    ctx.strokeStyle = `rgba(80,160,255,${borderGlow})`;
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, PW, PH, 12);
-    ctx.stroke();
-
-    // Inner top accent
+    // Inner top accent — steel-blue sweep across the top of the frame
     const topGrad = ctx.createLinearGradient(px, py, px + PW, py);
     topGrad.addColorStop(0,   'rgba(0,80,200,0)');
     topGrad.addColorStop(0.5, 'rgba(80,160,255,0.2)');
     topGrad.addColorStop(1,   'rgba(0,80,200,0)');
     ctx.fillStyle = topGrad;
-    ctx.fillRect(px, py, PW, 3);
+    ctx.fillRect(px + 3, py + 3, PW - 6, 3);
+    void elapsed; // animated border removed in favour of the shared frame
 
     // Title
     ctx.fillStyle = '#6ab0ff';
@@ -8066,7 +9618,7 @@ export class Renderer {
   /* ═══════════════════════════════════════════════════════
      BUILD-MODE FURNITURE CURSOR (camera-space)
      ═══════════════════════════════════════════════════════ */
-  drawBuildModeFurnCursor(col, row, elapsed, furnitureDef, rotation, invalid = false) {
+  drawBuildModeFurnCursor(col, row, elapsed, furnitureDef, rotation, invalid = false, tint = null) {
     if (!furnitureDef) return;
     const ctx = this.ctx;
     const { w, h } = rotatedFootprint(furnitureDef, rotation);
@@ -8085,11 +9637,16 @@ export class Renderer {
           // Base colour fill
           ctx.fillStyle = TILE_COLORS[tileId] || '#555';
           ctx.fillRect(tx, ty, 32, 32);
-          // Tile detail (non-FURN_SET tiles like cauldron, candelabra, etc.)
-          const fakeWorld = { getTile: () => 0, getRotation: () => rotation };
+          // Fake world that exposes the chosen variant tint to tint-aware
+          // sprite cases (table/rug/bed/etc.) during the ghost preview.
+          const fakeWorld = {
+            getTile: () => 0,
+            getRotation: () => rotation,
+            furnVariants: tint ? { get: () => tint } : null,
+          };
           try { this._drawTileDetail(ctx, tileId, tx, ty, col + dc, row + dr, fakeWorld); } catch (_) {}
           // Furniture sprite (FURN_SET tiles like chair, chest, bed, etc.)
-          try { ctx.save(); ctx.translate(tx, ty); this._drawFurnitureSprite(ctx, tileId, rotation); ctx.restore(); } catch (_) { ctx.restore(); }
+          try { ctx.save(); ctx.translate(tx, ty); this._drawFurnitureSprite(ctx, tileId, rotation, tint); ctx.restore(); } catch (_) { ctx.restore(); }
         }
       }
       ctx.restore();
@@ -8111,7 +9668,100 @@ export class Renderer {
   }
 
   /** Draw a 32×32 tile preview icon at (x, y) with a border. Used for build-mode lists. */
-  _drawTilePreview(ctx, tileId, x, y, seed = 0) {
+  /** Rect for the Paint Picker popup (tint options list). */
+  paintPickerRect() {
+    const W = this.canvas.width, H = this.canvas.height;
+    const PW = 360, PH = 420;
+    return {
+      px: Math.floor((W - PW) / 2),
+      py: Math.floor((H - PH) / 2),
+      PW, PH,
+    };
+  }
+
+  /** Draw the paint picker overlay. `kind` = 'floor' | 'wall'.
+   *  Returns an array of per-option rects for the click handler. */
+  drawPaintPicker(kind, inventory, currentTintId, mouseX, mouseY) {
+    const ctx = this.ctx;
+    const W = this.canvas.width, H = this.canvas.height;
+    const { px, py, PW, PH } = this.paintPickerRect();
+    const options = kind === 'wall' ? WALL_TINT_OPTIONS : FLOOR_TINT_OPTIONS;
+
+    // Dim backdrop
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(0, 0, W, H);
+
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, PW, mouseX, mouseY);
+
+    ctx.fillStyle = '#f0d090';
+    ctx.font = 'bold 15px monospace';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(kind === 'wall' ? 'Repaint Walls' : 'Refinish Floor', px + 14, py + 28);
+    ctx.fillStyle = '#8a7050';
+    ctx.font = '10px monospace';
+    ctx.fillText('Choose a tint. Materials are consumed on apply.', px + 14, py + 44);
+
+    // Divider
+    ctx.fillStyle = '#c89030'; ctx.fillRect(px + 8, py + 51, PW - 16, 1);
+    ctx.fillStyle = '#080503'; ctx.fillRect(px + 8, py + 52, PW - 16, 1);
+
+    const rects = [];
+    const ROW_H = 36, PAD = 4;
+    const listTop = py + 62;
+    options.forEach((opt, i) => {
+      const rx = px + 14;
+      const ry = listTop + i * (ROW_H + PAD);
+      const rw = PW - 28, rh = ROW_H;
+      const isCur = opt.id === currentTintId;
+      const canAfford = opt.materials.every(m => inventory.count(m.itemId) >= m.qty);
+      const hov = mouseX >= rx && mouseX <= rx + rw && mouseY >= ry && mouseY <= ry + rh;
+
+      ctx.fillStyle = isCur ? 'rgba(100,160,60,0.28)'
+                    : hov   ? 'rgba(200,160,60,0.18)'
+                    :         'rgba(40,24,10,0.5)';
+      ctx.fillRect(rx, ry, rw, rh);
+      ctx.strokeStyle = isCur ? '#6acc4a' : canAfford ? '#8a6020' : '#4a3010';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(rx, ry, rw, rh);
+
+      // Colour swatch
+      if (opt.tint) {
+        ctx.fillStyle = opt.tint;
+        ctx.fillRect(rx + 4, ry + 6, 24, 24);
+      } else {
+        ctx.fillStyle = '#3a2a1a';
+        ctx.fillRect(rx + 4, ry + 6, 24, 24);
+        ctx.fillStyle = '#8a7050';
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('—', rx + 16, ry + 22);
+      }
+      ctx.strokeStyle = '#1a0e04';
+      ctx.strokeRect(rx + 4.5, ry + 6.5, 23, 23);
+
+      // Name
+      ctx.fillStyle = canAfford || isCur ? '#f0d090' : '#8a7050';
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText(opt.name + (isCur ? ' (current)' : ''), rx + 34, ry + 16);
+
+      // Materials
+      ctx.fillStyle = canAfford || isCur ? '#a89868' : '#6a5030';
+      ctx.font = '9px monospace';
+      const matStr = opt.materials.length === 0
+        ? 'Free'
+        : opt.materials.map(m => `${m.qty}×${m.itemId.replace(/_/g,' ')}`).join('  ');
+      ctx.fillText(matStr, rx + 34, ry + 28);
+
+      rects.push({ id: opt.id, x: rx, y: ry, w: rw, h: rh });
+    });
+
+    return rects;
+  }
+
+  _drawTilePreview(ctx, tileId, x, y, seed = 0, tint = null) {
     ctx.save();
     ctx.beginPath();
     ctx.rect(x, y, 32, 32);
@@ -8119,17 +9769,33 @@ export class Renderer {
     // Base colour fill
     ctx.fillStyle = TILE_COLORS[tileId] || '#000';
     ctx.fillRect(x, y, 32, 32);
-    // Tile detail (uses a fake world so context-aware tiles degrade gracefully)
-    const fakeWorld = { getTile: () => 0, getRotation: () => 0 };
-    try {
-      this._drawTileDetail(ctx, tileId, x, y, seed, 0, fakeWorld);
-    } catch (_) { /* ok */ }
-    // Furniture sprites rendered via FURN_SET — draw default rotation for preview
-    try {
-      ctx.save(); ctx.translate(x, y);
-      this._drawFurnitureSprite(ctx, tileId, 0);
+    // Fake world that yields `tint` for any tile lookup in furnVariants,
+    // so variant-aware sprites (table/rug/bed/etc.) pick up the preview colour.
+    const fakeWorld = {
+      getTile: () => 0,
+      getRotation: () => 0,
+      furnVariants: tint ? { get: () => tint } : null,
+    };
+
+    if (OVERHANG_TILES.has(tileId)) {
+      // Tall sprite (y = -32..32). Scale vertically 0.5× so the full 64 px
+      // silhouette fits into the 32×32 thumbnail. Works for both FURN_SET
+      // dispatch (clock/wardrobe/bookshelf/throne/lantern/vase) and direct
+      // cases (armor_stand, weapon_case using px, py absolute coords).
+      ctx.save();
+      ctx.translate(x, y + 16);
+      ctx.scale(1, 0.5);
+      try { this._drawTileDetail(ctx, tileId, 0, 0, seed, 0, fakeWorld); } catch (_) {}
       ctx.restore();
-    } catch (_) { /* ok — tile not a furniture sprite */ }
+    } else {
+      try { this._drawTileDetail(ctx, tileId, x, y, seed, 0, fakeWorld); } catch (_) {}
+      // Furniture sprites rendered via FURN_SET — draw default rotation for preview
+      try {
+        ctx.save(); ctx.translate(x, y);
+        this._drawFurnitureSprite(ctx, tileId, 0, tint);
+        ctx.restore();
+      } catch (_) { /* ok — tile not a furniture sprite */ }
+    }
     // Border
     ctx.restore();
     ctx.strokeStyle = 'rgba(120,100,60,0.5)';
@@ -8150,23 +9816,17 @@ export class Renderer {
     const py = Math.floor((canvasH - BM_PH) / 2);
 
     // ── backdrop ──────────────────────────────────────────
-    ctx.fillStyle = '#1c1208';
-    ctx.fillRect(px, py, BM_PW, BM_PH);
-    ctx.strokeStyle = '#7a5a2a';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px + 1, py + 1, BM_PW - 2, BM_PH - 2);
-    ctx.strokeStyle = '#3a2a0a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px + 3, py + 3, BM_PW - 6, BM_PH - 6);
+    this.drawBronzeFrame(ctx, px, py, BM_PW, BM_PH, { rivets: true });
 
-    // ── header ────────────────────────────────────────────
+    // ── header band + gold/dark divider under it ──────────
     ctx.fillStyle = '#1a0e02';
-    ctx.fillRect(px, py, BM_PW, BM_HEADER_H);
-    ctx.strokeStyle = '#7a5a2a';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px, py + BM_HEADER_H, BM_PW, 0);
+    ctx.fillRect(px + 3, py + 3, BM_PW - 6, BM_HEADER_H - 3);
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 4, py + BM_HEADER_H, BM_PW - 8, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(px + 4, py + BM_HEADER_H + 1, BM_PW - 8, 1);
 
-    ctx.fillStyle = '#e8c870';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 16px monospace';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -8344,10 +10004,13 @@ export class Renderer {
       ctx.fillStyle = '#a08050';
       ctx.fillText('Choose furniture to place:', rox, py + BM_HEADER_H + 32);
 
-      const allFurn = furnitureForRoom(cell.typeId);
+      // Expanded + sorted: craftable-now first, then by level.
+      const allFurn = sortedFurnitureEntries(
+        furnitureForRoom(cell.typeId), inventory, archLevel,
+      );
 
       // Bottom buttons zone starts at py + BM_PH - 100
-      const furnListH = py + BM_PH - 100 - listTop;
+      const furnListH = py + BM_PH - 134 - listTop;
       const maxVis = Math.floor(furnListH / ROW_H);
       const visible = allFurn.slice(furnScroll, furnScroll + maxVis);
 
@@ -8357,10 +10020,11 @@ export class Renderer {
       ctx.rect(rox, listTop, rpW, maxVis * ROW_H);
       ctx.clip();
 
-      visible.forEach((fd, i) => {
+      visible.forEach(({ def: fd, variant }, i) => {
         const ry = listTop + i * ROW_H;
+        const materials = variant?.materials || fd.materials;
         const canPlace = archLevel >= fd.levelReq &&
-          fd.materials.every(m => inventory.count(m.itemId) >= m.qty);
+          materials.every(m => inventory.count(m.itemId) >= m.qty);
         const rowHov = mouseX >= rox && mouseX <= rox + rpW && mouseY >= ry && mouseY <= ry + ROW_H - 4;
 
         ctx.fillStyle = rowHov ? 'rgba(255,220,80,0.12)' : 'rgba(60,40,10,0.4)';
@@ -8369,21 +10033,32 @@ export class Renderer {
         ctx.lineWidth = 1;
         ctx.strokeRect(rox, ry, rpW, ROW_H - 4);
 
-        // Tile preview icon
-        this._drawTilePreview(ctx, fd.tileId, rox + 4, ry + 6, i + furnScroll);
+        // Tile preview icon (optionally tinted to show the variant colour)
+        this._drawTilePreview(ctx, fd.tileId, rox + 4, ry + 6, i + furnScroll, variant?.tint ?? null);
+
+        // Variant colour swatch next to the name so the colour reads at a glance
+        if (variant?.tint) {
+          ctx.fillStyle = variant.tint;
+          ctx.fillRect(rox + 40, ry + 8, 6, 6);
+          ctx.strokeStyle = '#1a0e04';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(rox + 40.5, ry + 8.5, 5, 5);
+        }
 
         ctx.fillStyle = canPlace ? '#e8c870' : '#6a5030';
         ctx.font = 'bold 10px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
         const fpLabel = `${fd.footprint.w}×${fd.footprint.h}`;
-        ctx.fillText(`${fd.name}  [${fpLabel}]`, rox + 40, ry + 16);
+        const label = variant ? `${variant.name} ${fd.name}` : fd.name;
+        const labelX = rox + (variant?.tint ? 50 : 40);
+        ctx.fillText(`${label}  [${fpLabel}]`, labelX, ry + 16);
 
         ctx.fillStyle = canPlace ? '#a0a870' : '#6a5030';
         ctx.font = '9px monospace';
         ctx.fillText(`Arch ${fd.levelReq}  ${fd.solid ? 'solid' : 'walkable'}`, rox + 40, ry + 28);
 
-        const matStr = fd.materials.map(m => `${m.qty}×${m.itemId.replace(/_/g,' ')}`).join('  ') || 'Free';
+        const matStr = materials.map(m => `${m.qty}×${m.itemId.replace(/_/g,' ')}`).join('  ') || 'Free';
         ctx.fillText(matStr, rox + 40, ry + 40);
       });
 
@@ -8409,8 +10084,54 @@ export class Renderer {
         ctx.font = '9px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'alphabetic';
-        ctx.fillText(`${placed.length} item(s) placed in this room.`, rox, py + BM_PH - 92);
+        ctx.fillText(`${placed.length} item(s) placed in this room.`, rox, py + BM_PH - 126);
       }
+
+      // ── Paint Floor / Paint Wall buttons ─────────────────
+      const paintBtnH = 24;
+      const paintBtnW = Math.floor((rpW - 6) / 2);
+      const paintBtnY = py + BM_PH - 120;
+      const sel = housingState.getCell(selGX, selGY);
+      const floorTintId = sel?.floorTintId || 'natural';
+      const wallTintId  = sel?.wallTintId  || 'natural';
+      const pfHov = mouseX >= rox && mouseX <= rox + paintBtnW && mouseY >= paintBtnY && mouseY <= paintBtnY + paintBtnH;
+      const pwX   = rox + paintBtnW + 6;
+      const pwHov = mouseX >= pwX && mouseX <= pwX + paintBtnW && mouseY >= paintBtnY && mouseY <= paintBtnY + paintBtnH;
+      // Paint Floor
+      ctx.fillStyle = pfHov ? 'rgba(140,90,40,0.4)' : 'rgba(80,50,20,0.3)';
+      ctx.fillRect(rox, paintBtnY, paintBtnW, paintBtnH);
+      ctx.strokeStyle = '#8a5a20'; ctx.lineWidth = 1;
+      ctx.strokeRect(rox, paintBtnY, paintBtnW, paintBtnH);
+      ctx.fillStyle = '#e8c870';
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Paint Floor', rox + paintBtnW / 2, paintBtnY + paintBtnH / 2 - 4);
+      ctx.fillStyle = '#a08050';
+      ctx.font = '9px monospace';
+      ctx.fillText(floorTintId === 'natural' ? 'Natural' :
+        (FLOOR_TINT_OPTIONS.find(o => o.id === floorTintId)?.name ?? floorTintId),
+        rox + paintBtnW / 2, paintBtnY + paintBtnH / 2 + 7);
+      // Paint Wall
+      ctx.fillStyle = pwHov ? 'rgba(140,90,40,0.4)' : 'rgba(80,50,20,0.3)';
+      ctx.fillRect(pwX, paintBtnY, paintBtnW, paintBtnH);
+      ctx.strokeStyle = '#8a5a20';
+      ctx.strokeRect(pwX, paintBtnY, paintBtnW, paintBtnH);
+      ctx.fillStyle = '#e8c870';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText('Paint Wall', pwX + paintBtnW / 2, paintBtnY + paintBtnH / 2 - 4);
+      ctx.fillStyle = '#a08050';
+      ctx.font = '9px monospace';
+      ctx.fillText(wallTintId === 'natural' ? 'Natural' :
+        (WALL_TINT_OPTIONS.find(o => o.id === wallTintId)?.name ?? wallTintId),
+        pwX + paintBtnW / 2, paintBtnY + paintBtnH / 2 + 7);
+      ctx.textBaseline = 'alphabetic';
+
+      // Store rects so the click handler can find them without recomputing
+      this._paintBtnRects = {
+        floor: { x: rox, y: paintBtnY, w: paintBtnW, h: paintBtnH },
+        wall:  { x: pwX, y: paintBtnY, w: paintBtnW, h: paintBtnH },
+      };
 
       // "Set Exit" button above Remove Room
       const exBtnW = rpW, exBtnH = 24;
@@ -8513,31 +10234,24 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.45)';
     ctx.fillRect(0, 0, W, H);
 
-    // Panel background
-    ctx.fillStyle = 'rgba(15,8,22,0.97)';
-    this._roundRect(ctx, px, py, MO_PW, MO_PH, 8);
-    ctx.fill();
-    ctx.strokeStyle = '#9b3a9b';
-    ctx.lineWidth = 2;
-    this._roundRect(ctx, px, py, MO_PW, MO_PH, 8);
-    ctx.stroke();
+    // Panel background — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, MO_PW, MO_PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, MO_PW);
 
     // Header
-    ctx.fillStyle = '#e040fb';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'left';
     ctx.fillText('Character Makeover', px + 12, py + 24);
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = '#8a7050';
     ctx.font = '10px monospace';
     ctx.fillText('Click a swatch or style button  |  Click outside or Done to close', px + 12, py + 40);
 
-    // Header divider
-    ctx.strokeStyle = '#5a1a7a';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(px + 8, py + MO_HEADER_H - 2);
-    ctx.lineTo(px + MO_PW - 8, py + MO_HEADER_H - 2);
-    ctx.stroke();
+    // Header divider — gold over dark double rule
+    ctx.fillStyle = '#c89030';
+    ctx.fillRect(px + 8, py + MO_HEADER_H - 3, MO_PW - 16, 1);
+    ctx.fillStyle = '#080503';
+    ctx.fillRect(px + 8, py + MO_HEADER_H - 2, MO_PW - 16, 1);
 
     // ── Character preview ──────────────────────────────────
     const previewBoxW = 90;
@@ -8746,15 +10460,11 @@ export class Renderer {
     const px = 10;
     const py = Math.round(this.canvas.height / 2 - PH / 2);
 
-    // Panel bg
-    ctx.fillStyle = 'rgba(10,8,5,0.92)';
-    ctx.fillRect(px, py, PW, PH);
-    ctx.strokeStyle = '#8b6914';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, PW, PH);
+    // Panel bg — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, PW, PH);
 
     // Title
-    ctx.fillStyle = '#f1c40f';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 12px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Equipment  [E]', px + PW / 2, py + 22);
@@ -8928,6 +10638,47 @@ export class Renderer {
         p( 5, 18,  3,  4, '#ff9900'); // mid flame
         p( 6, 17,  2,  3, '#ffdd00'); // tip
         break;
+      case 11: // Raiding — two crossed swords (X)
+        // Sword A — blade NW→SE (tip top-left, handle bottom-right).
+        for (let i = 0; i < 13; i++) p(5 + i, 5 + i, 2, 2, '#c0c0c0');  // blade
+        for (let i = 1; i < 11; i++) p(5 + i, 5 + i, 1, 1, '#ebebeb');  // blade sheen
+        for (let i = 0; i < 5;  i++) p(19 - i, 15 + i, 2, 2, '#cd7f32'); // crossguard (⟂)
+        for (let i = 0; i < 3;  i++) p(20 + i, 20 + i, 2, 2, '#8b4513'); // grip
+        p(24, 24, 3, 3, '#e0a840');                                      // pommel
+        // Sword B — blade NE→SW (tip top-right, handle bottom-left). Drawn second
+        // so its blade crosses on top of sword A at the centre.
+        for (let i = 0; i < 13; i++) p(25 - i, 5 + i, 2, 2, '#c0c0c0');  // blade
+        for (let i = 1; i < 11; i++) p(25 - i, 5 + i, 1, 1, '#ebebeb');  // blade sheen
+        for (let i = 0; i < 5;  i++) p(11 + i, 15 + i, 2, 2, '#cd7f32'); // crossguard (⟂)
+        for (let i = 0; i < 3;  i++) p(10 - i, 20 + i, 2, 2, '#8b4513'); // grip
+        p( 5, 24, 3, 3, '#e0a840');                                      // pommel
+        break;
+      case 12: // Farming — cabbage (round leafy head)
+        // Outer leaf ring (darkest green) — octagon silhouette
+        p( 8,  8, 16, 16, '#1e5a1e');
+        p(10,  6, 12,  2, '#1e5a1e'); // top cap
+        p(10, 24, 12,  2, '#1e5a1e'); // bottom cap
+        p( 6, 10,  2, 12, '#1e5a1e'); // left cap
+        p(24, 10,  2, 12, '#1e5a1e'); // right cap
+        // Middle leaf layer (mid green)
+        p(10, 10, 12, 12, '#3a8e34');
+        p(12,  8,  8,  2, '#3a8e34');
+        p(12, 22,  8,  2, '#3a8e34');
+        p( 8, 12,  2,  8, '#3a8e34');
+        p(22, 12,  2,  8, '#3a8e34');
+        // Inner leaf layer (lighter green)
+        p(12, 12,  8,  8, '#6bc06b');
+        p(13, 10,  6,  2, '#6bc06b');
+        p(13, 20,  6,  2, '#6bc06b');
+        p(10, 13,  2,  6, '#6bc06b');
+        p(20, 13,  2,  6, '#6bc06b');
+        // Leaf veins — a bright + highlight in the centre
+        p(15, 12,  2,  8, '#a6e8a6');
+        p(12, 15,  8,  2, '#a6e8a6');
+        // Stem nub poking out the top
+        p(15,  3,  2,  4, '#2a7a2a');
+        p(14,  6,  4,  1, '#1e5a1e');
+        break;
     }
   }
 
@@ -8939,24 +10690,20 @@ export class Renderer {
     const px = Math.min(menu.x, this.canvas.width  - PW - 4);
     const py = Math.min(menu.y, this.canvas.height - PH - 4);
 
-    // Shadow
+    // Soft drop shadow underneath the frame
     ctx.fillStyle = 'rgba(0,0,0,0.4)';
     ctx.fillRect(px + 3, py + 3, PW, PH);
-    // Bg
-    ctx.fillStyle = 'rgba(15,12,8,0.96)';
-    ctx.fillRect(px, py, PW, PH);
-    ctx.strokeStyle = '#8b6914';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(px, py, PW, PH);
+    // Shared bronze frame (no rivets — context menus are small)
+    this.drawBronzeFrame(ctx, px, py, PW, PH);
 
     menu.options.forEach((opt, i) => {
       const oy = py + PAD + i * OPT_H;
       const hovered = mx >= px && mx < px + PW && my >= oy && my < oy + OPT_H;
       if (hovered) {
-        ctx.fillStyle = 'rgba(139,105,20,0.35)';
-        ctx.fillRect(px + 1, oy, PW - 2, OPT_H);
+        ctx.fillStyle = 'rgba(200,144,48,0.22)';
+        ctx.fillRect(px + 2, oy, PW - 4, OPT_H);
       }
-      ctx.fillStyle = hovered ? '#f1c40f' : '#ddd';
+      ctx.fillStyle = hovered ? '#fff1c0' : '#f0d090';
       ctx.font = '11px monospace';
       ctx.textAlign = 'left';
       ctx.fillText(opt.label, px + 10, oy + 17);
@@ -9029,35 +10776,21 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
     ctx.fillRect(0, 0, cw, ch);
 
-    // Panel background
-    ctx.fillStyle = '#1a1a2e';
-    ctx.fillRect(px, py, PW, PH);
-
-    // Gold border (2px)
-    ctx.strokeStyle = '#c9a84c';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, PW, PH);
+    // Panel background — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, PW);
 
     // ── Header ──────────────────────────────────────────
-    ctx.fillStyle = '#c9a84c';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 20px monospace';
     ctx.textAlign = 'center';
     ctx.fillText('Skills', px + PW / 2, py + 32);
 
-    ctx.fillStyle = '#888';
+    ctx.fillStyle = '#a08848';
     ctx.font = '10px monospace';
     ctx.fillText(`Total Level: ${skills.totalLevel}`, px + PW / 2, py + 48);
 
-    // Close "X" button (top-right)
-    const X_SZ = 20;
-    const xbX = px + PW - X_SZ - 6;
-    const xbY = py + 6;
-    ctx.fillStyle = 'rgba(180,40,40,0.85)';
-    ctx.fillRect(xbX, xbY, X_SZ, X_SZ);
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 13px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('X', xbX + X_SZ / 2, xbY + X_SZ - 5);
+    // Close button drawn via the shared helper above.
 
     // ── Skill rows ──────────────────────────────────────
     const ROW_H = 36;
@@ -9136,23 +10869,18 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
     ctx.fillRect(0, py - 10, cw, PH + 30);
 
-    // Panel background
-    ctx.fillStyle = 'rgba(26,26,46,0.93)';
-    ctx.fillRect(px, py, PW, PH);
-
-    // Gold border
-    ctx.strokeStyle = '#c9a84c';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(px, py, PW, PH);
+    // Panel background — shared bronze frame
+    this.drawBronzeFrame(ctx, px, py, PW, PH, { rivets: true });
+    this.drawCloseButton(ctx, px, py, PW);
 
     // NPC name (gold, top-left)
-    ctx.fillStyle = '#c9a84c';
+    ctx.fillStyle = '#f0d090';
     ctx.font = 'bold 13px monospace';
     ctx.textAlign = 'left';
     ctx.fillText(dialogueData.npcName || 'NPC', px + 12, py + 20);
 
-    // Body text (white)
-    ctx.fillStyle = '#ffffff';
+    // Body text
+    ctx.fillStyle = '#f0e8d0';
     ctx.font = '12px monospace';
     ctx.fillText(dialogueData.text || '', px + 12, py + 40);
 

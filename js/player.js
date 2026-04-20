@@ -611,16 +611,19 @@ export class Player {
       ctx.fillRect(barX, barY, Math.round(barW * frac), barH);
     }
 
-    // Name tag — "Name (Lvl. X)"
-    const label = `${this.name} (Lvl. ${this.combatLevel || 1})`;
-    ctx.fillStyle = '#fff';
-    ctx.strokeStyle = '#000';
-    ctx.lineWidth = 2;
-    ctx.font = 'bold 10px monospace';
-    ctx.textAlign = 'center';
-    const nameY = cy - 6 - bob;
-    ctx.strokeText(label, cx + this.w / 2, nameY);
-    ctx.fillText(label, cx + this.w / 2, nameY);
+    // Name tag — "Name (Lvl. X)" — suppressed when the caller sets
+    // `this.hideNameTag` (e.g. the Character view panel).
+    if (!this.hideNameTag) {
+      const label = `${this.name} (Lvl. ${this.combatLevel || 1})`;
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = '#000';
+      ctx.lineWidth = 2;
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      const nameY = cy - 6 - bob;
+      ctx.strokeText(label, cx + this.w / 2, nameY);
+      ctx.fillText(label, cx + this.w / 2, nameY);
+    }
   }
 
   _drawActionTool(ctx, cx, cy, bob, armSwing) {

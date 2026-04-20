@@ -182,6 +182,97 @@ export const ROOM_DEFS = {
 // footprint: { w, h } — tiles wide × tall (before rotation)
 // solid: whether the tile blocks movement
 
+/** Floor / wall recolour palettes. Each entry has a material cost — scale
+ *  reflects how much flooring the player would need to "refinish" a whole
+ *  room, not just a single tile, so the numbers feel earned.
+ *  tint === null means "keep the natural colour". */
+export const FLOOR_TINT_OPTIONS = [
+  { id: 'natural', name: 'Natural',   tint: null,      materials: [] },
+  { id: 'oak',     name: 'Oak Stain', tint: '#8a5028', materials: [{ itemId: 'oak_logs',        qty: 40 }] },
+  { id: 'willow',  name: 'Willow',    tint: '#b0823a', materials: [{ itemId: 'willow_logs',     qty: 40 }] },
+  { id: 'maple',   name: 'Maple',     tint: '#c4794a', materials: [{ itemId: 'maple_logs',      qty: 40 }] },
+  { id: 'yew',     name: 'Yew',       tint: '#6a3820', materials: [{ itemId: 'yew_logs',        qty: 40 }] },
+  { id: 'magic',   name: 'Magic',     tint: '#6a4a8a', materials: [{ itemId: 'magic_logs',      qty: 40 }] },
+  { id: 'sand',    name: 'Sandstone', tint: '#d4c078', materials: [{ itemId: 'desert_crystal',  qty: 20 }] },
+  { id: 'slate',   name: 'Slate',     tint: '#6a6a70', materials: [{ itemId: 'bar_iron',        qty: 15 }] },
+  { id: 'marble',  name: 'Marble',    tint: '#cac8c0', materials: [{ itemId: 'bar_silver',      qty: 10 }] },
+];
+
+export const WALL_TINT_OPTIONS = [
+  { id: 'natural',  name: 'Natural',  tint: null,      materials: [] },
+  { id: 'plaster',  name: 'Plaster',  tint: '#d8c8a8', materials: [{ itemId: 'sulfur',           qty: 30 }] },
+  { id: 'mahogany', name: 'Mahogany', tint: '#5a2818', materials: [{ itemId: 'yew_logs',         qty: 30 }] },
+  { id: 'marble',   name: 'Marble',   tint: '#cac8c0', materials: [{ itemId: 'bar_silver',       qty: 12 }] },
+  { id: 'obsidian', name: 'Obsidian', tint: '#2a2a30', materials: [{ itemId: 'bar_tungsten',     qty: 6 }] },
+  { id: 'slate',    name: 'Slate',    tint: '#5a6a6a', materials: [{ itemId: 'bar_iron',         qty: 20 }] },
+  { id: 'sand',     name: 'Sandstone',tint: '#c0a068', materials: [{ itemId: 'desert_crystal',   qty: 25 }] },
+];
+
+/** Expand a list of furniture defs into one row per variant. Defs without
+ *  variants produce a single row with variant === null. Used by the build-
+ *  mode UI so players can pick which colour/material to craft from. */
+export function flattenFurnitureVariants(defs) {
+  const out = [];
+  for (const fd of defs) {
+    if (fd.variants && fd.variants.length > 0) {
+      for (const v of fd.variants) out.push({ def: fd, variant: v });
+    } else {
+      out.push({ def: fd, variant: null });
+    }
+  }
+  return out;
+}
+
+/** Same as flattenFurnitureVariants but sorted so entries the player can
+ *  craft right now land at the top, then by level requirement, then by
+ *  display name. Each entry also carries a `_canCraft` boolean so the
+ *  renderer doesn't need to recompute the material check. */
+export function sortedFurnitureEntries(defs, inventory, archLevel) {
+  return flattenFurnitureVariants(defs)
+    .map(entry => {
+      const mats = entry.variant?.materials || entry.def.materials;
+      const hasMats = mats.every(m => inventory.count(m.itemId) >= m.qty);
+      const canCraft = archLevel >= entry.def.levelReq && hasMats;
+      return { ...entry, _canCraft: canCraft };
+    })
+    .sort((a, b) => {
+      if (a._canCraft !== b._canCraft) return a._canCraft ? -1 : 1;
+      if (a.def.levelReq !== b.def.levelReq) return a.def.levelReq - b.def.levelReq;
+      return (a.def.name + (a.variant?.name ?? '')).localeCompare(
+        b.def.name + (b.variant?.name ?? ''));
+    });
+}
+
+/** Shared wood-variant recipes. All wooden furniture that shares this shape
+ *  can spread itself into 7 colour variants (standard / oak / willow / maple /
+ *  yew / magic / elder) by calling woodVariants(qty). The player picks which
+ *  variant to craft; the chosen tint is stored on the furniture entry so the
+ *  renderer can colour the sprite. */
+export function woodVariants(qty) {
+  return [
+    { id: 'standard', name: 'Standard', materials: [{ itemId: 'logs',        qty }],   tint: '#8a6b3a' },
+    { id: 'oak',      name: 'Oak',      materials: [{ itemId: 'oak_logs',    qty }],   tint: '#8a5028' },
+    { id: 'willow',   name: 'Willow',   materials: [{ itemId: 'willow_logs', qty }],   tint: '#b0823a' },
+    { id: 'maple',    name: 'Maple',    materials: [{ itemId: 'maple_logs',  qty }],   tint: '#c4794a' },
+    { id: 'yew',      name: 'Yew',      materials: [{ itemId: 'yew_logs',    qty }],   tint: '#6a3820' },
+    { id: 'magic',    name: 'Magic',    materials: [{ itemId: 'magic_logs',  qty }],   tint: '#6a4a8a' },
+    { id: 'elder',    name: 'Elder',    materials: [{ itemId: 'elder_logs',  qty }],   tint: '#8a4870' },
+  ];
+}
+
+/** Fabric colour variants for rugs, cushions, and tapestries. Each variant
+ *  uses a distinct material so rarer colours feel earned. */
+export function rugVariants(qty) {
+  return [
+    { id: 'red',       name: 'Red Weave',      materials: [{ itemId: 'logs',           qty }],        tint: '#8a2828' },
+    { id: 'sand',      name: 'Desert Sand',    materials: [{ itemId: 'desert_crystal', qty: qty * 3 }], tint: '#d4a858' },
+    { id: 'moss',      name: 'Moss Green',     materials: [{ itemId: 'reeds',          qty: qty * 4 }], tint: '#3a7838' },
+    { id: 'midnight',  name: 'Midnight Blue',  materials: [{ itemId: 'bar_silver',     qty: qty * 2 }], tint: '#2a4a8a' },
+    { id: 'arcane',    name: 'Arcane Violet',  materials: [{ itemId: 'magic_logs',     qty: qty * 2 }], tint: '#6a2a8a' },
+    { id: 'gold',      name: 'Royal Gold',     materials: [{ itemId: 'bar_gold',       qty: qty * 2 }], tint: '#c8a030' },
+  ];
+}
+
 export const FURNITURE_DEFS = {
   // ── General indoor (most rooms) ────────────────────────────
   chair: {
@@ -189,6 +280,7 @@ export const FURNITURE_DEFS = {
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: false,
     tileId: TILES.FURN_CHAIR, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 2 }],
+    variants: woodVariants(2),
     desc: 'A simple wooden chair.',
   },
   rug: {
@@ -196,6 +288,7 @@ export const FURNITURE_DEFS = {
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: false,
     tileId: TILES.FURN_RUG, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 1 }],
+    variants: rugVariants(2),
     desc: 'A decorative floor rug.',
     rooms: ['starter', 'living_room', 'bedroom', 'kitchen', 'library', 'trophy_room'],
   },
@@ -204,6 +297,7 @@ export const FURNITURE_DEFS = {
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
     tileId: TILES.FURN_TABLE, rotatable: true,
     levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 4 }],
+    variants: woodVariants(4),
     desc: 'A sturdy wooden dining table.',
   },
   chest: {
@@ -235,6 +329,7 @@ export const FURNITURE_DEFS = {
     category: 'indoor', footprint: { w: 1, h: 2 }, solid: true,
     tileId: TILES.FURN_BED, rotatable: true,
     levelReq: 15, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 8 }],
+    variants: woodVariants(8),
     desc: 'A cosy bed to sleep in.',
     rooms: ['bedroom', 'starter'],
   },
@@ -244,6 +339,7 @@ export const FURNITURE_DEFS = {
     tileId: TILES.FURN_WARDROBE, rotatable: true,
     levelReq: 15, goldCost: 0,
     materials: [{ itemId: 'oak_logs', qty: 10 }],
+    variants: woodVariants(10),
     desc: 'A tall wooden cabinet for garments.',
     rooms: ['bedroom', 'starter', 'living_room'],
   },
@@ -290,6 +386,7 @@ export const FURNITURE_DEFS = {
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
     tileId: TILES.FURN_BOOKSHELF, rotatable: true,
     levelReq: 10, goldCost: 0, materials: [{ itemId: 'oak_logs', qty: 6 }],
+    variants: woodVariants(6),
     desc: 'A shelf packed with books.',
     rooms: ['library', 'living_room', 'starter', 'bedroom', 'trophy_room'],
   },
@@ -333,20 +430,21 @@ export const FURNITURE_DEFS = {
   weapon_rack: {
     id: 'weapon_rack', name: 'Weapon Rack',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
-    tileId: TILES.WEAPON_RACK, rotatable: true,
+    tileId: TILES.WEAPON_RACK, wallMount: 'north',
     levelReq: 20, goldCost: 0,
     materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'bar_iron', qty: 3 }],
-    desc: 'A wall rack displaying swords and axes.',
-    rooms: ['trophy_room', 'workshop'],
+    desc: 'A wall rack displaying swords and axes. Hangs on the north wall.',
+    rooms: ['trophy_room', 'workshop', 'living_room'],
   },
   armor_stand: {
     id: 'armor_stand', name: 'Armour Stand',
     category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
     tileId: TILES.ARMOR_STAND,
-    levelReq: 25, goldCost: 0,
-    materials: [{ itemId: 'bar_iron', qty: 8 }],
-    desc: 'A mannequin bearing chainmail.',
-    rooms: ['trophy_room'],
+    displayKind: 'armor',
+    levelReq: 25, goldCost: 500,
+    materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'bar_iron', qty: 4 }],
+    desc: 'A wooden mannequin. Click to equip it with armour from your inventory.',
+    rooms: ['trophy_room', 'living_room', 'bedroom', 'starter'],
   },
   display_shelf: {
     id: 'display_shelf', name: 'Display Shelf',
@@ -406,6 +504,235 @@ export const FURNITURE_DEFS = {
     materials: [{ itemId: 'logs', qty: 4 }],
     desc: 'A straw-stuffed guardian for the crops.',
     rooms: ['farming_plot', 'garden'],
+  },
+  // ── Garden decorations ───────────────────────────────────
+  garden_rock: {
+    id: 'garden_rock', name: 'Garden Boulder',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_GARDEN_ROCK,
+    levelReq: 1, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 1 }],
+    desc: 'A weathered stone. Nice against a flower bed.',
+    rooms: ['garden', 'courtyard'],
+  },
+  pond_water: {
+    id: 'pond_water', name: 'Pond Water',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_POND_WATER,
+    levelReq: 5, goldCost: 25,
+    materials: [{ itemId: 'logs', qty: 1 }],
+    desc: 'A shimmering water tile. Place several to build a pond.',
+    rooms: ['garden'],
+  },
+  // ── Trail textures (walkable) ────────────────────────────
+  trail_dirt: {
+    id: 'trail_dirt', name: 'Dirt Path',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: false,
+    tileId: TILES.FURN_TRAIL_DIRT,
+    levelReq: 1, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 1 }],
+    desc: 'A short stretch of packed earth path.',
+    rooms: ['garden', 'taming_pen'],
+  },
+  trail_stone: {
+    id: 'trail_stone', name: 'Cobblestone Path',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: false,
+    tileId: TILES.FURN_TRAIL_STONE,
+    levelReq: 5, goldCost: 15,
+    materials: [{ itemId: 'bar_iron', qty: 1 }],
+    desc: 'Rough-cut cobblestones laid as a path.',
+    rooms: ['garden', 'taming_pen'],
+  },
+  trail_gravel: {
+    id: 'trail_gravel', name: 'Gravel Path',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: false,
+    tileId: TILES.FURN_TRAIL_GRAVEL,
+    levelReq: 3, goldCost: 10,
+    materials: [{ itemId: 'logs', qty: 1 }],
+    desc: 'Loose gravel crunches underfoot.',
+    rooms: ['garden', 'taming_pen'],
+  },
+  trail_flagstone: {
+    id: 'trail_flagstone', name: 'Flagstone Path',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: false,
+    tileId: TILES.FURN_TRAIL_FLAGSTONE,
+    levelReq: 10, goldCost: 40,
+    materials: [{ itemId: 'bar_iron', qty: 2 }],
+    desc: 'Polished flagstone slabs. A touch of refinement.',
+    rooms: ['garden', 'taming_pen'],
+  },
+
+  // ── New decorative furniture ────────────────────────────────────
+  stool: {
+    id: 'stool', name: 'Wooden Stool',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: false,
+    tileId: TILES.FURN_STOOL,
+    levelReq: 1, goldCost: 0, materials: [{ itemId: 'logs', qty: 1 }],
+    variants: woodVariants(1),
+    desc: 'A sturdy three-legged stool.',
+  },
+  throne: {
+    id: 'throne', name: 'Gilded Throne',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_THRONE,
+    levelReq: 30, goldCost: 1500,
+    materials: [{ itemId: 'oak_logs', qty: 10 }, { itemId: 'bar_gold', qty: 3 }],
+    desc: 'An ornate throne fit for a lord of the manor.',
+    rooms: ['living_room', 'trophy_room', 'starter'],
+  },
+  painting: {
+    id: 'painting', name: 'Framed Painting',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_PAINTING, wallMount: 'north',
+    levelReq: 8, goldCost: 0,
+    materials: [{ itemId: 'logs', qty: 2 }, { itemId: 'bar_gold', qty: 1 }],
+    desc: 'A framed landscape painting.',
+    rooms: ['living_room', 'bedroom', 'library', 'trophy_room', 'starter'],
+  },
+  vase: {
+    id: 'vase', name: 'Porcelain Vase',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_VASE,
+    levelReq: 5, goldCost: 0,
+    materials: [{ itemId: 'bar_silver', qty: 1 }],
+    desc: 'A slender vase with fresh flowers.',
+    rooms: ['living_room', 'bedroom', 'library', 'trophy_room', 'starter'],
+  },
+  nightstand: {
+    id: 'nightstand', name: 'Nightstand',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_NIGHTSTAND,
+    levelReq: 12, goldCost: 0,
+    materials: [{ itemId: 'oak_logs', qty: 4 }],
+    desc: 'A bedside table with a small lamp.',
+    rooms: ['bedroom', 'starter'],
+  },
+  flower_patch: {
+    id: 'flower_patch', name: 'Flower Patch',
+    category: 'outdoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_FLOWER_PATCH,
+    levelReq: 3, goldCost: 0, materials: [{ itemId: 'logs', qty: 1 }],
+    desc: 'A colourful cluster of garden flowers.',
+    rooms: ['garden', 'courtyard', 'farming_plot'],
+  },
+  grandfather_clock: {
+    id: 'grandfather_clock', name: 'Grandfather Clock',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_CLOCK,
+    levelReq: 25, goldCost: 500,
+    materials: [{ itemId: 'oak_logs', qty: 12 }, { itemId: 'bar_gold', qty: 1 }],
+    desc: 'A tall pendulum clock — counts the hours.',
+    rooms: ['living_room', 'library', 'trophy_room', 'starter'],
+  },
+  floor_lantern: {
+    id: 'floor_lantern', name: 'Floor Lantern',
+    category: 'both', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_LANTERN,
+    levelReq: 8, goldCost: 0,
+    materials: [{ itemId: 'bar_iron', qty: 4 }],
+    desc: 'A tall iron lantern. Casts a warm glow.',
+  },
+
+  // ── Interactive Prestige / Display Furniture ─────────────────────
+  // These open a picker on click so the player can assign the displayed
+  // content. The `displayKind` field tells the interact handler which
+  // picker / input flow to use.
+  weapon_case: {
+    id: 'weapon_case', name: 'Weapon Display Case',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_WEAPON_CASE,
+    displayKind: 'weapon',
+    levelReq: 25, goldCost: 500,
+    materials: [{ itemId: 'oak_logs', qty: 10 }, { itemId: 'bar_iron', qty: 4 }],
+    desc: 'A glass-fronted case. Click to showcase a weapon from your inventory.',
+    rooms: ['living_room', 'trophy_room', 'library', 'starter'],
+  },
+  fish_mount: {
+    id: 'fish_mount', name: 'Mounted Fish',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_FISH_MOUNT, wallMount: 'north',
+    displayKind: 'fish',
+    levelReq: 20, goldCost: 200,
+    materials: [{ itemId: 'oak_logs', qty: 4 }, { itemId: 'bar_silver', qty: 1 }],
+    desc: 'A wall-mounted plaque. Click to mount one of your caught fish.',
+    rooms: ['living_room', 'trophy_room', 'library', 'starter'],
+  },
+  trophy_plaque: {
+    id: 'trophy_plaque', name: 'Trophy Plaque',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_TROPHY_PLAQUE, wallMount: 'north',
+    displayKind: 'text',
+    levelReq: 15, goldCost: 100,
+    materials: [{ itemId: 'oak_logs', qty: 3 }, { itemId: 'bar_gold', qty: 1 }],
+    desc: 'An engraved plaque. Click to set an inscription.',
+    rooms: ['living_room', 'trophy_room', 'library', 'starter', 'bedroom'],
+  },
+  relic_shelf: {
+    id: 'relic_shelf', name: 'Relic Shelf',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_RELIC_SHELF,
+    displayKind: 'relic',
+    levelReq: 18, goldCost: 250,
+    materials: [{ itemId: 'oak_logs', qty: 6 }, { itemId: 'bar_silver', qty: 2 }],
+    desc: 'A small display shelf. Click to place a treasured item.',
+    rooms: ['trophy_room', 'library', 'living_room', 'starter'],
+  },
+  achievements_book: {
+    id: 'achievements_book', name: 'Achievements Book',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_ACHIEVEMENTS_BOOK,
+    displayKind: 'achievements',
+    levelReq: 10, goldCost: 150,
+    materials: [{ itemId: 'oak_logs', qty: 4 }, { itemId: 'bar_gold', qty: 1 }],
+    desc: 'An open tome on a pedestal. Click to review your milestones.',
+    rooms: ['library', 'trophy_room', 'living_room', 'starter'],
+  },
+
+  // ── Misc new indoor furniture ────────────────────────────
+  fish_tank: {
+    id: 'fish_tank', name: 'Fish Tank',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_FISH_TANK,
+    levelReq: 20, goldCost: 300,
+    materials: [{ itemId: 'oak_logs', qty: 4 }, { itemId: 'bar_silver', qty: 2 }],
+    desc: 'A glass aquarium with swimming fish.',
+    rooms: ['living_room', 'library', 'kitchen', 'trophy_room', 'starter'],
+  },
+  alchemy_table: {
+    id: 'alchemy_table', name: 'Alchemy Table',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_ALCHEMY_TABLE, rotatable: true,
+    levelReq: 25, goldCost: 250,
+    materials: [{ itemId: 'oak_logs', qty: 6 }, { itemId: 'bar_silver', qty: 1 }, { itemId: 'sulfur', qty: 4 }],
+    desc: 'A bench for mixing potions. Purely decorative.',
+    rooms: ['library', 'workshop', 'kitchen', 'trophy_room'],
+  },
+  archery_target: {
+    id: 'archery_target', name: 'Archery Target',
+    category: 'both', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_ARCHERY_TARGET,
+    levelReq: 12, goldCost: 100,
+    materials: [{ itemId: 'logs', qty: 6 }, { itemId: 'bar_iron', qty: 1 }],
+    desc: 'A round straw target with arrows in it.',
+    rooms: ['trophy_room', 'workshop', 'courtyard', 'garden'],
+  },
+  wine_cask: {
+    id: 'wine_cask', name: 'Wine Cask',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_WINE_CASK,
+    levelReq: 15, goldCost: 150,
+    materials: [{ itemId: 'oak_logs', qty: 5 }, { itemId: 'bar_iron', qty: 2 }],
+    desc: 'A wooden cask of wine with a brass tap.',
+    rooms: ['kitchen', 'living_room', 'trophy_room', 'storage'],
+  },
+  loom: {
+    id: 'loom', name: 'Loom',
+    category: 'indoor', footprint: { w: 1, h: 1 }, solid: true,
+    tileId: TILES.FURN_LOOM, rotatable: true,
+    levelReq: 18, goldCost: 120,
+    materials: [{ itemId: 'oak_logs', qty: 8 }, { itemId: 'flax', qty: 6 }],
+    desc: 'A wooden weaving frame strung with flax.',
+    rooms: ['workshop', 'library', 'living_room', 'kitchen'],
   },
 };
 
@@ -625,12 +952,18 @@ export class HousingState {
    * Check whether furniture can be placed at localCol/localRow within the cell.
    * @returns {{ ok: boolean, reason?: string }}
    */
-  canPlaceFurniture(gx, gy, defId, localCol, localRow, rotation, inventory, skills, isAdmin = false) {
+  canPlaceFurniture(gx, gy, defId, localCol, localRow, rotation, inventory, skills, isAdmin = false, variantId = null) {
     const cell = this.getCell(gx, gy);
     if (!cell) return { ok: false, reason: 'No room here.' };
 
     const def = FURNITURE_DEFS[defId];
     if (!def) return { ok: false, reason: 'Unknown furniture.' };
+
+    // Resolve the variant recipe (if this def has variants). Variants share
+    // the def's stats but each has its own materials + colour tint.
+    const variant = variantId && def.variants
+      ? def.variants.find(v => v.id === variantId)
+      : null;
 
     const roomDef = ROOM_DEFS[cell.typeId];
     if (def.category === 'indoor'  && roomDef.category !== 'indoor')
@@ -670,7 +1003,8 @@ export class HousingState {
     }
 
     if (!isAdmin) {
-      const matCheck = _hasAll(inventory, def.materials);
+      const mats = variant ? variant.materials : def.materials;
+      const matCheck = _hasAll(inventory, mats);
       if (!matCheck.ok) return matCheck;
     }
 
@@ -678,17 +1012,55 @@ export class HousingState {
   }
 
   /** Place furniture. Assumes canPlaceFurniture returned ok. */
-  placeFurniture(gx, gy, defId, localCol, localRow, rotation, inventory, isAdmin = false) {
+  placeFurniture(gx, gy, defId, localCol, localRow, rotation, inventory, isAdmin = false, variantId = null) {
     const def = FURNITURE_DEFS[defId];
-    if (!isAdmin) _deductAll(inventory, def.materials);
+    const variant = variantId && def.variants
+      ? def.variants.find(v => v.id === variantId)
+      : null;
+    const mats = variant ? variant.materials : def.materials;
+    if (!isAdmin) _deductAll(inventory, mats);
     if (!this.furniture.has(`${gx},${gy}`)) this.furniture.set(`${gx},${gy}`, []);
-    this.furniture.get(`${gx},${gy}`).push({ defId, localCol, localRow, rotation });
+    const entry = { defId, localCol, localRow, rotation };
+    if (variant) entry.variantId = variant.id;
+    this.furniture.get(`${gx},${gy}`).push(entry);
   }
 
   /** Remove furniture at index within (gx, gy). */
   removeFurniture(gx, gy, index) {
     const list = this.furniture.get(`${gx},${gy}`);
     if (list && index >= 0 && index < list.length) list.splice(index, 1);
+  }
+
+  /** Apply a floor or wall tint to a cell. `which` = 'floor' | 'wall'.
+   *  Pass `tintId = 'natural'` (or null) to revert to the default colour.
+   *  Deducts materials from inventory unless `isAdmin` is true.
+   *  Returns { ok, reason? }. */
+  setCellTint(gx, gy, which, tintId, inventory, isAdmin = false) {
+    const cell = this.getCell(gx, gy);
+    if (!cell) return { ok: false, reason: 'No room here.' };
+    const opts = which === 'wall' ? WALL_TINT_OPTIONS : FLOOR_TINT_OPTIONS;
+    const opt  = opts.find(o => o.id === tintId);
+    if (!opt) return { ok: false, reason: 'Unknown tint.' };
+    if (!isAdmin) {
+      const matCheck = _hasAll(inventory, opt.materials);
+      if (!matCheck.ok) return matCheck;
+      _deductAll(inventory, opt.materials);
+    }
+    const field = which === 'wall' ? 'wallTintId' : 'floorTintId';
+    if (opt.tint === null) delete cell[field];
+    else                   cell[field] = opt.id;
+    return { ok: true };
+  }
+
+  /** Set or clear the per-instance content of a placed display piece.
+   *  Content shape depends on def.displayKind (e.g. { itemId } for weapon/relic,
+   *  { speciesId, weight } for a fish, { text } for a trophy plaque).
+   *  Pass `null` to clear. */
+  setFurnitureContent(gx, gy, index, content) {
+    const list = this.furniture.get(`${gx},${gy}`);
+    if (!list || index < 0 || index >= list.length) return false;
+    list[index] = { ...list[index], content: content ?? undefined };
+    return true;
   }
 
   /** Find furniture occupying localCol/localRow within a cell. */

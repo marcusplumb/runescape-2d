@@ -11,6 +11,7 @@ import {
   FURNITURE_DEFS, rotatedFootprint, ROOM_DEFS,
   CELL_INNER, CELL_STRIDE, GRID_COLS, GRID_ROWS,
   HOUSE_MAP_SIZE, cellInnerOrigin,
+  FLOOR_TINT_OPTIONS, WALL_TINT_OPTIONS,
 } from './housing.js';
 import { PATCH_LOCAL_POSITIONS, GROW_STAGES } from './farming.js';
 
@@ -534,6 +535,15 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
 
   // Collect furniture rotations during build; applied after InteriorMap creation.
   const furnRotations = [];
+  // Collect per-tile variant tints so the renderer can recolour sprites.
+  const furnVariantEntries = [];
+  // Collect display-piece metadata so the renderer + click handler can find
+  // the source housing-state entry by tile (c, r).
+  const furnDisplayEntries = [];
+  // Per-tile paint overrides. Each entry maps `${c},${r}` → hex colour.
+  // The renderer's chunk builder looks these up and replaces the base fill.
+  const floorTintMap = new Map();
+  const wallTintMap  = new Map();
 
   // ── Build each owned cell ──────────────────────────────
   for (const [key, cell] of housingState.cells) {
@@ -543,8 +553,24 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
 
     const io = cellInnerOrigin(gx, gy);          // top-left of 11x11 inner area
 
+    // Resolve this cell's tint overrides (set by Paint build-mode step).
+    const floorTint = cell.floorTintId
+      ? FLOOR_TINT_OPTIONS.find(o => o.id === cell.floorTintId)?.tint ?? null
+      : null;
+    const wallTint = cell.wallTintId
+      ? WALL_TINT_OPTIONS.find(o => o.id === cell.wallTintId)?.tint ?? null
+      : null;
+
     // Fill the 11x11 inner floor
     _fill(t, W, io.col, io.row, CELL_INNER, CELL_INNER, roomDef.floorTile);
+    // Record floor tints for every floor tile in this cell
+    if (floorTint) {
+      for (let rr = io.row; rr < io.row + CELL_INNER; rr++) {
+        for (let cc = io.col; cc < io.col + CELL_INNER; cc++) {
+          floorTintMap.set(`${cc},${rr}`, floorTint);
+        }
+      }
+    }
 
     // ── Walls around this cell ───────────────────────────
     const wL = io.col - 1;
@@ -580,23 +606,31 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
 
     // Top wall row (excluding corners)
     if (wT >= 0) {
-      for (let c = io.col; c < io.col + CELL_INNER; c++)
+      for (let c = io.col; c < io.col + CELL_INNER; c++) {
         _set(t, W, c, wT, tileTop);
+        if (wallTint) wallTintMap.set(`${c},${wT}`, wallTint);
+      }
     }
     // Bottom wall row (excluding corners)
     if (wB < H) {
-      for (let c = io.col; c < io.col + CELL_INNER; c++)
+      for (let c = io.col; c < io.col + CELL_INNER; c++) {
         _set(t, W, c, wB, tileBot);
+        if (wallTint) wallTintMap.set(`${c},${wB}`, wallTint);
+      }
     }
     // Left wall column (excluding corners)
     if (wL >= 0) {
-      for (let r = io.row; r < io.row + CELL_INNER; r++)
+      for (let r = io.row; r < io.row + CELL_INNER; r++) {
         _set(t, W, wL, r, tileLeft);
+        if (wallTint) wallTintMap.set(`${wL},${r}`, wallTint);
+      }
     }
     // Right wall column (excluding corners)
     if (wR < W) {
-      for (let r = io.row; r < io.row + CELL_INNER; r++)
+      for (let r = io.row; r < io.row + CELL_INNER; r++) {
         _set(t, W, wR, r, tileRight);
+        if (wallTint) wallTintMap.set(`${wR},${r}`, wallTint);
+      }
     }
 
     // Corners — set corner post for now; second pass below upgrades to WALL if needed
@@ -606,6 +640,7 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
     for (const [cc, cr] of cornerPositions) {
       if (cc < 0 || cc >= W || cr < 0 || cr >= H) continue;
       _set(t, W, cc, cr, isFenced ? fenceCorner : TILES.WALL);
+      if (wallTint) wallTintMap.set(`${cc},${cr}`, wallTint);
     }
 
     // ── 3-tile gap in shared walls to adjacent rooms (no doors) ─
@@ -643,10 +678,23 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
       }
     }
 
-    // Furniture placement — record rotation for each tile so the renderer
-    // can draw directional sprites (chairs, chests, bookshelves, etc.).
+  }
+
+  // ── Furniture placement pass (AFTER all walls are drawn) ─────────────
+  // Must run as a second pass because wall-mounted items at localRow = -1
+  // sit on the shared wall row between two cells. If furniture were placed
+  // during the first pass, the neighbouring cell's wall-draw (same shared
+  // row) would overwrite it. Running all wall/gap/floor work first ensures
+  // every wall tile is final before any furniture lands on top.
+  for (const [key, cell] of housingState.cells) {
+    const [gx, gy] = key.split(',').map(Number);
+    const roomDef = ROOM_DEFS[cell.typeId];
+    if (!roomDef) continue;
+    const io = cellInnerOrigin(gx, gy);
+
     const furList = housingState.getFurniture(gx, gy);
-    for (const f of furList) {
+    for (let fi = 0; fi < furList.length; fi++) {
+      const f = furList[fi];
       const fd = FURNITURE_DEFS[f.defId];
       if (!fd) continue;
       const { w, h } = rotatedFootprint(fd, f.rotation);
@@ -661,6 +709,23 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
                tr >= io.row && tr < io.row + CELL_INNER)) {
             _prop(tc, tr, fd.tileId);
             furnRotations.push({ c: tc, r: tr, rot: f.rotation });
+            // Record the variant tint for this tile, if the entry picked
+            // one. The renderer reads it to recolour the sprite.
+            if (f.variantId && fd.variants) {
+              const v = fd.variants.find(x => x.id === f.variantId);
+              if (v?.tint) furnVariantEntries.push({ c: tc, r: tr, tint: v.tint });
+            }
+            // For interactive display pieces, record the origin coordinates
+            // and current content so the renderer and click handler can look
+            // both up by tile (c, r).
+            if (fd.displayKind) {
+              furnDisplayEntries.push({
+                c: tc, r: tr,
+                gx, gy, index: fi,
+                displayKind: fd.displayKind,
+                content: f.content ?? null,
+              });
+            }
           }
         }
       }
@@ -725,6 +790,26 @@ function _buildPlayerHouseFromState(housingState, farmingState = null) {
   // Apply furniture rotations now that the InteriorMap's _rotations array exists.
   for (const { c, r, rot } of furnRotations) {
     map._rotations[r * W + c] = rot & 3;
+  }
+
+  // Expose per-tile variant tints (wood colour, fabric colour, etc.) to the
+  // renderer. Tile sprites that support tinting look this up by `${c},${r}`.
+  map.furnVariants = new Map();
+  for (const { c, r, tint } of furnVariantEntries) {
+    map.furnVariants.set(`${c},${r}`, tint);
+  }
+
+  // Paint overrides: per-tile hex colours the renderer applies as the base
+  // fill for floor and wall tiles.
+  map.floorTints = floorTintMap;
+  map.wallTints  = wallTintMap;
+
+  // Attach display-piece index so the renderer + click handler can resolve
+  // per-instance content (weapon ID, fish species, plaque text, etc.) from
+  // a tile coordinate.
+  map.displayContent = new Map();
+  for (const entry of furnDisplayEntries) {
+    map.displayContent.set(`${entry.c},${entry.r}`, entry);
   }
 
   return map;

@@ -948,9 +948,11 @@ function placeKingdom(map, rows, cols, cx, cy) {
     for (let dr = 1; dr <= 6; dr++)
       for (let dc = 1; dc <= 10; dc++)
         map[br + dr][bc + dc] = TILES.STONE_TILE;
-    // Weapon racks along full north inner wall (dr=1)
+    // Weapon racks along the north wall itself (dr=0 is the wall row).
+    // They render as wall-mounts now (upper half of the wall face), matching
+    // the way player-house wall-mount furniture hangs on the wall.
     for (let dc = 1; dc <= 10; dc++)
-      _propOn(br + 1, bc + dc, TILES.WEAPON_RACK);
+      _propOn(br, bc + dc, TILES.WEAPON_RACK);
     // Armor stands flanking the room in two rows
     _propOn(br + 2, bc + 1, TILES.ARMOR_STAND);
     _propOn(br + 2, bc + 10, TILES.ARMOR_STAND);

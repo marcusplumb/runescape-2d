@@ -100,6 +100,7 @@ export function drawCape(ctx, x, y, s, capeId, bob = 0, dir = DIR_DOWN) {
     green_cape:     '#27ae60',
     warrior_cape:   '#8a2020',
     berserker_cape: '#3a0808',
+    vitality_cape:  '#2a7a3a',
   };
   const col = COLORS[capeId];
   if (!col) return;
@@ -157,6 +158,7 @@ export function drawCapeOverlay(ctx, x, y, s, capeId, bob = 0, dir = DIR_DOWN) {
     green_cape:     '#27ae60',
     warrior_cape:   '#8a2020',
     berserker_cape: '#3a0808',
+    vitality_cape:  '#2a7a3a',
   };
   const col = COLORS[capeId];
   if (!col) return;
@@ -322,6 +324,91 @@ export function drawHelmet(ctx, x, y, s, helmId, bob = 0, dir = DIR_DOWN) {
       break;
     }
 
+    case 'dragonhide_helm': {
+      // Dark crimson scale-plated helm with a green vitality glow.
+      ctx.fillStyle = '#5a1010';
+      ctx.fillRect(x + 3*s, y - 2*s - bob, 18*s, 15*s);    // skull
+      // Scale rows — staggered dark slashes
+      ctx.fillStyle = '#3a0808';
+      ctx.fillRect(x + 4*s,  y - 1*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 8*s,  y - 1*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 12*s, y - 1*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 16*s, y - 1*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 6*s,  y + 2*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 10*s, y + 2*s - bob, 2*s, 3*s);
+      ctx.fillRect(x + 14*s, y + 2*s - bob, 2*s, 3*s);
+      if (dir === DIR_UP) {
+        ctx.fillStyle = '#3a0808';
+        ctx.fillRect(x + 4*s, y + 11*s - bob, 16*s, 2*s);
+      } else {
+        // Eye slit
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        if (dir === DIR_DOWN)       ctx.fillRect(x + 6*s,  y + 6*s - bob, 12*s, 3*s);
+        else if (dir === DIR_LEFT)  ctx.fillRect(x + 6*s,  y + 6*s - bob,  6*s, 3*s);
+        else if (dir === DIR_RIGHT) ctx.fillRect(x + 12*s, y + 6*s - bob,  6*s, 3*s);
+        ctx.fillStyle = 'rgba(80,220,120,0.35)';
+        if (dir !== DIR_RIGHT) ctx.fillRect(x + 7*s,  y + 7*s - bob, 4*s, 1*s);
+        if (dir !== DIR_LEFT)  ctx.fillRect(x + 13*s, y + 7*s - bob, 4*s, 1*s);
+      }
+      break;
+    }
+
+    case 'raiders_helm': {
+      // Royal purple helm with gold trim and a violet ridge crest.
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(x + 3*s, y - 3*s - bob, 18*s, 16*s);    // skull
+      // Gold band
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x + 3*s, y + 7*s - bob, 18*s, 2*s);
+      // Violet ridge crest
+      ctx.fillStyle = '#7c3aed';
+      ctx.fillRect(x + 9*s, y - 6*s - bob, 6*s, 4*s);
+      ctx.fillRect(x + 10*s, y - 8*s - bob, 4*s, 2*s);
+      if (dir === DIR_UP) {
+        ctx.fillStyle = '#2d1260';
+        ctx.fillRect(x + 4*s, y + 11*s - bob, 16*s, 2*s);
+      } else {
+        ctx.fillStyle = 'rgba(0,0,0,0.45)';
+        if (dir === DIR_DOWN)       ctx.fillRect(x + 5*s,  y + 3*s - bob, 14*s, 3*s);
+        else if (dir === DIR_LEFT)  ctx.fillRect(x + 5*s,  y + 3*s - bob,  7*s, 3*s);
+        else if (dir === DIR_RIGHT) ctx.fillRect(x + 12*s, y + 3*s - bob,  7*s, 3*s);
+        ctx.fillStyle = 'rgba(196,181,253,0.35)';
+        ctx.fillRect(x + 5*s, y - 2*s - bob, 5*s, 2*s);
+      }
+      break;
+    }
+
+    case 'voidguard_helm': {
+      // Void-black helm with glowing cyan runes.
+      ctx.fillStyle = '#0f0a1a';
+      ctx.fillRect(x + 3*s, y - 3*s - bob, 18*s, 16*s);    // skull
+      // Cyan rune outline (top + vertical)
+      ctx.fillStyle = '#00ffe0';
+      ctx.fillRect(x + 3*s,  y - 3*s - bob, 18*s, 1*s);
+      ctx.fillRect(x + 11*s, y - 3*s - bob, 2*s, 4*s);
+      if (dir === DIR_UP) {
+        ctx.fillStyle = '#2d1260';
+        ctx.fillRect(x + 4*s, y + 11*s - bob, 16*s, 2*s);
+      } else {
+        // Eye slits with cyan glow
+        ctx.fillStyle = 'rgba(0,0,0,0.75)';
+        if (dir === DIR_DOWN) {
+          ctx.fillRect(x + 5*s,  y + 4*s - bob, 5*s, 3*s);
+          ctx.fillRect(x + 14*s, y + 4*s - bob, 5*s, 3*s);
+        } else if (dir === DIR_LEFT) {
+          ctx.fillRect(x + 5*s,  y + 4*s - bob, 5*s, 3*s);
+        } else {
+          ctx.fillRect(x + 14*s, y + 4*s - bob, 5*s, 3*s);
+        }
+        ctx.fillStyle = '#00ffe0';
+        if (dir !== DIR_RIGHT) ctx.fillRect(x + 6*s,  y + 5*s - bob, 3*s, 1*s);
+        if (dir !== DIR_LEFT)  ctx.fillRect(x + 15*s, y + 5*s - bob, 3*s, 1*s);
+        ctx.fillStyle = 'rgba(0,255,224,0.18)';
+        ctx.fillRect(x + 3*s, y - 3*s - bob, 18*s, 16*s);
+      }
+      break;
+    }
+
     case 'berserker_mask': {
       ctx.fillStyle = '#5a1010';
       ctx.fillRect(x + 2*s, y - 3*s - bob, 20*s, 16*s);
@@ -467,6 +554,89 @@ export function drawChestplate(ctx, x, y, s, chestId, armSwing = 0, bob = 0) {
       break;
     }
 
+    case 'raiders_plate': {
+      // Royal purple with gold trim and violet rune accents.
+      ctx.fillStyle = '#4c1d95';
+      ctx.fillRect(x - 2*s,  y + 9*s  - bob, 6*s,  9*s);   // left pauldron
+      ctx.fillRect(x + 20*s, y + 9*s  - bob, 6*s,  9*s);   // right pauldron
+      ctx.fillRect(x + 2*s,  y + 9*s  - bob, 20*s, 13*s);  // torso
+      ctx.fillRect(x - 1*s,  y + 12*s - bob - armSwing, 5*s, 9*s);
+      ctx.fillRect(x + 20*s, y + 12*s - bob + armSwing, 5*s, 9*s);
+      // Gold trim across shoulders and belt
+      ctx.fillStyle = '#c9a227';
+      ctx.fillRect(x + 2*s, y + 9*s  - bob, 20*s, 1*s);
+      ctx.fillRect(x + 2*s, y + 20*s - bob, 20*s, 2*s);
+      // Center violet rune stripe
+      ctx.fillStyle = '#7c3aed';
+      ctx.fillRect(x + 11*s, y + 10*s - bob, 2*s, 10*s);
+      ctx.fillStyle = 'rgba(196,181,253,0.28)';
+      ctx.fillRect(x + 4*s, y + 10*s - bob, 5*s, 3*s);
+      break;
+    }
+
+    case 'trollhide_vest': {
+      // Rugged hide with stitched seams and a green vitality sheen.
+      ctx.fillStyle = '#6b4a2a';
+      ctx.fillRect(x - 1*s,  y + 10*s - bob, 5*s,  8*s);
+      ctx.fillRect(x + 20*s, y + 10*s - bob, 5*s,  8*s);
+      ctx.fillRect(x + 2*s,  y + 10*s - bob, 20*s, 12*s);
+      ctx.fillRect(x,        y + 12*s - bob - armSwing, 4*s, 9*s);
+      ctx.fillRect(x + 20*s, y + 12*s - bob + armSwing, 4*s, 9*s);
+      // Hide stitching (diagonal dashes)
+      ctx.fillStyle = '#3a2818';
+      ctx.fillRect(x + 5*s,  y + 13*s - bob, 3*s, 1*s);
+      ctx.fillRect(x + 10*s, y + 13*s - bob, 3*s, 1*s);
+      ctx.fillRect(x + 15*s, y + 13*s - bob, 3*s, 1*s);
+      ctx.fillRect(x + 7*s,  y + 18*s - bob, 3*s, 1*s);
+      ctx.fillRect(x + 13*s, y + 18*s - bob, 3*s, 1*s);
+      // Belt
+      ctx.fillStyle = '#3a2010';
+      ctx.fillRect(x + 3*s, y + 20*s - bob, 18*s, 2*s);
+      // Subtle vitality glow
+      ctx.fillStyle = 'rgba(80,200,100,0.14)';
+      ctx.fillRect(x + 2*s, y + 10*s - bob, 20*s, 12*s);
+      break;
+    }
+
+    case 'obsidian_plate': {
+      // Jagged black obsidian with magenta glow seams.
+      ctx.fillStyle = '#15101a';
+      ctx.fillRect(x - 3*s,  y + 8*s  - bob, 7*s, 11*s);   // jagged pauldrons
+      ctx.fillRect(x + 20*s, y + 8*s  - bob, 7*s, 11*s);
+      ctx.fillRect(x - 4*s,  y + 9*s  - bob, 2*s, 4*s);    // shards
+      ctx.fillRect(x + 26*s, y + 9*s  - bob, 2*s, 4*s);
+      ctx.fillRect(x + 2*s,  y + 9*s  - bob, 20*s, 13*s);  // torso
+      ctx.fillRect(x - 1*s,  y + 12*s - bob - armSwing, 5*s, 9*s);
+      ctx.fillRect(x + 20*s, y + 12*s - bob + armSwing, 5*s, 9*s);
+      // Center fracture line
+      ctx.fillStyle = '#4a1a5a';
+      ctx.fillRect(x + 11*s, y + 9*s - bob, 2*s, 12*s);
+      // Glow seams
+      ctx.fillStyle = 'rgba(180,80,220,0.4)';
+      ctx.fillRect(x + 5*s,  y + 13*s - bob, 4*s, 1*s);
+      ctx.fillRect(x + 15*s, y + 13*s - bob, 4*s, 1*s);
+      ctx.fillStyle = 'rgba(140,60,200,0.16)';
+      ctx.fillRect(x + 2*s, y + 9*s - bob, 20*s, 13*s);
+      break;
+    }
+
+    case 'voidguard_plate': {
+      // Void-black plate with cyan rune cross.
+      ctx.fillStyle = '#0f0a1a';
+      ctx.fillRect(x - 2*s,  y + 9*s  - bob, 6*s,  9*s);
+      ctx.fillRect(x + 20*s, y + 9*s  - bob, 6*s,  9*s);
+      ctx.fillRect(x + 2*s,  y + 9*s  - bob, 20*s, 13*s);
+      ctx.fillRect(x - 1*s,  y + 12*s - bob - armSwing, 5*s, 9*s);
+      ctx.fillRect(x + 20*s, y + 12*s - bob + armSwing, 5*s, 9*s);
+      // Cyan rune cross (horizontal + vertical)
+      ctx.fillStyle = '#00ffe0';
+      ctx.fillRect(x + 11*s, y + 10*s - bob, 2*s, 11*s);
+      ctx.fillRect(x + 4*s,  y + 14*s - bob, 16*s, 1*s);
+      ctx.fillStyle = 'rgba(0,255,224,0.15)';
+      ctx.fillRect(x + 2*s, y + 9*s - bob, 20*s, 13*s);
+      break;
+    }
+
     case 'shadow_tunic': {
       ctx.fillStyle = '#1a1a2a';
       ctx.fillRect(x - 1*s,  y + 9*s  - bob, 5*s,  8*s);  // left shoulder
@@ -491,10 +661,14 @@ export function drawChestplate(ctx, x, y, s, chestId, armSwing = 0, bob = 0) {
 export function drawLeggings(ctx, x, y, s, legsId, legSpread = 0, bob = 0) {
   if (!legsId || legsId === 'none') return;
   const COLORS = {
-    leather_legs: '#6b4a2a',
-    bronze_legs:  '#cd7f32',
-    iron_legs:    '#8a8a8a',
-    mithril_legs: '#5a5a9a',
+    leather_legs:   '#6b4a2a',
+    bronze_legs:    '#cd7f32',
+    iron_legs:      '#8a8a8a',
+    steel_legs:     '#9aaabb',
+    mithril_legs:   '#5a5a9a',
+    tungsten_legs:  '#5a5a8a',
+    raiders_legs:   '#4c1d95',
+    voidguard_legs: '#0f0a1a',
   };
   const col = COLORS[legsId];
   if (!col) return;
@@ -518,11 +692,14 @@ export function drawLeggings(ctx, x, y, s, legsId, legSpread = 0, bob = 0) {
 export function drawGloves(ctx, x, y, s, gloveId, armSwing = 0, bob = 0) {
   if (!gloveId || gloveId === 'none') return;
   const COLORS = {
-    leather_gloves:   '#6b4a2a',
-    bronze_gauntlets: '#cd7f32',
-    iron_gauntlets:   '#8a8a8a',
-    steel_gauntlets:  '#7a8a9a',
-    berserker_wraps:  '#6a2010',
+    leather_gloves:    '#6b4a2a',
+    bronze_gauntlets:  '#cd7f32',
+    iron_gauntlets:    '#8a8a8a',
+    steel_gauntlets:   '#7a8a9a',
+    mithril_gauntlets: '#5a5a9a',
+    tungsten_gauntlets:'#5a5a8a',
+    raiders_gauntlets: '#4c1d95',
+    berserker_wraps:   '#6a2010',
   };
   const col = COLORS[gloveId];
   if (!col) return;
@@ -542,11 +719,14 @@ export function drawGloves(ctx, x, y, s, gloveId, armSwing = 0, bob = 0) {
 export function drawBoots(ctx, x, y, s, bootId, legSpread = 0, bob = 0) {
   if (!bootId || bootId === 'none') return;
   const COLORS = {
-    leather_boots:  '#6b4a2a',
-    bronze_boots:   '#cd7f32',
-    iron_boots:     '#8a8a8a',
-    steel_boots:    '#7a8a9a',
-    shadow_treads:  '#1a1a2a',
+    leather_boots:   '#6b4a2a',
+    bronze_boots:    '#cd7f32',
+    iron_boots:      '#8a8a8a',
+    steel_boots:     '#7a8a9a',
+    mithril_boots:   '#5a5a9a',
+    tungsten_boots:  '#5a5a8a',
+    voidguard_boots: '#0f0a1a',
+    shadow_treads:   '#1a1a2a',
   };
   const col = COLORS[bootId];
   if (!col) return;
@@ -600,6 +780,44 @@ export function drawWeapon(ctx, x, y, s, weaponId, dir = DIR_DOWN, armSwing = 0,
     return;
   }
 
+  // ── Dungeon Greataxe (two-handed, dark steel) ─────────
+  if (weaponId === 'dungeon_greataxe') {
+    const ox = x + 20*s, oy = y + 12*s - bob + armSwing;
+    if (dir === DIR_RIGHT || dir === DIR_DOWN) {
+      // Long haft (two-handed grip)
+      ctx.fillStyle = '#3a2a18';
+      ctx.fillRect(ox,       oy + 4*s, 3*s, 16*s);
+      // Main axe head — broad blade in dark steel
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(ox - 3*s, oy,        12*s, 7*s);   // head upper
+      ctx.fillRect(ox + 6*s, oy - 2*s,   5*s, 3*s);   // top horn
+      ctx.fillRect(ox - 3*s, oy + 6*s,  11*s, 4*s);   // head lower
+      // Blade highlight
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillRect(ox + 6*s, oy + s,    4*s, 4*s);
+      // Back spike
+      ctx.fillStyle = '#4b5563';
+      ctx.fillRect(ox - 6*s, oy + s,    4*s, 5*s);
+      ctx.fillStyle = '#6b7280';
+      ctx.fillRect(ox - 5*s, oy + 2*s,  1*s, 3*s);
+    } else {
+      // Mirrored for LEFT / UP
+      ctx.fillStyle = '#3a2a18';
+      ctx.fillRect(x + 1*s,  oy + 4*s, 3*s, 16*s);
+      ctx.fillStyle = '#374151';
+      ctx.fillRect(x - 8*s,  oy,        12*s, 7*s);
+      ctx.fillRect(x - 9*s,  oy - 2*s,   5*s, 3*s);
+      ctx.fillRect(x - 7*s,  oy + 6*s,  11*s, 4*s);
+      ctx.fillStyle = '#9ca3af';
+      ctx.fillRect(x - 8*s,  oy + s,    4*s, 4*s);
+      ctx.fillStyle = '#4b5563';
+      ctx.fillRect(x + 4*s,  oy + s,    4*s, 5*s);
+      ctx.fillStyle = '#6b7280';
+      ctx.fillRect(x + 6*s,  oy + 2*s,  1*s, 3*s);
+    }
+    return;
+  }
+
   // ── Berserker Axe ─────────────────────────────────────
   if (weaponId === 'berserker_axe') {
     const ox = x + 20*s, oy = y + 14*s - bob + armSwing;
@@ -624,6 +842,75 @@ export function drawWeapon(ctx, x, y, s, weaponId, dir = DIR_DOWN, armSwing = 0,
       ctx.fillRect(x - 5*s,  oy,        11*s, 2*s);
       ctx.fillStyle = 'rgba(255,60,60,0.25)';
       ctx.fillRect(x - 8*s,  oy - 3*s,  14*s, 14*s);
+    }
+    return;
+  }
+
+  // ── Mithril Axe (fast one-handed axe, blue steel) ─────
+  if (weaponId === 'mithril_axe') {
+    const ox = x + 20*s, oy = y + 14*s - bob + armSwing;
+    if (dir === DIR_RIGHT || dir === DIR_DOWN) {
+      ctx.fillStyle = '#2a2a6a';
+      ctx.fillRect(ox,       oy + 4*s, 3*s, 11*s);   // haft
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(ox - 2*s, oy,        9*s, 5*s);   // head
+      ctx.fillRect(ox + 5*s, oy - 2*s,  3*s, 3*s);   // top horn
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(ox - 2*s, oy,        9*s, 2*s);   // highlight
+      ctx.fillStyle = 'rgba(140,140,255,0.22)';
+      ctx.fillRect(ox - 3*s, oy - 2*s, 11*s, 9*s);   // mithril glow
+    } else {
+      ctx.fillStyle = '#2a2a6a';
+      ctx.fillRect(x + 1*s,  oy + 4*s, 3*s, 11*s);
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(x - 5*s,  oy,        9*s, 5*s);
+      ctx.fillRect(x - 6*s,  oy - 2*s,  3*s, 3*s);
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(x - 5*s,  oy,        9*s, 2*s);
+      ctx.fillStyle = 'rgba(140,140,255,0.22)';
+      ctx.fillRect(x - 7*s,  oy - 2*s, 11*s, 9*s);
+    }
+    return;
+  }
+
+  // ── Mithril Dagger (fast, short mithril blade) ────────
+  if (weaponId === 'mithril_dagger') {
+    const ox = x + 22*s, oy = y + 20*s - bob + armSwing;
+    ctx.fillStyle = '#2a2a6a';
+    if (dir === DIR_RIGHT) {
+      ctx.fillRect(ox - 3*s, oy,       3*s, 2*s);    // grip
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(ox - s,   oy - 2*s, 2*s, 5*s);   // guard
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(ox,       oy - s,   7*s, 2*s);    // blade
+      ctx.fillRect(ox + 5*s, oy - 2*s, 2*s, s);      // tip
+      ctx.fillStyle = 'rgba(160,160,255,0.55)';
+      ctx.fillRect(ox,       oy - s,   7*s, s);       // edge glow
+    } else if (dir === DIR_LEFT) {
+      ctx.fillRect(x + 4*s,  oy,       3*s, 2*s);
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(x + 3*s,  oy - 2*s, 2*s, 5*s);
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(x - 5*s,  oy - s,   7*s, 2*s);
+      ctx.fillRect(x - 7*s,  oy - 2*s, 2*s, s);
+      ctx.fillStyle = 'rgba(160,160,255,0.55)';
+      ctx.fillRect(x - 5*s,  oy - s,   7*s, s);
+    } else if (dir === DIR_DOWN) {
+      ctx.fillRect(ox - s,   oy - 3*s, 2*s, 3*s);
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(ox - 3*s, oy - s,   5*s, 2*s);
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(ox - s,   oy,       2*s, 7*s);
+      ctx.fillStyle = 'rgba(160,160,255,0.55)';
+      ctx.fillRect(ox - s,   oy,       s,   7*s);
+    } else {
+      ctx.fillRect(ox - s,   oy,       2*s, 3*s);
+      ctx.fillStyle = '#5050aa';
+      ctx.fillRect(ox - 3*s, oy - s,   5*s, 2*s);
+      ctx.fillStyle = '#7070cc';
+      ctx.fillRect(ox - s,   oy - 7*s, 2*s, 7*s);
+      ctx.fillStyle = 'rgba(160,160,255,0.55)';
+      ctx.fillRect(ox - s,   oy - 7*s, s,   7*s);
     }
     return;
   }
@@ -719,6 +1006,9 @@ export function drawWeapon(ctx, x, y, s, weaponId, dir = DIR_DOWN, armSwing = 0,
     mithril_sword:   { len: 14, col: '#7070cc', shine: 'rgba(160,160,255,0.5)',  guard: '#5050aa', grip: '#2a2a6a' },
     tungsten_blade:  { len: 15, col: '#5a5a8a', shine: 'rgba(140,140,220,0.4)', guard: '#4a4a7a', grip: '#20203a' },
     obsidian_cleaver:{ len: 14, col: '#2e1a3e', shine: 'rgba(180,80,220,0.55)', guard: '#4a1a5a', grip: '#18101a' },
+    raid_blade:      { len: 14, col: '#7c3aed', shine: 'rgba(196,181,253,0.55)', guard: '#c9a227', grip: '#4a2060' },
+    voidbane_sword:  { len: 15, col: '#0f0a1a', shine: 'rgba(0,255,224,0.7)',    guard: '#c9a227', grip: '#2a1a3a' },
+    chaos_edge:      { len: 12, col: '#c2410c', shine: 'rgba(253,186,116,0.55)', guard: '#c9a227', grip: '#3a1a0a' },
   };
   const sw = SWORDS[weaponId];
   if (!sw) return;
@@ -808,6 +1098,28 @@ export function drawWeapon(ctx, x, y, s, weaponId, dir = DIR_DOWN, armSwing = 0,
     else if (dir === DIR_LEFT) ctx.fillRect(x + 2*s - bl, y + 16*s - bob - armSwing, bl + 4*s, 7*s);
     else if (dir === DIR_DOWN) ctx.fillRect(x + 18*s, y + 18*s - bob + armSwing, 7*s, bl + 4*s);
     else                       ctx.fillRect(x + 18*s, y + 14*s - bob - bl, 7*s, bl + 4*s);
+  }
+  if (weaponId === 'voidbane_sword') {
+    // Cyan void glow — similar envelope to mithril_sword.
+    ctx.fillStyle = 'rgba(0,255,224,0.18)';
+    if (dir === DIR_RIGHT)     ctx.fillRect(x + 22*s,   y + 17*s - bob + armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_LEFT) ctx.fillRect(x + 2*s - bl, y + 17*s - bob - armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_DOWN) ctx.fillRect(x + 19*s,   y + 19*s - bob + armSwing, 5*s, bl + 4*s);
+    else                       ctx.fillRect(x + 19*s,   y + 15*s - bob - bl,       5*s, bl + 4*s);
+  }
+  if (weaponId === 'raid_blade') {
+    ctx.fillStyle = 'rgba(168,85,247,0.18)';
+    if (dir === DIR_RIGHT)     ctx.fillRect(x + 22*s,   y + 17*s - bob + armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_LEFT) ctx.fillRect(x + 2*s - bl, y + 17*s - bob - armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_DOWN) ctx.fillRect(x + 19*s,   y + 19*s - bob + armSwing, 5*s, bl + 4*s);
+    else                       ctx.fillRect(x + 19*s,   y + 15*s - bob - bl,       5*s, bl + 4*s);
+  }
+  if (weaponId === 'chaos_edge') {
+    ctx.fillStyle = 'rgba(253,186,116,0.15)';
+    if (dir === DIR_RIGHT)     ctx.fillRect(x + 22*s,   y + 17*s - bob + armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_LEFT) ctx.fillRect(x + 2*s - bl, y + 17*s - bob - armSwing, bl + 4*s, 5*s);
+    else if (dir === DIR_DOWN) ctx.fillRect(x + 19*s,   y + 19*s - bob + armSwing, 5*s, bl + 4*s);
+    else                       ctx.fillRect(x + 19*s,   y + 15*s - bob - bl,       5*s, bl + 4*s);
   }
 }
 
